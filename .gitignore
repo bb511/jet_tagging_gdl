@@ -1,0 +1,8 @@
+jedi_data/__pycache__/
+jedi_data/plot/
+jedi_data/trained_models_deepset/
+jedi_data/trained_models_vector_neuron_px_py_pz_8/
+jedi_data/trained_models_vector_neuron/
+data/__pycache__/
+jedi_data/trained_models_vector_neuron_px_py_pz_32/
+training_jetclass/__pycache__/
