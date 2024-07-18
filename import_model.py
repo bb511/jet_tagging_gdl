@@ -5,11 +5,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from deepsets import DeepSetsInvariant
-from vector_neurons import Vect_Neuron
-from vector_neurons_lorentz import Vect_Neuron_Lorentz
-from vn_dgcnn import VN_DGCNN 
-from dgcnn import DGCNN
+from jedi_data.deepsets import DeepSetsInvariant
+from jedi_data.vector_neurons import Vect_Neuron
+from jedi_data.vector_neurons_lorentz import Vect_Neuron_Lorentz
+from jedi_data.vn_dgcnn import VN_DGCNN 
+from jedi_data.dgcnn import DGCNN
 #from graph_net import MultiLayerEdgeConv
 
 import util

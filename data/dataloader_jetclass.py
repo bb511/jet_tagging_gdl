@@ -7,7 +7,41 @@ import argparse
 import os
 vector.register_awkward()
 
+def sort_by_feature(data, feature_index=4, descending=True):
+        """
+        Sort the data and labels based on a specific feature.
 
+        Args:
+            data (np.ndarray): The input data array.
+            labels (np.ndarray): The corresponding labels.
+            feature_index (int): The index of the feature to sort by.
+            descending (bool): Whether to sort in descending order.
+
+        Returns:
+            tuple: Sorted data, labels and jet_data.
+        """
+        sort_indices = np.argsort(data[:, feature_index, :], axis=1)
+        if descending:
+            sort_indices = np.flip(sort_indices, axis=1)
+            
+        sample_indices = np.arange(data.shape[0])[:, np.newaxis, np.newaxis]
+        feature_indices = np.arange(data.shape[1])[np.newaxis, :, np.newaxis]
+        expanded_sorting_indices = sort_indices[:, np.newaxis, :]
+        return data[sample_indices, feature_indices, expanded_sorting_indices]
+
+def restrict_nb_constituents(data, nconst):
+    """
+    Restrict the number of constituents in each jet to a fixed number.
+
+    Args:
+        x_data (np.ndarray): The input data array.
+        nconst (int): The number of constituents to keep.
+
+    Returns:
+        np.ndarray: Data array with restricted number of constituents.
+    """
+    data = np.pad(data[:, :, :nconst], ((0, 0), (0, 0), (0, max(0, nconst - data.shape[2]))))
+    return data
 def read_file(
         dirpath,
         max_num_particles=128,
@@ -122,12 +156,16 @@ def read_file(
         x_jets = np.stack([ak.to_numpy(table[n]).astype('float32') for n in jet_features], axis=1)
         y = np.stack([ak.to_numpy(table[n]).astype('int') for n in labels], axis=1)
         
+        x_particles = sort_by_feature(x_particles, feature_index=4, descending=True)
+        x_particles = restrict_nb_constituents(x_particles, 32)
+        
         name_particles = ''.join(part[5:] for part in particle_features)
         name_jets = ''.join(jet[4:] for jet in jet_features)
         path = f"C://Users//bonvi//Documents//deepset//data//jetclass//{name_particles}_{name_jets}_{max_num_particles}//"
         if not os.path.exists(path):
             os.makedirs(path)
         
+        x_particles = np.swapaxes(x_particles, 1, 2)
         #x_jets = np.expand_dims(x_jets, 2)
         print(x_particles.shape, x_jets.shape, y.shape)
         #x_particles[:, 1:, :] = x_particles[:, 1:, :] - x_jets[:, 1:, :]
@@ -141,7 +179,7 @@ def read_file(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--filepath',  default = 'C://Users//bonvi//Documents//deepset//data//jetclass//JetClass//Pythia//train_100M//', help='datasets to download')
+    parser.add_argument('--filepath',  default = 'D://pc//JetClass//Pythia//train_100M//', help='datasets to download')
     parser.add_argument('--nbr_const', default=200, help='number of constituents')
     parser.add_argument('--features', default=['part_px', 'part_py', 'part_pz', 'part_energy', 'part_pt', 'part_eta', 'part_phi'], help='particules features')
     parser.add_argument('--jet', default=['jet_pt', 'jet_eta', 'jet_phi', 'jet_energy'], help='jet features')

@@ -42,11 +42,10 @@ def main(config):
     name = args.name
     data_name = args.data_name
     print(f"Training of the model {name} with data {data_name}")
-    if name in ["no_zero_mlp", "no_zero_lstm"]:
-        device = torch.device("cpu")
-    else:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Training done on {device}")
+    
     outdir = util.make_output_directory(f"trained_models_{name}", config["outdir"])
     # Save the config file to the main dir.
     util.save_config_file(config, outdir)
@@ -69,7 +68,6 @@ def main(config):
     print('Model summary: ', model)
     util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
     util.weights_plot(model, name + data_name + '_init')
-    #util.compute_flop(model, name, device, config_path)
     if data_name not in ["px_py_pz_E_8", "px_py_pz_E_16", "px_py_pz_E_32", "px_py_pz_E_jet_center_8", "px_py_pz_E_jet_center_16", "px_py_pz_E_jet_center_32"]:
         util.check_invariance(model, nbr_const, nbr_feat, name, device, config_path)
     else:
@@ -93,7 +91,7 @@ def main(config):
         name = name + '_' + data_name
         util.weights_plot(model, name + '_validation')
         evaluate_model(model, valid_data, 'cuda:0', 256, config_path)
-        plot_evaluation_metric(name, model, valid_data, batch_size=260000, device = 'cuda:0')
+        plot_evaluation_metric(name, model, valid_data, batch_size=256, device = 'cuda:0')
 
 
 def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv):
@@ -142,15 +140,9 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             # get the inputs; data is a list of [inputs, labels]
             y_true = y
             if epoch == 0 and count == 0 and name != "cg_net":
-                
-                if name == "lorentz_net":
-                    prof.start_profile()
-                    y_pred = net(x.x, x.edge_index)
-                    prof.stop_profile()
-                else:
-                    prof.start_profile()
-                    y_pred = net(x)
-                    prof.stop_profile()
+                prof.start_profile()
+                y_pred = net(x)
+                prof.stop_profile()
                 print(util.tcols.OKGREEN + "Model flops: " + util.tcols.ENDC, end="")
                 print(f"{prof.get_total_flops()/ x.shape[0]}")
                 prof.end_profile()
