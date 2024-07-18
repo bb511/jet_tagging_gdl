@@ -10,6 +10,7 @@ from jedi_data.vector_neurons import Vect_Neuron
 from jedi_data.vector_neurons_lorentz import Vect_Neuron_Lorentz
 from jedi_data.vn_dgcnn import VN_DGCNN 
 from jedi_data.dgcnn import DGCNN
+from jedi_data.transformer import Transformer
 #from graph_net import MultiLayerEdgeConv
 
 import util
@@ -25,6 +26,7 @@ def get_model(name : str, nbr_const : int, nbr_feat : int, model_hyperparamter: 
         "vector_neuron_lorentz": lambda:Vect_Neuron_Lorentz(nbr_const, nbr_feat,**parameter),
         "vn_dgcnn": lambda: VN_DGCNN(nbr_const, nbr_feat,**parameter),
         "dgcnn": lambda: DGCNN(nbr_const, nbr_feat,**parameter),
+        "transformer": lambda: Transformer(nbr_const, nbr_feat,**parameter),
         #"msg_pass_edgeconv": lambda: MultiLayerEdgeConv(nbr_const, nbr_feat,**parameter),
     }
     model = sel_model.get(name, lambda: None)()

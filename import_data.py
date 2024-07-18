@@ -16,6 +16,7 @@ def select_data(name : str, data_name : str):
         "dgcnn": import_data_without_prepossesing,
         "graph_net": import_data_graph_net,
         "msg_pass_edgeconv" : import_data_graph,
+        "transformer": import_data_with_mask,
     }
     PATH = "/mnt/c/users/bonvi/Documents/deepset/data/"
     sel_path = {
@@ -80,10 +81,26 @@ def import_data_without_prepossesing(tup:tuple, valid = False):
     
     x =  torch.Tensor(np.load(x))
     y =  torch.Tensor(np.load(y))
-    
-    print('The data has shape: ',x.shape)
-    
+        
     return torch.utils.data.TensorDataset(x, y)
+
+
+def import_data_with_mask(tup:tuple, valid = False):
+    """Function to import the data as such in the data set"""
+    path = tup[0]
+    if valid:    
+        x = path + f"x_val_robust_{tup[1]}const_ptetaphi.npy"
+        y = path + f"y_val_robust_{tup[1]}const_ptetaphi.npy"
+    else:
+        x = path + f"x_train_robust_{tup[1]}const_ptetaphi.npy"
+        y = path + f"y_train_robust_{tup[1]}const_ptetaphi.npy"
+    
+    
+    x =  torch.Tensor(np.load(x))
+    x_mask = x.ne(0).float()
+    y =  torch.Tensor(np.load(y))
+        
+    return torch.utils.data.TensorDataset(x,y, x_mask)
 
 
 def point_clouds_to_fully_connected_graphs(point_clouds):

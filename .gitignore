@@ -6,3 +6,8 @@ jedi_data/trained_models_vector_neuron/
 data/__pycache__/
 jedi_data/trained_models_vector_neuron_px_py_pz_32/
 training_jetclass/__pycache__/
+__pycache__/
+plot/
+trained_models_deepset/
+trained_models_dgcnn/
+trained_models_vector_neuron/

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from glob import glob
+from sklearn.preprocessing import RobustScaler
 
 from matplotlib import pyplot as plt
 
@@ -83,9 +84,6 @@ class JetDataProcessor:
             data_label = np.load(label_file)
             jet_data = np.load(f"x_jets_pt_eta_phi_energypxpypzenergyptetaphi_200_{batch_index*200+j}.npy")
 
-            #data, data_label = self.sort_by_feature(data, data_label)
-            #data = self.restrict_nb_constituents(data, 32)
-            #data, data_label = self.cut_transverse_momentum(data, data_label, 0.2)
             data = self.get_features(data, jet_data)
 
             all_data.append(data)
@@ -93,12 +91,15 @@ class JetDataProcessor:
 
         concatenated_data = np.concatenate(all_data, axis=0)
         concatenated_data_label = np.concatenate(all_data_label, axis=0)
-    
-        
-        #self.plot_non_zero_constituents(concatenated_data, batch_index)
-        #self.plot_normalised_data(concatenated_data, concatenated_data_label, batch_index)
 
-        feat_dir = os.path.join(self.directory, f'{self.feat}')
+        # Apply robust normalization
+        scaler = RobustScaler()
+        original_shape = concatenated_data.shape
+        flattened_data = concatenated_data.reshape(-1, original_shape[-1])
+        normalized_data = scaler.fit_transform(flattened_data)
+        normalized_data = normalized_data.reshape(original_shape)
+
+        feat_dir = os.path.join(self.directory, f'{self.feat}_robust_normalized')
         if not os.path.exists(feat_dir):
             os.makedirs(feat_dir)
 
@@ -107,13 +108,13 @@ class JetDataProcessor:
         for label, count in enumerate(label_counts):
             print(f"Label {label}: {count}")
 
-        # Save concatenated data in the 'feat' directory
-        name = f"{self.output_name}_{batch_index}"
-        np.save(os.path.join(feat_dir, name), concatenated_data)
+        # Save normalized data in the 'feat_robust_normalized' directory
+        name = f"{self.output_name}_robust_normalized_{batch_index}"
+        np.save(os.path.join(feat_dir, name), normalized_data)
         np.save(os.path.join(feat_dir, f"y_{name}"), concatenated_data_label)
 
-        print(f"Concatenated data saved as {os.path.join(feat_dir, name)}.npy")
-        print(f"Shape of concatenated data: {concatenated_data.shape}")
+        print(f"Normalized data saved as {os.path.join(feat_dir, name)}.npy")
+        print(f"Shape of normalized data: {normalized_data.shape}")
     
     def count_constituents_per_jet(self, x_data: np.array):
         """Count the number of non-zero constituents for each of the jets in the dataset."""
@@ -433,5 +434,5 @@ class JetDataProcessor:
 
 if __name__ == "__main__":
     directory = "C://Users//bonvi//Documents//deepset//data//jetclass//pxpypzenergyptetaphi_ptetaphienergy_200//"
-    processor = JetDataProcessor(directory, "x_px_py_pz_E_pt_eta_phi200_*.npy", "concatenated_x_pt_etarel_phirel_32", "pxpypz")
+    processor = JetDataProcessor(directory, "x_px_py_pz_E_pt_eta_phi200_*.npy", "concatenated_x_pt_etarel_phirel_32", "pxpypzE")
     processor.process_files()

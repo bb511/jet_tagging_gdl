@@ -10,8 +10,8 @@ import torch.nn as nn
 import torchinfo
 import matplotlib.pyplot as plt
 
-from deepsets import DeepSetsEquivariant
-from deepsets import DeepSetsInvariant
+from jedi_data.deepsets import DeepSetsEquivariant
+from jedi_data.deepsets import DeepSetsInvariant
 
 from sklearn.metrics import roc_curve, auc
 

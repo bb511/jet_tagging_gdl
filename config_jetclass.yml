@@ -1,0 +1,42 @@
+outdir: 'trained_models_pt_eta_phi_jet_center_8const'
+
+model_hyperparameter:
+  deepset:
+    phi_layers: [32,32,32]
+    rho_layers: [32]
+    activ: "relu"
+    aggreg: "mean"
+    dropout: -1
+    output_dim: 10
+  vector_neuron:
+    out_channel: 10
+    hidden : 43
+    num_layers: 4
+    add_mlp : False
+  vector_neuron_lorentz:
+    out_channel: 10
+    hidden : 20
+    num_layers: 4
+  vn_dgcnn:
+    n_knn : 8
+    output : 10
+    pooling : "mean"
+  dgcnn:
+    n_knn : 8
+    output : 10
+    pooling : "mean"
+  transformer:
+    lifting_dim: 512
+    num_layers: 4
+    d_models: 512
+    nhead: 8
+    output_size: 10
+    norm: None
+
+training_hyperparams : 
+  epochs :  100
+  lr : 0.001
+  batch_size: 256
+  loss_inv : False
+
+validation : True

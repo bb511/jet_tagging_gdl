@@ -25,9 +25,16 @@ model_hyperparameter:
     n_knn : 8
     output : 5
     pooling : "mean"
+  transformer:
+    lifting_dim: 512
+    num_layers: 4
+    d_models: 512
+    nhead: 8
+    output_size: 5
+    norm: None
 
 training_hyperparams : 
-  epochs :  15
+  epochs :  100
   lr : 0.001
   batch_size: 256
   loss_inv : False

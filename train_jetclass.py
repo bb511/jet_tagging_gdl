@@ -58,9 +58,24 @@ def main(config):
     print('Subfile for each seeds are created')
 
     # Import the training and the validation data, sampled and normalised.
-    train_data, valid_data = select_data(name, data_name)
-    nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
-    util.print_data_deets(valid_data, "Validation")
+    training_data, _ = select_data(name, data_name)
+    train_size = int(0.8 * len(training_data))
+    val_size = len(training_data) - train_size
+
+    # Use random_split to create the split
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        training_data, 
+        [train_size, val_size],
+    )
+
+    print(f"Training set size: {len(train_dataset)}")
+    print(f"Validation set size: {len(val_dataset)}")
+
+
+    print(f"Training data shape: {train_dataset[:][0].shape}")
+    nbr_const = train_dataset[:][0].shape[1]
+    nbr_feat = train_dataset[:][0].shape[2]
+    print(f"Training labels shape: {train_dataset[:][1].shape}")
     print("The training data and the validation data have been successfully imported")
 
     # Import and train the model.
@@ -74,7 +89,7 @@ def main(config):
         util.check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, config_path)
     util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
 
-    hist = train_model(model, train_data, valid_data, device, name, data_name, **config["training_hyperparams"])
+    hist = train_model(model, train_dataset, val_dataset, device, name, data_name, **config["training_hyperparams"])
     print('The model has been successfully trained')
     
     # Saved model and plot the loss and accuracy evolution throught the epochs.
@@ -90,8 +105,8 @@ def main(config):
         util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
         name = name + '_' + data_name
         util.weights_plot(model, name + '_validation')
-        evaluate_model(model, valid_data, 'cuda:0', 256, config_path)
-        plot_evaluation_metric(name, model, valid_data, batch_size=256, device = 'cuda:0')
+        evaluate_model(model, val_dataset, 'cuda:0', 256, config_path)
+        plot_evaluation_metric(name, model, val_dataset, batch_size=256, device = 'cuda:0')
 
 
 def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv):
@@ -175,13 +190,13 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
         # print statistics
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
-        inv_err = util.check_inv(net, device)
+        #inv_err = util.check_inv(net, device)
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
-        all_inv_err.append(inv_err)
+        #all_inv_err.append(inv_err)
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
-        print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
+        #print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
         batch_loss_sum = 0
         batch_accu_sum = 0
         totnum_batches = 0

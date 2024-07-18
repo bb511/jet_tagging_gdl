@@ -19,12 +19,12 @@ def select_data(name : str, data_name : str):
     }
     PATH = "/mnt/c/users/bonvi/Documents/deepset/data/"
     sel_path = {
-        "pt_eta_rel_phi_rel_8_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/ptetaphi",8),
-        "pt_eta_rel_phi_rel_16_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/ptetaphi",16),
-        "pt_eta_rel_phi_rel_32_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/ptetaphi",32),
-        "px_py_pz_8_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/pxpypz",8),
-        "px_py_pz_16_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/pxpypz",16),
-        "px_py_pz_32_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/pxpypz",32),
+        "pt_eta_rel_phi_rel_8_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/ptetaphi/",8),
+        "pt_eta_rel_phi_rel_16_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/ptetaphi/",16),
+        "pt_eta_rel_phi_rel_32_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/ptetaphi/",32),
+        "px_py_pz_8_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/pxpypz/",8),
+        "px_py_pz_16_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/pxpypz/",16),
+        "px_py_pz_32_jetclass": (PATH+"jetclass/pxpypzenergyptetaphi_ptetaphienergy_200/pxpypz/",32),
     }
     
     data_path = sel_path.get(data_name, None)
@@ -38,7 +38,7 @@ def select_data(name : str, data_name : str):
         raise ValueError(
             f"The model {name} not implemented!"
             )
-    dataset_validate = sel_data.get(name, None)(data_path, valid = True)
+    dataset_validate = None#sel_data.get(name, None)(data_path, valid =False)
     if dataset_train is None:
         raise ValueError(
             f"The model {name} not implemented!"
@@ -62,7 +62,7 @@ def import_data_without_prepossesing(tup:tuple, valid = False):
     
     print('The data has shape: ',x.shape)
     
-    return torch.utils.data.TensorDataset(x[:,:tup[1], :], y)
+    return torch.utils.data.TensorDataset(x[:10000000,:tup[1], :], y[:10000000,:])
 
 
 def point_clouds_to_fully_connected_graphs(point_clouds):
