@@ -104,7 +104,10 @@ def import_data(device: str, config: dict, train: bool):
 
 def print_data_deets(data, data_type: str):
     """Prints some key details of the data set, for sanity check at start of training."""
-    x, y = next(iter(data))
+    try:
+        x, y = next(iter(data))
+    except:
+        x,y,_ = next(iter(data))
     try:
         print(tcols.HEADER + f"{data_type} data details:" + tcols.ENDC)
         print(f"Dataset size: {len(data)}")
@@ -426,7 +429,7 @@ def dnn_output_uncertainty(outdir: str, all_fold_predictions: np.ndarray, name =
 def compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path):
     """Function that compute the inference time of a model"""
     batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vn_dgcnn","dgcnn"]:
+    if name in ["deepset", "vector_neuron", "vn_dgcnn","dgcnn", "transformer"]:
         input_shape = (batch_size, nbr_const, nbr_feat)
     else:
         raise ValueError(
@@ -454,7 +457,7 @@ def check_invariance(model, nbr_const, nbr_feat, name, device, config_path, val 
             return 1000000.0
 
     batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vn_dgcnn","dgcnn"]:
+    if name in ["deepset", "vector_neuron", "vn_dgcnn","dgcnn", "transformer"]:
         input = torch.randn((batch_size, nbr_const, nbr_feat)).to(device)
         rot_mats = []
         for _ in range(16):
@@ -496,7 +499,7 @@ def check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, val = Fal
             return 1000000.0
 
     batch_size = 1000
-    if name in ["deepset", "vector_neuron","vn_dgcnn","dgcnn"]:
+    if name in ["deepset", "vector_neuron","vn_dgcnn","dgcnn", "transformer"]:
         input = torch.randn((batch_size, nbr_const, nbr_feat)).to(device)
         rot_mats = []
         for _ in range(16):

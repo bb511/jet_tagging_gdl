@@ -91,6 +91,8 @@ class JetDataProcessor:
 
         concatenated_data = np.concatenate(all_data, axis=0)
         concatenated_data_label = np.concatenate(all_data_label, axis=0)
+        
+        self.plot_non_zero_constituents(concatenated_data, batch_index)
 
         # Apply robust normalization
         scaler = RobustScaler()
@@ -98,15 +100,14 @@ class JetDataProcessor:
         flattened_data = concatenated_data.reshape(-1, original_shape[-1])
         normalized_data = scaler.fit_transform(flattened_data)
         normalized_data = normalized_data.reshape(original_shape)
+        
 
         feat_dir = os.path.join(self.directory, f'{self.feat}_robust_normalized')
         if not os.path.exists(feat_dir):
             os.makedirs(feat_dir)
 
-        label_counts = np.sum(concatenated_data_label, axis=0)
-        print(f"Label distribution in batch {batch_index}:")
-        for label, count in enumerate(label_counts):
-            print(f"Label {label}: {count}")
+        self.plot_normalised_data(normalized_data, concatenated_data_label, batch_index)
+
 
         # Save normalized data in the 'feat_robust_normalized' directory
         name = f"{self.output_name}_robust_normalized_{batch_index}"
@@ -149,12 +150,13 @@ class JetDataProcessor:
         constituents_distribution = self.count_constituents_per_jet(data)
         median_const = np.median(constituents_distribution)
         average_const = np.average(constituents_distribution)
+        max_const = np.max(constituents_distribution)
 
         plt.figure(figsize=(12, 10))
         plt.hist(
             x=constituents_distribution,
             bins=150,
-            range=(0, 150),
+            range=(0, max_const),
             alpha=0.4,
             histtype="step",
             linewidth=2.5,
@@ -165,7 +167,7 @@ class JetDataProcessor:
         plt.ylabel("Number of Jets")
         plt.legend()
         plt.gca().set_yscale("log")
-        plt.xlim(0, 150)
+        plt.xlim(0, max_const)
 
         plot_name = f"{self.output_name}_constituents_batch_{batch_index}.pdf"
         plt.savefig(os.path.join(outdir, plot_name))
@@ -204,6 +206,7 @@ class JetDataProcessor:
         feature_labels = self.select_feature_labels()
     
         print(feature_labels)
+        print(f"Number of features: {x_data.shape[2]}")
         for feature in range(x_data.shape[2]):  # Iterate over features
             plt.figure(figsize=(16, 10))
             for data_class_idx in range(len(x_data_seg)):
@@ -242,19 +245,15 @@ class JetDataProcessor:
             list: List of arrays, each containing data for a specific class.
         """
         
-        unique_classes = np.unique(y_data)
+        num_classes = y_data.shape[1]
         
         segregated_data = []
-        for cls in unique_classes:
-            if y_data.ndim == 1:
-                mask = y_data == cls
-            else:
-                mask = np.any(y_data == cls, axis=1)
-            
+        for cls in range(num_classes):
+            mask = y_data[:, cls] == 1
             class_data = x_data[mask]
             segregated_data.append(class_data)
             print(f"Class {cls}: {class_data.shape}")
-        
+            
         return segregated_data
 
     def select_feature_labels(self):

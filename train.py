@@ -26,7 +26,6 @@ import torch.nn.functional as F
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 
-import escnn.nn as enn
 import torch_geometric
 
 import yaml
@@ -61,7 +60,7 @@ def main(config):
     if name != "transformer":
         train_data, valid_data = select_data(name, data_name)
     else:
-        train_data, train_mask, valid_data, valid_mask = select_data(name, data_name)
+        train_data, valid_data = select_data(name, data_name)
     nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
     util.print_data_deets(valid_data, "Validation")
     print("The training data and the validation data have been successfully imported")
@@ -97,96 +96,116 @@ def main(config):
         plot_evaluation_metric(name, model, valid_data, batch_size=256, device = 'cuda:0')
 
 
+
 def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv):
+    "Standard training function for pytorch model"
+    l = 0.001
     criterion = nn.CrossEntropyLoss().to(device)
-    optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
+    if name not in ["vector_neuron", "vn_dgcnn"]:
+        optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
+    else:
+        optimizer = optim.RMSprop(net.parameters(), lr = 0.0294)#
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                           mode="max",
-                                                           patience=80,
-                                                           factor=0.1,
-                                                           threshold=1e-4,
-                                                           verbose=True)
-    
+                                                            mode="max",
+                                                            patience= 80,
+                                                            factor=0.1,
+                                                            threshold=1e-4,
+                                                            verbose=True,
+                                                            )
     print('Optimizer Summary: ', optimizer)
-    train_data = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=1)
-    valid_data = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=1)
-    
-    print(f'Beginning of training of model {name}')
-    all_train_loss, all_train_accu, all_valid_loss, all_valid_accu, all_inv_err = [], [], [], [], []
-    epochs_no_improve, best_accu = 0, 0
+    train_data = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True, pin_memory = True, num_workers=1)
+    valid_data = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=True, pin_memory = True, num_workers=1)
+    print(f'Begining of training of model {name}')
+    all_train_loss = []
+    all_train_accu = []
+    all_valid_loss = []
+    all_valid_accu = []
+    all_inv_err = []
+    epochs_no_improve = 0
     epochs_es_limit = 30
-    
+    best_accu = 0
     total_params = sum(p.numel() for p in net.parameters())
     print(f"Number of parameters: {total_params}")
     print("")
-    
+    next_epoch = 0
     prof = deepspeed.profiling.flops_profiler.FlopsProfiler(net)
-    
-    for epoch in range(epochs):
-        batch_loss_sum, batch_accu_sum, totnum_batches = 0, 0, 0
+    for epoch in range(epochs):  # loop over the dataset multiple times
+        batch_loss_sum = 0
+        batch_accu_sum = 0
+        totnum_batches = 0
         net.train()
-        print(f'Beginning of Epoch {epoch + 1}/{epochs}')
-        
-        for x, y, mask in train_data:
-            x, y, mask = x.to(device), y.to(device), mask.to(device)
-            y_true = y
+        print(f'Begining of Epoch {epoch + 1}/{epochs}')
+        count = 0
+        for x,y in train_data:
+            x = x.to(device)
+            y = y.to(device)
             
-            if epoch == 0 and totnum_batches == 0:
+            # get the inputs; data is a list of [inputs, labels]
+            y_true = y
+            if epoch == 0 and count == 0 and name != "cg_net":
                 prof.start_profile()
-                y_pred = net(x, mask)
+                y_pred = net(x)
                 prof.stop_profile()
                 print(util.tcols.OKGREEN + "Model flops: " + util.tcols.ENDC, end="")
                 print(f"{prof.get_total_flops()/ x.shape[0]}")
                 prof.end_profile()
                 print("")
-            else:
-                y_pred = net(x, mask)
-            
-            if loss_inv == 'so3':
-                loss = util.inv_err_randn(net, criterion, x, y_pred, y_true, 0.001, device)
+                count += 1
+            y_pred = net(x)
+            if loss_inv =='so3':
+                l = 0.001
+                loss = util.inv_err_randn(net, criterion, x, y_pred, y_true, l, device)
             elif loss_inv == 'lorentz':
-                loss = util.inv_err_lorentz(net, criterion, x, y_pred, y_true, 0.001, device)
+                l = 0.001
+                loss = util.inv_err_lorentz(net, criterion, x, y_pred, y_true, l, device)
             elif loss_inv == 'jet_center':
-                loss = util.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, 0.001, device)
+                loss = util.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, l, device)
             elif loss_inv == 'phi':
-                loss = util.inv_err_phi(net, criterion, x, y_pred, y_true, 0.001, device)
+                loss = util.inv_err_phi(net, criterion, x, y_pred, y_true, l, device)
             else:
-                loss = criterion(y_pred, torch.argmax(y_true, dim=1))
-            
+                loss = criterion(y_pred, torch.argmax(y_true, dim = 1))
             optimizer.zero_grad()
             loss.backward()
+
             optimizer.step()
             
             batch_loss_sum += loss.detach()
             totnum_batches += 1
-            batch_accu_sum += torch.sum(y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]) / len(y_true)
-        
+            batch_accu_sum += torch.sum(
+                y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]
+            ) / len(y_true)
+            
+        # print statistics
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
         inv_err = util.check_inv(net, device)
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
         all_inv_err.append(inv_err)
-        
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
         print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
-        
-        batch_loss_sum, batch_accu_sum, totnum_batches = 0, 0, 0
+        batch_loss_sum = 0
+        batch_accu_sum = 0
+        totnum_batches = 0
         
         with torch.no_grad():
             net.eval()
-            for x, y, mask in valid_data:
-                x, y, mask = x.to(device), y.to(device), mask.to(device)
-                y_pred = net(x, mask)
+            for x,y in valid_data:
+                x = x.to(device)
+                y = y.to(device)        
+
+                y_pred = net(x)
                 y_true = y
                 
-                loss = criterion(y_pred, torch.argmax(y_true, dim=1).to(torch.int64))
+                loss = criterion(y_pred, torch.argmax(y_true, dim = 1).to(torch.int64))
                 
-                batch_accu_sum += torch.sum(y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]) / len(y_true)
+                batch_accu_sum += torch.sum(
+                    y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]
+                    ) / len(y_true)
                 batch_loss_sum += loss.detach()
-                totnum_batches += 1
-            
+                
+                totnum_batches += 1 
             valid_loss = batch_loss_sum / totnum_batches
             valid_accu = batch_accu_sum / totnum_batches
             print(f"[{epoch + 1}] validation loss: {valid_loss:.5f}")
@@ -194,7 +213,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             print(f'[{epoch + 1}] Learning rate: ', optimizer.state_dict()['param_groups'][0]['lr'])
             all_valid_loss.append(valid_loss.item())
             all_valid_accu.append(valid_accu.item())
-        
+            
         if round(valid_accu.cpu().item(), 3) <= round(best_accu, 3):
             epochs_no_improve += 1
         else:
@@ -202,7 +221,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             epochs_no_improve = 0
         scheduler.step(best_accu)
         if epochs_no_improve >= epochs_es_limit:
-            break
+            continue
     plt.plot(all_train_loss, color="gray", label="Training Loss")
     plt.plot(all_valid_loss, color="navy", label="Validation Loss")
     plt.xlabel("Epochs")

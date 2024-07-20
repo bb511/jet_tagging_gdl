@@ -181,18 +181,18 @@ def main(config):
     #util.dnn_output_uncertainty("plot",all_fold_predictions, f"{name}_{data_name}_output_histos.pdf")
 
     # Train final model on all training data
-    #model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"])
-    #train_loader = DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True)
-    #optimizer = optim.Adam(model.parameters(), lr=config["training_hyperparams"]["lr"])
+    model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"])
+    train_loader = DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True)
+    optimizer = optim.Adam(model.parameters(), lr=config["training_hyperparams"]["lr"])
     
-    #for epoch in range(config["training_hyperparams"]["epochs"]):
-    #    train_loss, train_acc = train_model(model, train_loader, criterion, optimizer, device)
-    #    print(f'Epoch {epoch+1}/{config["training_hyperparams"]["epochs"]}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}')
+    for epoch in range(config["training_hyperparams"]["epochs"]):
+        train_loss, train_acc = train_model(model, train_loader, criterion, optimizer, device)
+        print(f'Epoch {epoch+1}/{config["training_hyperparams"]["epochs"]}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}')
     
     # Evaluate on test data
-    #test_loader = DataLoader(test_data, batch_size=config["training_hyperparams"]["batch_size"])
-    #test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)
-    #print(f'Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}')
+    test_loader = DataLoader(test_data, batch_size=config["training_hyperparams"]["batch_size"])
+    test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)
+    print(f'Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}')
 
     # Save the model
     torch.save(model.state_dict(), os.path.join(outdir, f"model_{name}_{data_name}.pt"))

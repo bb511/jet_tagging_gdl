@@ -11,3 +11,4 @@ plot/
 trained_models_deepset/
 trained_models_dgcnn/
 trained_models_vector_neuron/
+trained_models_transformer/

@@ -1,4 +1,4 @@
-# This code is copied from https://github.com/jet-universe/particle_transformer/blob/main/get_datasets.py
+# This code is adapted from https://github.com/jet-universe/particle_transformer/blob/main/get_datasets.py
 import numpy as np
 import awkward as ak
 import uproot
@@ -147,10 +147,6 @@ def read_file(
         table['part_pt'] = p4.pt
         table['part_eta'] = p4.eta
         table['part_phi'] = p4.phi
-
-        #table['px_jet'] = jetp4.pt_jet * np.cos(jetp4.phi_jet)
-        #table['py_jet'] = jetp4.pt_jet * np.sin(jetp4.phi_jet)
-        #table['pz_jet'] = jetp4.pt_jet * np.sinh(jetp4.eta_jet)
         
         x_particles = np.stack([ak.to_numpy(_pad(table[n], maxlen=max_num_particles)) for n in particle_features], axis=1)
         x_jets = np.stack([ak.to_numpy(table[n]).astype('float32') for n in jet_features], axis=1)
@@ -166,10 +162,7 @@ def read_file(
             os.makedirs(path)
         
         x_particles = np.swapaxes(x_particles, 1, 2)
-        #x_jets = np.expand_dims(x_jets, 2)
         print(x_particles.shape, x_jets.shape, y.shape)
-        #x_particles[:, 1:, :] = x_particles[:, 1:, :] - x_jets[:, 1:, :]
-        #x_particles = np.concatenate([x_particles, np.expand_dims(x_jets, 1)], axis=1)
         
         np.save(f'{path}//x_px_py_pz_E_pt_eta_phi{max_num_particles}_{idx}.npy', x_particles)
         np.save(f'{path}//x_jets_pt_eta_phi_energy{name_particles}_{max_num_particles}_{idx}.npy', x_jets)

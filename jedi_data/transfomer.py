@@ -14,6 +14,8 @@ class Transformer(nn.Module):
                 norm = None, # normalization layer
                 
                 ):
+        super(Transformer, self).__init__()
+        
         self.nbr_const = nbr_const
         self.nbr_feat = nbr_feat
                 
@@ -25,7 +27,7 @@ class Transformer(nn.Module):
         self.output_size = output_size
         self.norm = norm
 
-        self.lifting_layer = nn.Linear(nbr_feat, lifting_dim)
+        self.lifting_layer = nn.Linear(nbr_feat*nbr_const, 3)#lifting_dim
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_models, nhead=self.nhead)
         
         self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=6)
@@ -33,7 +35,8 @@ class Transformer(nn.Module):
         self.fc = nn.Linear(self.lifting_dim, self.output_size)
         
     def forward(self, x, x_mask):
-        x = self.lifting_layer(x)
+        #x = self.lifting_layer(x)
+        #print(x.shape)
         x = self.transformer_encoder(x, x_mask)
         x = self.fc(x)
         return x

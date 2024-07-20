@@ -10,7 +10,7 @@ from jedi_data.vector_neurons import Vect_Neuron
 from jedi_data.vector_neurons_lorentz import Vect_Neuron_Lorentz
 from jedi_data.vn_dgcnn import VN_DGCNN 
 from jedi_data.dgcnn import DGCNN
-from jedi_data.transformer import Transformer
+from jedi_data.transfomer import Transformer
 #from graph_net import MultiLayerEdgeConv
 
 import util
