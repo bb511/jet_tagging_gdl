@@ -10,6 +10,7 @@ parser.add_argument("--seed", type=int, default=42)
 args = parser.parse_args()
 
 import random
+import math
 
 random.seed(args.seed)
 
@@ -22,6 +23,7 @@ import matplotlib.pyplot as plt
 import torch 
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import LambdaLR
 import torch.nn.functional as F
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
@@ -29,6 +31,7 @@ torch.cuda.manual_seed_all(args.seed)
 import torch_geometric
 
 import yaml
+
 import deepspeed
 
 from import_data import select_data
@@ -74,7 +77,7 @@ def main(config):
         #util.check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, config_path)
     #util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
 
-    hist = train_model(model, train_data, valid_data, device, name, data_name, **config["training_hyperparams"])
+    hist = train_model(model, train_data, valid_data, device, name, data_name, **config["training_hyperparams"], warmup_steps=1000)
     print('The model has been successfully trained')
     
     # Saved model and plot the loss and accuracy evolution throught the epochs.
@@ -94,24 +97,30 @@ def main(config):
         plot_evaluation_metric(name, model, valid_data, batch_size=256, device = 'cuda:0')
 
     
-def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv):
+def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, num_cycles=0.5, last_epoch=-1):
+    def lr_lambda(current_step):
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1, num_warmup_steps))
+        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
+
+def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv, warmup_steps):
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                           mode="max",
-                                                           patience=80,
-                                                           factor=0.1,
-                                                           threshold=1e-4,
-                                                           verbose=True)
     
-    print('Optimizer Summary: ', optimizer)
     train_data = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=1)
     valid_data = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=1)
     
+    total_steps = len(train_data) * epochs
+    
+    # Create scheduler with warmup
+    scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+    
     print(f'Beginning of training of model {name}')
     all_train_loss, all_train_accu, all_valid_loss, all_valid_accu, all_inv_err = [], [], [], [], []
-    epochs_no_improve, best_accu = 0, 0
-    epochs_es_limit = 30
+    best_accu = 0
     
     total_params = sum(p.numel() for p in net.parameters())
     print(f"Number of parameters: {total_params}")
@@ -124,20 +133,20 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
         net.train()
         print(f'Beginning of Epoch {epoch + 1}/{epochs}')
         
-        for x, y, mask in train_data:
-            x, y, mask = x.to(device), y.to(device), mask.to(device)
+        for x, y in train_data:
+            x, y = x.to(device), y.to(device)
             y_true = y
             
             if epoch == 0 and totnum_batches == 0:
                 prof.start_profile()
-                y_pred = net(x, mask)
+                y_pred = net(x)
                 prof.stop_profile()
                 print(util.tcols.OKGREEN + "Model flops: " + util.tcols.ENDC, end="")
                 print(f"{prof.get_total_flops()/ x.shape[0]}")
                 prof.end_profile()
                 print("")
             else:
-                y_pred = net(x, mask)
+                y_pred = net(x)
             
             if loss_inv == 'so3':
                 loss = util.inv_err_randn(net, criterion, x, y_pred, y_true, 0.001, device)
@@ -153,6 +162,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
             
             batch_loss_sum += loss.detach()
             totnum_batches += 1
@@ -160,22 +170,23 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
         
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
-        inv_err = util.check_inv(net, device)
+        #inv_err = util.check_inv(net, device)
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
-        all_inv_err.append(inv_err)
+        #all_inv_err.append(inv_err)
         
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
-        print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
+        #print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
+        print(f'[{epoch + 1}] Learning rate: {scheduler.get_last_lr()[0]}')
         
         batch_loss_sum, batch_accu_sum, totnum_batches = 0, 0, 0
         
         with torch.no_grad():
             net.eval()
-            for x, y, mask in valid_data:
-                x, y, mask = x.to(device), y.to(device), mask.to(device)
-                y_pred = net(x, mask)
+            for x, y in valid_data:
+                x, y = x.to(device), y.to(device)
+                y_pred = net(x)
                 y_true = y
                 
                 loss = criterion(y_pred, torch.argmax(y_true, dim=1).to(torch.int64))
@@ -188,18 +199,12 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             valid_accu = batch_accu_sum / totnum_batches
             print(f"[{epoch + 1}] validation loss: {valid_loss:.5f}")
             print(f"[{epoch + 1}] test accuracy: {valid_accu:.5f}")
-            print(f'[{epoch + 1}] Learning rate: ', optimizer.state_dict()['param_groups'][0]['lr'])
             all_valid_loss.append(valid_loss.item())
             all_valid_accu.append(valid_accu.item())
         
-        if round(valid_accu.cpu().item(), 3) <= round(best_accu, 3):
-            epochs_no_improve += 1
-        else:
-            best_accu = valid_accu.cpu().item()
-            epochs_no_improve = 0
-        scheduler.step(best_accu)
-        if epochs_no_improve >= epochs_es_limit:
-            break
+        if valid_accu > best_accu:
+            best_accu = valid_accu
+    
     plt.plot(all_train_loss, color="gray", label="Training Loss")
     plt.plot(all_valid_loss, color="navy", label="Validation Loss")
     plt.xlabel("Epochs")
@@ -212,10 +217,10 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
     plt.ylabel("Accuracy")
     plt.savefig(f'plot/Accuracy_{name}_{data_name}')
     plt.close()
-    plt.plot(all_inv_err, color="gray", label="Invariance Relative Error")
-    plt.xlabel("Epochs")
-    plt.ylabel("Invariance Relative Error")
-    plt.savefig(f'plot/Invariance_{name}_{data_name}')
+    #plt.plot(all_inv_err, color="gray", label="Invariance Relative Error")
+    #plt.xlabel("Epochs")
+    #plt.ylabel("Invariance Relative Error")
+    #plt.savefig(f'plot/Invariance_{name}_{data_name}')
     print('Finished Training')
     
 def evaluate_model(model, validation_set, device, batch_size, config_path):

@@ -26,9 +26,9 @@ model_hyperparameter:
     output : 5
     pooling : "mean"
   transformer:
-    lifting_dim: 512
+    lifting_dim: 128
     num_layers: 4
-    d_models: 512
+    d_models: 128
     nhead: 8
     output_size: 5
     norm: None

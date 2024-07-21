@@ -16,7 +16,7 @@ def select_data(name : str, data_name : str):
         "dgcnn": import_data_without_prepossesing,
         "graph_net": import_data_graph_net,
         "msg_pass_edgeconv" : import_data_graph,
-        "transformer": import_data_with_mask,
+        "transformer": import_data_without_prepossesing,
     }
     PATH = "/mnt/c/users/bonvi/Documents/deepset/data/"
     sel_path = {
