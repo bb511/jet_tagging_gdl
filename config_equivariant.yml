@@ -25,6 +25,10 @@ model_hyperparameter:
     n_knn : 8
     output : 5
     pooling : "mean"
+  graph_net:
+    hidden_channels : 32
+    out_channels : 5 
+    num_layers : 3
   transformer:
     lifting_dim: 128
     num_layers: 4
@@ -34,8 +38,8 @@ model_hyperparameter:
     norm: None
 
 training_hyperparams : 
-  epochs :  100
-  lr : 0.001
+  epochs :  1
+  lr : 0.0028
   batch_size: 256
   loss_inv : False
 

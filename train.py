@@ -154,7 +154,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             y_pred = net(x)
             if loss_inv =='so3':
                 l = 0.001
-                loss = util.inv_err_randn(net, criterion, x, y_pred, y_true, l, device)
+                loss = util.inv_err_rand(net, criterion, x, y_pred, y_true, l, device)
             elif loss_inv == 'lorentz':
                 l = 0.001
                 loss = util.inv_err_lorentz(net, criterion, x, y_pred, y_true, l, device)

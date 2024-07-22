@@ -10,14 +10,6 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GCNConv, global_mean_pool, MessagePassing
 from torch_geometric.utils import add_self_loops, degree
 
-from e3nn import o3
-from e3nn.nn import FullyConnectedNet, Extract, Activation
-from e3nn.o3 import FullyConnectedTensorProduct, TensorProduct
-
-from escnn import gspaces
-from escnn import nn as enn
-
-import deepspeed
 
 import matplotlib.pyplot as plt
 
@@ -113,9 +105,9 @@ class MPLayer(MessagePassing):
         return norm.view(-1, 1) * x_j
     
 class MultiLayerEdgeConv(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers):
+    def __init__(self, nbr_const, nbr_feat, hidden_channels, out_channels, num_layers):
         super(MultiLayerEdgeConv, self).__init__()
-        
+        in_channels = nbr_feat
         self.convs = torch.nn.ModuleList()
         self.convs.append(EdgeConvLayer(in_channels, hidden_channels))
         
@@ -125,14 +117,17 @@ class MultiLayerEdgeConv(torch.nn.Module):
         self.convs.append(EdgeConvLayer(hidden_channels, out_channels))
         
     def forward(self, x, edge_index, batch):
+        mask = (x.sum(dim=-1) != 0) 
         for conv in self.convs[:-1]:
-            x = conv(x, edge_index)
+            x = conv(x, edge_index, mask)
             x = F.relu(x)
         
-        x = self.convs[-1](x, edge_index)
+        x = self.convs[-1](x, edge_index, mask)
+        
+        x = x * mask.unsqueeze(-1)
         
         x = global_mean_pool(x, batch)
-        return x
+        return x, mask
 
 class EdgeConvLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
@@ -143,8 +138,8 @@ class EdgeConvLayer(MessagePassing):
             torch.nn.Linear(128, out_channels)
         )
     
-    def forward(self, x, edge_index):
-        return self.propagate(edge_index, x=x)
+    def forward(self, x, edge_index, mask):
+        return self.propagate(edge_index, x=x)* mask.unsqueeze(-1)
     
     def message(self, x_i, x_j):
         tmp = torch.cat([x_i, x_j - x_i], dim=1)

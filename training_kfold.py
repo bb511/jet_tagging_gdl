@@ -77,7 +77,11 @@ def k_fold_cross_validation(train_data, net, criterion, config, device, k=5):
         train_loader = DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], sampler=train_subsampler)
         val_loader = DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], sampler=val_subsampler)
 
-        model = get_model(args.name, 32, 3, config["model_hyperparameter"]).to(device)
+        x, y = next(iter(train_data))
+        nbr_const = x.size(0)
+        nbr_feat = x.size(1)
+        print(f'Number of constituents: {nbr_const}, Number of features: {nbr_feat}')
+        model = get_model(args.name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
         optimizer = optim.Adam(model.parameters(), lr=config["training_hyperparams"]["lr"])
 
         fold_history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
@@ -180,15 +184,6 @@ def main(config):
     util.roc_curves_uncertainty(all_fold_predictions, f"roc_curves_uncertainty_{name}_{data_name}")
     #util.dnn_output_uncertainty("plot",all_fold_predictions, f"{name}_{data_name}_output_histos.pdf")
 
-    # Train final model on all training data
-    model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"])
-    train_loader = DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True)
-    optimizer = optim.Adam(model.parameters(), lr=config["training_hyperparams"]["lr"])
-    
-    for epoch in range(config["training_hyperparams"]["epochs"]):
-        train_loss, train_acc = train_model(model, train_loader, criterion, optimizer, device)
-        print(f'Epoch {epoch+1}/{config["training_hyperparams"]["epochs"]}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}')
-    
     # Evaluate on test data
     test_loader = DataLoader(test_data, batch_size=config["training_hyperparams"]["batch_size"])
     test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)

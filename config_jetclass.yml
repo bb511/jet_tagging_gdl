@@ -25,6 +25,10 @@ model_hyperparameter:
     n_knn : 8
     output : 10
     pooling : "mean"
+  graph_net:
+    hidden_channels : 32
+    out_channels : 10
+    num_layers : 3
   transformer:
     lifting_dim: 512
     num_layers: 4
