@@ -49,7 +49,7 @@ def main(config):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Training done on {device}")
     
-    outdir = util.make_output_directory(f"trained_models_{name}", config["outdir"])
+    outdir = util.make_output_directory(f"train_models/trained_models_{name}", config["outdir"])
     # Save the config file to the main dir.
     util.save_config_file(config, outdir)
     config_path = os.path.join(f"trained_models_{name}_{data_name}/trained_models", f"config_{name}_{data_name}.yml")
@@ -68,28 +68,23 @@ def main(config):
 
     # Import and train the model.
     model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
+    model
     print('Model summary: ', model)
-    #util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
-    #util.weights_plot(model, name + data_name + '_init')
-    #if data_name not in ["px_py_pz_E_8", "px_py_pz_E_16", "px_py_pz_E_32", "px_py_pz_E_jet_center_8", "px_py_pz_E_jet_center_16", "px_py_pz_E_jet_center_32"]:
-        #util.check_invariance(model, nbr_const, nbr_feat, name, device, config_path)
-    #else:
-        #util.check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, config_path)
-    #util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
+    util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
+    util.weights_plot(model, name + data_name + '_init')
+    util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
 
     hist = train_model(model, train_data, valid_data, device, name, data_name, **config["training_hyperparams"], warmup_steps=1000)
     print('The model has been successfully trained')
     
     # Saved model and plot the loss and accuracy evolution throught the epochs.
     model_file = os.path.join(outdir, f"model_{name}_{data_name}.pt")
+    util.init_transformer_weights(model)
     torch.save(model.state_dict(), model_file)
     
     if config["validation"]:
-        print(f'Validation of the model {name} trained using the data {data_name}')
-        if data_name not in ["px_py_pz_E_8", "px_py_pz_E_16", "px_py_pz_E_32", "px_py_pz_E_jet_center_8", "px_py_pz_E_jet_center_16", "px_py_pz_E_jet_center_32"]:
-            util.check_invariance(model, nbr_const, nbr_feat, name, device, config_path)
-        else:
-            util.check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, config_path)        
+        print(f'Validation of the model {name} trained using the data {data_name}')  
+        util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
         util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
         name = name + '_' + data_name
         util.weights_plot(model, name + '_validation')
@@ -170,10 +165,10 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
         
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
-        #inv_err = util.check_inv(net, device)
+        inv_err = util.check_inv(net, x, device)
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
-        #all_inv_err.append(inv_err)
+        all_inv_err.append(inv_err)
         
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
@@ -217,10 +212,10 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
     plt.ylabel("Accuracy")
     plt.savefig(f'plot/Accuracy_{name}_{data_name}')
     plt.close()
-    #plt.plot(all_inv_err, color="gray", label="Invariance Relative Error")
-    #plt.xlabel("Epochs")
-    #plt.ylabel("Invariance Relative Error")
-    #plt.savefig(f'plot/Invariance_{name}_{data_name}')
+    plt.plot(all_inv_err, color="gray", label="Invariance Relative Error")
+    plt.xlabel("Epochs")
+    plt.ylabel("Invariance Relative Error")
+    plt.savefig(f'plot/Invariance_{name}_{data_name}')
     print('Finished Training')
     
 def evaluate_model(model, validation_set, device, batch_size, config_path):
@@ -247,14 +242,18 @@ def evaluate_model(model, validation_set, device, batch_size, config_path):
 def plot_evaluation_metric(name, model, validation_set, batch_size, device):
     model.eval()
     validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=False)
+    y_true_all = []
+    y_pred_all = []
     for x,y in validation_loader:
         x = x.to(device)
         y_true = y.to(device)
         y_pred = nn.Softmax(dim = 1)(model(x))
-    y_true = y_true.cpu().detach()
-    y_pred = y_pred.cpu().detach()
+        y_true = y_true.cpu().detach()
+        y_pred = y_pred.cpu().detach()
+        y_true_all.append(y_true)
+        y_pred_all.append(y_pred)
     roc_curve_name = 'roc_curves_' + name
-    util.roc_curves('plot', y_pred, y_true.numpy(), roc_curve_name)
+    util.roc_curves('plot', y_pred, y_true, roc_curve_name)
     util.dnn_output('plot', y_pred, name)
 
 if __name__ == "__main__":

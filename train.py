@@ -45,15 +45,15 @@ def main(config):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Training done on {device}")
     
-    outdir = util.make_output_directory(f"trained_models_{name}", config["outdir"])
+    outdir = util.make_output_directory(f"train_models/trained_models_{name}", config["outdir"])
     # Save the config file to the main dir.
     util.save_config_file(config, outdir)
-    config_path = os.path.join(f"trained_models_{name}_{data_name}/trained_models", f"config_{name}_{data_name}.yml")
+    config_path = os.path.join(f"train_models/trained_models_{name}_{data_name}/trained_models", f"config_{name}_{data_name}.yml")
     print('Config file saved')
 
     # Create subdir for each seed.
     config["outdir"] = os.path.join(config["outdir"], f"seed{args.seed}")
-    outdir = util.make_output_directory(f"trained_models_{name}_{data_name}", config["outdir"])
+    outdir = util.make_output_directory(f"train_models/trained_models_{name}_{data_name}", config["outdir"])
     print('Subfile for each seeds are created')
 
     # Import the training and the validation data, sampled and normalised.
@@ -64,19 +64,24 @@ def main(config):
     nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
     util.print_data_deets(valid_data, "Validation")
     print("The training data and the validation data have been successfully imported")
+    
+    train_load = torch.utils.data.DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
+    valid_load = torch.utils.data.DataLoader(valid_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
 
     # Import and train the model.
     model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
+    model.apply(util.init_weights)
     print('Model summary: ', model)
-    util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
+    x, _ = next(iter(train_load))
+    util.compute_inference_time(model,x, name, device, config_path)
     util.weights_plot(model, name + data_name + '_init')
-    if data_name not in ["px_py_pz_E_8", "px_py_pz_E_16", "px_py_pz_E_32", "px_py_pz_E_jet_center_8", "px_py_pz_E_jet_center_16", "px_py_pz_E_jet_center_32"]:
-        util.check_invariance(model, nbr_const, nbr_feat, name, device, config_path)
+    if "px_py_pz_E" not in data_name:
+        util.check_invariance(model, x, name, device, config_path)
     else:
-        util.check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, config_path)
-    util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
+        util.check_invariance_Lorentz(model, x, name, device, config_path)
+    util.check_permutation_invariance(model, x, name, device, config_path)
 
-    hist = train_model(model, train_data, valid_data, device, name, data_name, **config["training_hyperparams"])
+    hist = train_model(model, train_load, valid_load, device, name, data_name, **config["training_hyperparams"])
     print('The model has been successfully trained')
     
     # Saved model and plot the loss and accuracy evolution throught the epochs.
@@ -85,11 +90,12 @@ def main(config):
     
     if config["validation"]:
         print(f'Validation of the model {name} trained using the data {data_name}')
-        if data_name not in ["px_py_pz_E_8", "px_py_pz_E_16", "px_py_pz_E_32", "px_py_pz_E_jet_center_8", "px_py_pz_E_jet_center_16", "px_py_pz_E_jet_center_32"]:
-            util.check_invariance(model, nbr_const, nbr_feat, name, device, config_path)
+        util.compute_inference_time(model, x, name, device, config_path)
+        if "px_py_pz_E" not in data_name:
+            util.check_invariance(model, x, name, device, config_path)
         else:
-            util.check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, config_path)        
-        util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
+            util.check_invariance_Lorentz(model, x, name, device, config_path)        
+        util.check_permutation_invariance(model, x, name, device, config_path)
         name = name + '_' + data_name
         util.weights_plot(model, name + '_validation')
         evaluate_model(model, valid_data, 'cuda:0', 256, config_path)
@@ -97,7 +103,7 @@ def main(config):
 
 
 
-def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv):
+def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr, batch_size, loss_inv):
     "Standard training function for pytorch model"
     l = 0.001
     criterion = nn.CrossEntropyLoss().to(device)
@@ -113,8 +119,6 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
                                                             verbose=True,
                                                             )
     print('Optimizer Summary: ', optimizer)
-    train_data = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True, pin_memory = True, num_workers=1)
-    valid_data = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=True, pin_memory = True, num_workers=1)
     print(f'Begining of training of model {name}')
     all_train_loss = []
     all_train_accu = []
@@ -122,7 +126,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
     all_valid_accu = []
     all_inv_err = []
     epochs_no_improve = 0
-    epochs_es_limit = 30
+    epochs_es_limit = 50
     best_accu = 0
     total_params = sum(p.numel() for p in net.parameters())
     print(f"Number of parameters: {total_params}")
@@ -178,7 +182,10 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
         # print statistics
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
-        inv_err = util.check_inv(net, device)
+        if "px_py_pz" in data_name and x.shape[2] == 3:
+            inv_err = util.check_inv(net, x, device)
+        else:
+            inv_err = 100
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
         all_inv_err.append(inv_err)
@@ -221,7 +228,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             epochs_no_improve = 0
         scheduler.step(best_accu)
         if epochs_no_improve >= epochs_es_limit:
-            continue
+            break
     plt.plot(all_train_loss, color="gray", label="Training Loss")
     plt.plot(all_valid_loss, color="navy", label="Validation Loss")
     plt.xlabel("Epochs")
@@ -264,14 +271,18 @@ def evaluate_model(model, validation_set, device, batch_size, config_path):
 def plot_evaluation_metric(name, model, validation_set, batch_size, device):
     model.eval()
     validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=False)
+    y_true_all = []
+    y_pred_all = []
     for x,y in validation_loader:
         x = x.to(device)
         y_true = y.to(device)
         y_pred = nn.Softmax(dim = 1)(model(x))
-    y_true = y_true.cpu().detach()
-    y_pred = y_pred.cpu().detach()
+        y_true = y_true.cpu().detach()
+        y_pred = y_pred.cpu().detach()
+        y_true_all.append(y_true)
+        y_pred_all.append(y_pred)
     roc_curve_name = 'roc_curves_' + name
-    util.roc_curves('plot', y_pred, y_true.numpy(), roc_curve_name)
+    util.roc_curves('plot', y_pred, y_true, roc_curve_name)
     util.dnn_output('plot', y_pred, name)
 
 if __name__ == "__main__":

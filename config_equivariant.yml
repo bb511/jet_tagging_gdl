@@ -1,4 +1,4 @@
-outdir: 'trained_models_pt_eta_phi_jet_center_8const'
+outdir: 'trained_models'
 
 model_hyperparameter:
   deepset:
@@ -13,6 +13,12 @@ model_hyperparameter:
     hidden : 43
     num_layers: 4
     add_mlp : False
+  vn_etaphi_rel:
+    out_channel: 5
+    hidden : 43
+    num_layers: 4
+    hidden_mlp : 16
+    num_layers_mlp : 3
   vector_neuron_lorentz:
     out_channel: 5
     hidden : 20

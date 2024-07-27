@@ -12,10 +12,11 @@ def select_data(name : str, data_name : str):
         "deepset": import_data_without_prepossesing,
         "vector_neuron": import_data_without_prepossesing,
         "vector_neuron_lorentz": import_data_without_prepossesing,
-        "vn_dgcnn": import_data_without_prepossesing,
-        "dgcnn": import_data_without_prepossesing,
-        "graph_net": import_data_graph,
+        #"vn_dgcnn": import_data_without_prepossesing,
+        #"dgcnn": import_data_without_prepossesing,
+        #"graph_net": import_data_graph,
         "transformer": import_data_without_prepossesing,
+        "vn_etaphi_rel": import_data_without_prepossesing,
     }
     PATH = "/mnt/c/users/bonvi/Documents/deepset/data/"
     sel_path = {

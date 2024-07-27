@@ -3,9 +3,9 @@ import os
 from tqdm import tqdm
 
 def create_rot_mat():
-    """Function to create 27 regularly rotated matrices"""
+    """Function to create 8 regularly rotated matrices"""
     rot_matrices = []
-    angles = np.linspace(0, 2*np.pi, 3, endpoint=False)
+    angles = np.linspace(0, 2*np.pi, 2, endpoint=False)
     
     for theta in angles:  # rotation around z-axis
         for phi in angles:  # rotation around y-axis

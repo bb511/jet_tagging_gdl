@@ -33,6 +33,7 @@ class JetDataProcessor:
         Raises:
             ValueError: If the selected feature method is not valid.
         """
+    
         valid_feats = ["ptetaphi", "pxpypz", "pxpypzE", "pxpypzjet", "pxpypzEjet"]
         if self.feat not in valid_feats:
             raise ValueError(f"Feature selection not valid. Choose from {valid_feats}")

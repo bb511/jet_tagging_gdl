@@ -26,8 +26,8 @@ def normsq4(p):
     """Function to calculate the Minkowski norm of a matrix of four-vectors"""
     dot = dot4(p, p)
     norm = torch.diagonal(dot, dim1=-2, dim2=-1)
-    norm = torch.sqrt(torch.abs(norm))
-    #print("norm", norm.isnan().sum())
+    norm = torch.sqrt(norm)
+    print("norm", norm.isnan().sum())
     return norm
 
 def dot4(p1, p2):
@@ -76,7 +76,6 @@ class VNBatchNormLorentz(nn.Module):
         '''
         x: point features of shape [B, N_feat, 4, N_samples, ...]
         '''
-        # norm = torch.sqrt((x*x).sum(2))
         norm = normsq4(x)
         norm_bn = self.bn(norm)
         norm = norm.unsqueeze(2)
@@ -84,6 +83,8 @@ class VNBatchNormLorentz(nn.Module):
         x = x / norm * norm_bn
         
         return x
+    
+    
 class VNGeometricMixingLorentz(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(VNGeometricMixingLorentz, self).__init__()

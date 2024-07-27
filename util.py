@@ -10,8 +10,8 @@ import torch.nn as nn
 import torchinfo
 import matplotlib.pyplot as plt
 
-from jedi_data.deepsets import DeepSetsEquivariant
-from jedi_data.deepsets import DeepSetsInvariant
+from network.deepsets import DeepSetsEquivariant
+from network.deepsets import DeepSetsInvariant
 
 from sklearn.metrics import roc_curve, auc
 
@@ -294,6 +294,7 @@ def compute_roc_stats(all_fold_predictions, n_classes=5):
         all_fats.append((mean_fat, std_fat))
     
     return tpr_base, all_fprs, all_aucs, all_fats
+
 def roc_curves_uncertainty(
     all_fold_predictions,
     name,
@@ -426,16 +427,16 @@ def dnn_output_uncertainty(outdir: str, all_fold_predictions: np.ndarray, name =
     plt.close()
     print(f"DNN output histograms plot saved to {outdir}.")
     
-def compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path):
+def compute_inference_time(model, x, name, device, config_path):
     """Function that compute the inference time of a model"""
-    batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vn_dgcnn","dgcnn", "transformer"]:
-        input_shape = (batch_size, nbr_const, nbr_feat)
+    batch_size = x.size(0)
+    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer"]:
+        print('')
     else:
         raise ValueError(
             f"The model {name} is not implemented!"
             )
-    data = torch.randn(input_shape).to(device)
+    data = x.to(device)
     t0 = time.time()
     y = model(data.to(device))
     t1 = time.time()
@@ -444,8 +445,8 @@ def compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path
 
 
     
-def check_invariance(model, nbr_const, nbr_feat, name, device, config_path, val = False):
-    
+def check_invariance(model, x, name, device, config_path, val = False):
+    nbr_const, nbr_feat = x.size(1), x.size(2)
     try:
         assert nbr_feat == 3, "The number of features should be 3"
     except:
@@ -457,8 +458,8 @@ def check_invariance(model, nbr_const, nbr_feat, name, device, config_path, val 
             return 1000000.0
 
     batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vn_dgcnn","dgcnn", "transformer"]:
-        input = torch.randn((batch_size, nbr_const, nbr_feat)).to(device)
+    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz", "vn_etaphi_rel", "transformer"]:
+        input = x.to(device)
         rot_mats = []
         for _ in range(16):
             R = np.random.rand(3, 3)
@@ -485,9 +486,9 @@ def check_invariance(model, nbr_const, nbr_feat, name, device, config_path, val 
             f"The model {name} is not implemented!"
             )
         
-def check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, val = False):
+def check_invariance_Lorentz(model, x, name, device, val = False):
     """Function that checks the invariance of the model to Lorentz transformations"""
-    
+    nbr_const, nbr_feat = x.shape[1], x.shape[2]
     try:
         assert nbr_feat == 4, "The number of features should be 4"
     except:
@@ -499,8 +500,8 @@ def check_invariance_Lorentz(model, nbr_const, nbr_feat, name, device, val = Fal
             return 1000000.0
 
     batch_size = 1000
-    if name in ["deepset", "vector_neuron","vn_dgcnn","dgcnn", "transformer"]:
-        input = torch.randn((batch_size, nbr_const, nbr_feat)).to(device)
+    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer"]:
+        input = x.to(device)
         rot_mats = []
         for _ in range(16):
             R = np.random.rand(3, 3)
@@ -605,8 +606,7 @@ def inv_err(model, criterion, x, y_pred, y_true, l, device):
     return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
 
 def inv_err_rand(model, criterion, x, y_pred, y_true, l, device):
-    batch_size = 256
-    input = torch.randn((batch_size, x.shape[1], x.shape[2])).to(device)
+    input = x
     rot_mats = torch.zeros((16, 3,3)).to(device)
     for i in range(rot_mats.shape[0]):
         R = np.random.rand(3, 3)
@@ -624,10 +624,8 @@ def inv_err_rand(model, criterion, x, y_pred, y_true, l, device):
 
 def inv_error_lorentz(model, criterion, x, y_pred, y_true, l, device):
     """Function that checks the invariance of the model to Lorentz transformations"""
-
-    batch_size = 1000
     
-    input = torch.randn((batch_size, x.shape[1], x.shape[2])).to(device)
+    input = x
     rot_mats = []
     for _ in range(16):
         R = np.random.rand(3, 3)
@@ -665,10 +663,10 @@ def permute_constituents(data: torch.Tensor):
 
     return data
 
-def check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path, val = False):
+def check_permutation_invariance(model, x, name, device, config_path, val = False):
     """Function that checks the permutation invariance of the model"""
     batch_size = 1000  
-    input = torch.randn((batch_size, nbr_const, nbr_feat)).to(device)
+    input = x.to(device)
     err = np.zeros(16)
     for i in range(err.shape[0]):
         a = model(input)
@@ -704,9 +702,9 @@ def permutation_err(model, criterion, x, y_pred, y_true, l, device):
     mean_err = err.mean()
     return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
 
-def check_inv(model, device):
-    batch_size = 1000
-    input = torch.randn((batch_size, 8, 3)).to(device)
+def check_inv(model, x, device):
+    model.eval()
+    input = x
     rot_mats = []
     for _ in range(16):
         R = np.random.rand(3, 3)
@@ -832,3 +830,48 @@ def no_zero_loss(net, criterion, x, y_pred, y_true):
         err[i] = torch.norm(b-a)/torch.norm(a)
     mean_err = err.detach().mean()
     return 0.01 * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
+
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.Conv1d):
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, (nn.BatchNorm1d, nn.GroupNorm)):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.Embedding):
+        nn.init.normal_(m.weight, mean=0, std=0.02)
+    elif isinstance(m, nn.MultiheadAttention):
+        # Initialize the weights for all linear transformations in MultiheadAttention
+        for param in m.parameters():
+            if param.dim() > 1:
+                nn.init.xavier_uniform_(param)
+    elif isinstance(m, nn.TransformerEncoderLayer):
+        # Initialize the feedforward layer
+        nn.init.xavier_uniform_(m.linear1.weight)
+        nn.init.zeros_(m.linear1.bias)
+        nn.init.xavier_uniform_(m.linear2.weight)
+        nn.init.zeros_(m.linear2.bias)
+    elif isinstance(m, nn.LayerNorm):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+
+def init_transformer_weights(model):
+    """Initialize weights for Transformer models."""
+    for p in model.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+    
+    # Special initialization for the final layer
+    if hasattr(model, 'fc'):
+        nn.init.normal_(model.fc.weight, mean=0, std=0.02)
+        nn.init.zeros_(model.fc.bias)
+
+    # Optionally, adjust the initialization of positional embeddings
+    if hasattr(model, 'pos_encoder') and hasattr(model.pos_encoder, 'pe'):
+        with torch.no_grad():
+            model.pos_encoder.pe.div_(math.sqrt(model.d_model))
