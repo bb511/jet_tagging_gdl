@@ -114,6 +114,44 @@ class VNGeometricMixing(nn.Module):
         
         x = x @ m
         return x
+class CircularSlidingWindowWeightedMean(nn.Module):
+    def __init__(self, window_size=8):
+        super(CircularSlidingWindowWeightedMean, self).__init__()
+        self.window_size = window_size
+        
+        # Create decreasing weights
+        weights = torch.linspace(1, 0, steps=window_size)
+        weights = weights.flip(0)  # Reverse the order to have decreasing weights
+        self.register_buffer('weights', weights.unsqueeze(0).unsqueeze(2))
+
+    def forward(self, x):
+        padding = self.window_size - 1
+        x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
+        
+       
+        unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
+        
+        # Apply weights to the unfolded tensor
+        weighted_unfolded = unfolded * self.weights.reshape(1,1,-1)
+        
+        # Compute weighted mean
+        windowed_weighted_mean = weighted_unfolded.sum(dim=-1) / self.weights.sum()
+       
+        return windowed_weighted_mean
+    
+class CircularSlidingWindowMean(nn.Module):
+    def __init__(self, window_size=8):
+        super(CircularSlidingWindowMean, self).__init__()
+        self.window_size = window_size
+
+    def forward(self, x):
+        padding = self.window_size - 1
+        x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
+        
+        unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
+        windowed_mean = unfolded.mean(dim=-1)
+        
+        return windowed_mean
     
 
 class Vect_Neuron(nn.Module):
@@ -137,6 +175,7 @@ class Vect_Neuron(nn.Module):
         self.nn = nn.ModuleList([VNLinearAndLeakyReLU(self.hidden, self.hidden,4) for _ in range(self.num_layers-1)])
         #self.mixing1 = VNGeometricMixing(self.hidden, self.hidden)
         self.mixing2 = VNGeometricMixing(self.hidden, self.hidden)
+        self.sliding_window = CircularSlidingWindowWeightedMean(24)
                                                                                 
         
         self.before_scalar = VNLinearAndLeakyReLU(self.hidden, self.hidden, 4)
@@ -149,11 +188,13 @@ class Vect_Neuron(nn.Module):
             self.out = nn.Linear(self.hidden**2, self.out_channel)
                 
     def forward(self, x):
+        x = self.sliding_window(x)
+        #print(f'Number of zero value in the input {x.is_null().sum()}')
         x = self.inp(x)
         #x = self.mixing1(x)
         for module in self.nn:
             x = module(x)
-        x = self.mixing2(x)
+        #x = self.mixing2(x)
         x = self.before_scalar(x)
         inv_x = x@(x.transpose(1,-1))
         x = torch.flatten(inv_x, start_dim = 1, end_dim = -1)

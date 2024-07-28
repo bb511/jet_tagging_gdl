@@ -22,7 +22,7 @@ model_hyperparameter:
   vector_neuron_lorentz:
     out_channel: 5
     hidden : 20
-    num_layers: 4
+    num_layers: 2
   vn_dgcnn:
     n_knn : 8
     output : 5
@@ -44,8 +44,8 @@ model_hyperparameter:
     norm: None
 
 training_hyperparams : 
-  epochs :  1
-  lr : 0.0028
+  epochs :  300
+  lr : 0.0001
   batch_size: 256
   loss_inv : False
 

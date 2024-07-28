@@ -107,7 +107,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
     "Standard training function for pytorch model"
     l = 0.001
     criterion = nn.CrossEntropyLoss().to(device)
-    if name not in ["vector_neuron", "vn_dgcnn"]:
+    if name not in ["vector_neuron", "vn_etaphi_rel", "vn_dgcnn"]:
         optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
     else:
         optimizer = optim.RMSprop(net.parameters(), lr = 0.0294)#

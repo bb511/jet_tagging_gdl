@@ -23,7 +23,7 @@ parser.add_argument("--name", type=str, help="Name of the model you want to trai
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
 parser.add_argument("--config_file", type=str, help="Configuration of your model", default="config_equivariant.yml")
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--kfold", type=int, default=5)
+parser.add_argument("--kfold", type=int, default=3)
 args = parser.parse_args()
 
 random.seed(args.seed)
@@ -41,7 +41,8 @@ def create_balanced_sampler(labels):
     weights = [1.0 / class_sample_count[label] for label in labels]
     return torch.utils.data.WeightedRandomSampler(weights, len(weights))
 
-def train_model(model, train_loader, criterion, optimizer, device, scaler):
+
+def train_model(model, train_loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
     correct = 0
@@ -49,19 +50,19 @@ def train_model(model, train_loader, criterion, optimizer, device, scaler):
     for x, y in train_loader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        with autocast():
-            y_pred = model(x)
-            loss = criterion(y_pred, torch.argmax(y, dim=1))
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        scaler.step(optimizer)
-        scaler.update()
+        
+        y_pred = model(x)
+        loss = criterion(y_pred, torch.argmax(y, dim=1))
+        
+        loss.backward()
+        optimizer.step()
+        
         running_loss += loss.item()
         _, predicted = y_pred.max(1)
         total += y.size(0)
         correct += predicted.eq(torch.argmax(y, dim=1)).sum().item()
-    return running_loss / len(train_loader), correct / total
+    
+    return running_loss / len(train_loader), correct / total, model
 
 def evaluate_model(model, val_loader, criterion, device):
     model.eval()
@@ -121,7 +122,7 @@ def k_fold_cross_validation(train_data, criterion, config, device, k=5):
 
         optimizer = optim.Adam(model.parameters(), lr=config["training_hyperparams"]["lr"])
         scheduler = ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
-        scaler = GradScaler()
+        #scaler = GradScaler()
 
         fold_history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
         best_val_loss = float('inf')
@@ -129,7 +130,7 @@ def k_fold_cross_validation(train_data, criterion, config, device, k=5):
         epochs_no_improve = 0
 
         for epoch in range(config["training_hyperparams"]["epochs"]):
-            train_loss, train_acc = train_model(model, train_loader, criterion, optimizer, device, scaler)
+            train_loss, train_acc, model = train_model(model, train_loader, criterion, optimizer, device)
             val_loss, val_acc = evaluate_model(model, val_loader, criterion, device)
             scheduler.step(val_loss)
             
@@ -141,6 +142,10 @@ def k_fold_cross_validation(train_data, criterion, config, device, k=5):
             fold_history['train_acc'].append(train_acc)
             fold_history['val_loss'].append(val_loss)
             fold_history['val_acc'].append(val_acc)
+            
+            #for name, param in model.named_parameters():
+            #    if param.grad is not None:
+            #        print(f"{name} - grad norm: {param.grad.norm().item()}")
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -228,9 +233,9 @@ def main(config):
     
     net = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
 
-    util.compute_inference_time(net, nbr_const, nbr_feat, name, device, config_path)
-    util.check_invariance(net, nbr_const, nbr_feat, name, device, config_path)
-    util.check_permutation_invariance(net, nbr_const, nbr_feat, name, device, config_path)
+    #util.compute_inference_time(net, nbr_const, nbr_feat, name, device, config_path)
+    #util.check_invariance(net, nbr_const, nbr_feat, name, device, config_path)
+    #util.check_permutation_invariance(net, nbr_const, nbr_feat, name, device, config_path)
 
     criterion = nn.CrossEntropyLoss().to(device)
 

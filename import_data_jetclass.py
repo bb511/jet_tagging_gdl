@@ -55,11 +55,11 @@ def import_data_without_prepossesing(feature_set: str, valid: bool = False):
         features = torch.stack([pt, eta_rel, phi_rel], dim=-1)
     elif feature_set == "px_py_pz_eta_rel_phi_rel":
         features = torch.stack([px, py, pz, eta_rel, phi_rel], dim=-1)
-    elif feature_set == "px_py_pz_px_jet_py_jet_pz_jet":
+    elif feature_set == "px_py_pz_jet_center":
         particle_features = torch.stack([px, py, pz], dim=-1)
         jet_features = torch.stack([px_jet, py_jet, pz_jet], dim=-1).unsqueeze(1)
         features = torch.cat([particle_features, jet_features], dim=1)
-    elif feature_set == "px_py_pz_E_px_jet_py_jet_pz_jet_E_jet":
+    elif feature_set == "px_py_pz_E_jet_center":
         particle_features = torch.stack([px, py, pz, E], dim=-1)
         jet_features = torch.stack([px_jet, py_jet, pz_jet, E_jet], dim=-1).unsqueeze(1)
         features = torch.cat([particle_features, jet_features], dim=1)
@@ -75,9 +75,10 @@ def select_data(name: str, feature_set: str):
     sel_data = {
         "deepset": import_data_without_prepossesing,
         "vector_neuron": import_data_without_prepossesing,
+        "vn_etaphi_rel": import_data_without_prepossesing,
         "vector_neuron_lorentz": import_data_without_prepossesing,
-        "vn_dgcnn": import_data_without_prepossesing,
-        "dgcnn": import_data_without_prepossesing,
+        #"vn_dgcnn": import_data_without_prepossesing,
+        #"dgcnn": import_data_without_prepossesing,
         "transformer": import_data_without_prepossesing,
     }
     
