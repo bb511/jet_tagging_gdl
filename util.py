@@ -355,8 +355,8 @@ def roc_curves(outdir: str, y_pred: np.ndarray, y_test: np.ndarray, name = 'roc_
         aucs.append(auc)
         fpr_baseline = np.interp(tpr_baseline, tpr, fpr)
         fprs.append(fpr_baseline)
-        fpr_baseline.astype("float32").tofile(os.path.join(outdir, f"fpr_{label}_{name}.dat"))
-        tpr_baseline.astype("float32").tofile(os.path.join(outdir, f"tpr_{label}_{name}.dat"))
+        #fpr_baseline.astype("float32").tofile(os.path.join(outdir, f"fpr_{label}_{name}.dat"))
+        #tpr_baseline.astype("float32").tofile(os.path.join(outdir, f"tpr_{label}_{name}.dat"))
         tpr_idx = find_nearest(tpr, 0.8)
         plt.plot(
             tpr,
@@ -618,6 +618,27 @@ def inv_err_rand(model, criterion, x, y_pred, y_true, l, device):
     for i in range(rot_mats.shape[0]):
         a = model(input)
         b = model(input @ rot_mats[i])
+        err[i] = torch.norm(b-a)/torch.norm(a)
+    mean_err = err.mean()
+    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
+
+def inv_err_rand_eta_phi(model, criterion, x, y_pred, y_true, l, device):
+    input = x
+    assert x.shape[2] == 5, "The number of features should be 5"
+    rot_mats = torch.zeros((16, 3,3)).to(device)
+    for i in range(rot_mats.shape[0]):
+        R = np.random.rand(3, 3)
+        U, _, __ = np.linalg.svd(R)
+        #generate an element of SO(3)
+        R = U@U
+        rot_mats[i] = torch.tensor(R).to(torch.float32).to(device)
+    err = torch.zeros(rot_mats.shape[0])
+    for i in range(rot_mats.shape[0]):
+        a = model(input)
+        px_py_pz = input[:, :, :3]
+        rot_input = px_py_pz @ rot_mats[i]
+        concat_input = torch.cat((rot_input, input[:,:,3:]), dim = 2)
+        b = model(concat_input)
         err[i] = torch.norm(b-a)/torch.norm(a)
     mean_err = err.mean()
     return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))

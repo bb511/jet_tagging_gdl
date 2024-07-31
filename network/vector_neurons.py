@@ -175,7 +175,7 @@ class Vect_Neuron(nn.Module):
         self.nn = nn.ModuleList([VNLinearAndLeakyReLU(self.hidden, self.hidden,4) for _ in range(self.num_layers-1)])
         #self.mixing1 = VNGeometricMixing(self.hidden, self.hidden)
         self.mixing2 = VNGeometricMixing(self.hidden, self.hidden)
-        self.sliding_window = CircularSlidingWindowWeightedMean(24)
+        #self.sliding_window = CircularSlidingWindowWeightedMean(24)
                                                                                 
         
         self.before_scalar = VNLinearAndLeakyReLU(self.hidden, self.hidden, 4)
@@ -188,8 +188,10 @@ class Vect_Neuron(nn.Module):
             self.out = nn.Linear(self.hidden**2, self.out_channel)
                 
     def forward(self, x):
-        x = self.sliding_window(x)
+        mask = (x.sum(dim=2) != 0).float().unsqueeze(2)
+        #x = self.sliding_window(x)
         #print(f'Number of zero value in the input {x.is_null().sum()}')
+        x = x * mask
         x = self.inp(x)
         #x = self.mixing1(x)
         for module in self.nn:

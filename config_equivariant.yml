@@ -10,7 +10,7 @@ model_hyperparameter:
     output_dim: 5
   vector_neuron:
     out_channel: 5
-    hidden : 43
+    hidden : 20
     num_layers: 4
     add_mlp : False
   vn_etaphi_rel:
@@ -44,7 +44,7 @@ model_hyperparameter:
     norm: None
 
 training_hyperparams : 
-  epochs :  300
+  epochs :  1
   lr : 0.0001
   batch_size: 256
   loss_inv : False

@@ -36,3 +36,6 @@ trained_models_vector_neuron_px_py_pz_jet_center_8/
 trained_models_vn_etaphi_rel/
 kfold_model/
 train_models/
+trained_models_transformer_px_py_pz_32/
+trained_models_transformer_pt_eta_rel_phi_rel_32/
+trained_models_transformer_pt_eta_rel_phi_rel_8/

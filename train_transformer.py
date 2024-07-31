@@ -49,15 +49,15 @@ def main(config):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Training done on {device}")
     
-    outdir = util.make_output_directory(f"train_models/trained_models_{name}", config["outdir"])
+    outdir = util.make_output_directory(f"train_models/trained_models_{name}_{data_name}", config["outdir"])
     # Save the config file to the main dir.
     util.save_config_file(config, outdir)
-    config_path = os.path.join(f"trained_models_{name}_{data_name}/trained_models", f"config_{name}_{data_name}.yml")
+    config_path = os.path.join(outdir, f"config_{name}_{data_name}.yml")
     print('Config file saved')
 
     # Create subdir for each seed.
     config["outdir"] = os.path.join(config["outdir"], f"seed{args.seed}")
-    outdir = util.make_output_directory(f"trained_models_{name}_{data_name}", config["outdir"])
+    outdir = util.make_output_directory(f"train_models/trained_models_{name}_{data_name}", config["outdir"])
     print('Subfile for each seeds are created')
 
     # Import the training and the validation data, sampled and normalised.
@@ -65,31 +65,24 @@ def main(config):
     nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
     util.print_data_deets(valid_data, "Validation")
     print("The training data and the validation data have been successfully imported")
-
+    train_load = torch.utils.data.DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory=True, num_workers=1)
+    valid_load = torch.utils.data.DataLoader(valid_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory=True, num_workers=1)
+    x, y = next(iter(train_load))
     # Import and train the model.
     model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
-    model
     print('Model summary: ', model)
-    util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
+    util.compute_inference_time(model, x, name, device, config_path)
     util.weights_plot(model, name + data_name + '_init')
-    util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
+    util.check_permutation_invariance(model, x, name, device, config_path)
 
-    hist = train_model(model, train_data, valid_data, device, name, data_name, **config["training_hyperparams"], warmup_steps=1000)
+    train_model(model, train_load, valid_load, device, name, data_name, **config["training_hyperparams"], warmup_steps=1000)
     print('The model has been successfully trained')
     
     # Saved model and plot the loss and accuracy evolution throught the epochs.
     model_file = os.path.join(outdir, f"model_{name}_{data_name}.pt")
-    util.init_transformer_weights(model)
     torch.save(model.state_dict(), model_file)
-    
-    if config["validation"]:
-        print(f'Validation of the model {name} trained using the data {data_name}')  
-        util.compute_inference_time(model, nbr_const, nbr_feat, name, device, config_path)
-        util.check_permutation_invariance(model, nbr_const, nbr_feat, name, device, config_path)
-        name = name + '_' + data_name
-        util.weights_plot(model, name + '_validation')
-        evaluate_model(model, valid_data, 'cuda:0', 256, config_path)
-        plot_evaluation_metric(name, model, valid_data, batch_size=256, device = 'cuda:0')
+    print(f"Model saved to {model_file}")
+
 
     
 def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, num_cycles=0.5, last_epoch=-1):
@@ -101,20 +94,27 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
-def train_model(net, training_set, validation_set, device, name, data_name, epochs, lr, batch_size, loss_inv, warmup_steps):
+def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr, batch_size, loss_inv, warmup_steps):
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
-    
-    train_data = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=1)
-    valid_data = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=1)
+
     
     total_steps = len(train_data) * epochs
     
     # Create scheduler with warmup
     scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+    scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+                                                            mode="max",
+                                                            patience= 80,
+                                                            factor=0.1,
+                                                            threshold=1e-4,
+                                                            verbose=True,
+                                                            )
     
     print(f'Beginning of training of model {name}')
     all_train_loss, all_train_accu, all_valid_loss, all_valid_accu, all_inv_err = [], [], [], [], []
+    epochs_no_improve = 0
+    epochs_es_limit = 50
     best_accu = 0
     
     total_params = sum(p.numel() for p in net.parameters())
@@ -162,6 +162,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             batch_loss_sum += loss.detach()
             totnum_batches += 1
             batch_accu_sum += torch.sum(y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]) / len(y_true)
+            
         
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
@@ -169,6 +170,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
         all_inv_err.append(inv_err)
+        
         
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
@@ -197,8 +199,14 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
             all_valid_loss.append(valid_loss.item())
             all_valid_accu.append(valid_accu.item())
         
-        if valid_accu > best_accu:
-            best_accu = valid_accu
+        if round(valid_accu.cpu().item(), 3) <= round(best_accu, 3):
+            epochs_no_improve += 1
+        else:
+            best_accu = valid_accu.cpu().item()
+            epochs_no_improve = 0
+        scheduler.step(best_accu)
+        if epochs_no_improve >= epochs_es_limit:
+            break
     
     plt.plot(all_train_loss, color="gray", label="Training Loss")
     plt.plot(all_valid_loss, color="navy", label="Validation Loss")
@@ -217,44 +225,7 @@ def train_model(net, training_set, validation_set, device, name, data_name, epoc
     plt.ylabel("Invariance Relative Error")
     plt.savefig(f'plot/Invariance_{name}_{data_name}')
     print('Finished Training')
-    
-def evaluate_model(model, validation_set, device, batch_size, config_path):
-    print('Evaluation of the model')
-    criterion = nn.CrossEntropyLoss().to(device)
-    model.eval()  
-    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=False, pin_memory = True)  
-    accu = 0
-    loss = 0
-    num_batch = 0
-    for x,y in validation_loader:
-        x = x.to(device)
-        y_true = y.to(device)
-        
-        y_pred = model(x)
-        
-        accu += torch.sum(y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]) / len(y_true)
-        loss += criterion(y_pred, torch.argmax(y_true, dim=1)) 
-        num_batch += 1
 
-    print('Test Accuracy of the model : {} %'.format(accu/num_batch))
-    print('The Test loss of the model : {} '.format(loss/num_batch))
-
-def plot_evaluation_metric(name, model, validation_set, batch_size, device):
-    model.eval()
-    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=False)
-    y_true_all = []
-    y_pred_all = []
-    for x,y in validation_loader:
-        x = x.to(device)
-        y_true = y.to(device)
-        y_pred = nn.Softmax(dim = 1)(model(x))
-        y_true = y_true.cpu().detach()
-        y_pred = y_pred.cpu().detach()
-        y_true_all.append(y_true)
-        y_pred_all.append(y_pred)
-    roc_curve_name = 'roc_curves_' + name
-    util.roc_curves('plot', y_pred, y_true, roc_curve_name)
-    util.dnn_output('plot', y_pred, name)
 
 if __name__ == "__main__":
     with open(args.config_file, "r") as stream:

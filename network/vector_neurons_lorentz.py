@@ -264,5 +264,129 @@ class Vect_Neuron_LorentzPositiv(nn.Module):
         out = self.out(x)
         return out
 
+import torch
+import torch.nn as nn
+
+class HatLayer(torch.nn.Module):
+    def __init__(self, algebra_type='so31'):
+        super(HatLayer, self).__init__()
+        if algebra_type == 'so31':
+            # Generators for SO(3,1)
+            E01 = torch.tensor([[0, 1, 0, 0],
+                                [1, 0, 0, 0],
+                                [0, 0, 0, 0],
+                                [0, 0, 0, 0]])
+            E02 = torch.tensor([[0, 0, 1, 0],
+                                [0, 0, 0, 0],
+                                [1, 0, 0, 0],
+                                [0, 0, 0, 0]])
+            E03 = torch.tensor([[0, 0, 0, 1],
+                                [0, 0, 0, 0],
+                                [0, 0, 0, 0],
+                                [1, 0, 0, 0]])
+            E12 = torch.tensor([[0, 0, 0, 0],
+                                [0, 0, -1, 0],
+                                [0, 1, 0, 0],
+                                [0, 0, 0, 0]])
+            E13 = torch.tensor([[0, 0, 0, 0],
+                                [0, 0, 0, -1],
+                                [0, 0, 0, 0],
+                                [0, 1, 0, 0]])
+            E23 = torch.tensor([[0, 0, 0, 0],
+                                [0, 0, 0, 0],
+                                [0, 0, 0, -1],
+                                [0, 0, 1, 0]])
+
+            E_bases = torch.stack([E01, E02, E03, E12, E13, E23], dim=0)  # [6,4,4]
+            self.register_buffer('E_bases', E_bases)
+        else:
+            raise ValueError('Invalid algebra type for the hat operation')
+
+    def forward(self, v):
+        """
+        v: a tensor of arbitrary shape with the last dimension of size 6
+        """
+        return (v[..., None, None]*self.E_bases).sum(dim=-3)
+
+def killingform(x, y, algebra_type='so31'):
+    if algebra_type == 'so31':
+        # Killing form for SO(3,1) is proportional to tr(xy)
+        return torch.einsum('...ij,...ji->...', x, y)
+    else:
+        raise ValueError('Invalid algebra type for the Killing form')
+
+def vee(x, algebra_type='so31'):
+    if algebra_type == 'so31':
+        # Extract the 6 independent components from the 4x4 matrix
+        v = torch.zeros(*x.shape[:-2], 6, device=x.device)
+        v[..., 0] = x[..., 0, 1]
+        v[..., 1] = x[..., 0, 2]
+        v[..., 2] = x[..., 0, 3]
+        v[..., 3] = x[..., 1, 2]
+        v[..., 4] = x[..., 1, 3]
+        v[..., 5] = x[..., 2, 3]
+        return v
+    else:
+        raise ValueError('Invalid algebra type for the vee operation')
+
+class LNKillingRelu(nn.Module):
+    def __init__(self, in_channels, algebra_type='so31', share_nonlinearity=False, leaky_relu=False, negative_slope=0.2):
+        super(LNKillingRelu, self).__init__()
+        self.share_nonlinearity = share_nonlinearity
+        if share_nonlinearity:
+            self.learn_dir = nn.Linear(in_channels, 1, bias=False)
+        else:
+            self.learn_dir = nn.Linear(in_channels, in_channels, bias=False)
+        self.HatLayer = HatLayer(algebra_type)
+        self.algebra_type = algebra_type
+        self.leaky_relu = leaky_relu
+        self.negative_slope = negative_slope
+
+    def forward(self, x):
+        '''
+        x: point features of shape [B, F, 6, N]
+        '''
+        x_out = torch.zeros_like(x)
+        d = self.learn_dir(x.transpose(1, -1)).transpose(1, -1)
+        x = x.transpose(2, -1)
+        d = d.transpose(2, -1)
+        x_hat = self.HatLayer(x)
+        d_hat = self.HatLayer(d)
+        kf_xd = killingform(x_hat, d_hat, self.algebra_type)
+        
+        if self.leaky_relu:
+            mask = (kf_xd <= 0).float()
+            x_out = self.negative_slope * x + (1-self.negative_slope) * (mask*x + (1-mask)*(x-(-kf_xd)*d))
+        else:
+            x_out = torch.where(kf_xd <= 0, x, x - (-kf_xd) * d)
+        x_out = x_out.transpose(2, -1)
+        return x_out
+
+class LNLieBracket(nn.Module):
+    def __init__(self, in_channels, algebra_type='so31', share_nonlinearity=False):
+        super(LNLieBracket, self).__init__()
+        self.share_nonlinearity = share_nonlinearity
+        self.algebra_type = algebra_type
+        if share_nonlinearity:
+            self.learn_dir = nn.Linear(in_channels, 1, bias=False)
+            self.learn_dir2 = nn.Linear(in_channels, 1, bias=False)
+        else:
+            self.learn_dir = nn.Linear(in_channels, in_channels, bias=False)
+            self.learn_dir2 = nn.Linear(in_channels, in_channels, bias=False)
+        self.HatLayer = HatLayer(algebra_type)
+
+    def forward(self, x):
+        '''
+        x: point features of shape [B, F, 6, N]
+        '''
+        d = self.learn_dir(x.transpose(1, -1)).transpose(1, -1)
+        d2 = self.learn_dir2(x.transpose(1, -1)).transpose(1, -1)
+        d = d.transpose(2, -1)
+        d2 = d2.transpose(2,-1)
+        d_hat = self.HatLayer(d)
+        d2_hat = self.HatLayer(d2)
+        lie_bracket = torch.matmul(d2_hat, d_hat) - torch.matmul(d_hat,d2_hat)
+        x_out = x + vee(lie_bracket,self.algebra_type).transpose(2, -1)
+        return x_out
 
 EPS = 1e-6

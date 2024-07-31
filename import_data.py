@@ -47,6 +47,9 @@ def select_data(name : str, data_name : str):
         "px_py_pz_E_8": (PATH+"px_py_pz_E_8/processed/",8),
         "px_py_pz_E_16": (PATH+"px_py_pz_E_16/processed/",16),
         "px_py_pz_E_32": (PATH+"px_py_pz_E_32/processed/",32),
+        "data_aug_8":(PATH+"augmented_data/", 8),
+        "data_aug_16":(PATH+"augmented_data/", 16),
+        "data_aug_32":(PATH+"augmented_data/", 32),
     }
     
     data_path = sel_path.get(data_name, None)
@@ -71,17 +74,22 @@ def select_data(name : str, data_name : str):
 def import_data_without_prepossesing(tup:tuple, valid = False):
     """Function to import the data as such in the data set"""
     path = tup[0]
-    if valid:    
-        x = path + f"x_val_robust_{tup[1]}const_ptetaphi.npy"
-        y = path + f"y_val_robust_{tup[1]}const_ptetaphi.npy"
-    else:
-        x = path + f"x_train_robust_{tup[1]}const_ptetaphi.npy"
-        y = path + f"y_train_robust_{tup[1]}const_ptetaphi.npy"
-    
-    
-    x =  torch.Tensor(np.load(x))
-    y =  torch.Tensor(np.load(y))
+    try: 
+        if valid:    
+            x = path + f"x_val_robust_{tup[1]}const_ptetaphi.npy"
+            y = path + f"y_val_robust_{tup[1]}const_ptetaphi.npy"
+        else:
+            x = path + f"x_train_robust_{tup[1]}const_ptetaphi.npy"
+            y = path + f"y_train_robust_{tup[1]}const_ptetaphi.npy"
         
+        x =  torch.Tensor(np.load(x))
+        y =  torch.Tensor(np.load(y))
+    except:
+        x = path + f"all_augmented_features_{tup[1]}.npy"
+        y = path + f"all_augmented_labels_{tup[1]}.npy"
+        x = torch.Tensor(np.load(x))
+        y = torch.Tensor(np.load(y))
+            
     return torch.utils.data.TensorDataset(x, y)
 
 
