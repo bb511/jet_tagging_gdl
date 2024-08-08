@@ -35,8 +35,9 @@ import util
 def main():
     name = args.name
     data_name = args.data_name
-    model_file = f"train_models/trained_models_{name}_{data_name}/trained_models/seed42/model_{name}_{data_name}.pt"
-    config_path = f"train_models/trained_models_{name}_{data_name}/trained_models/config.yml"
+    path = "/mnt/c/Users/bonvi/Documents/"
+    model_file = path + f"train_models/trained_models_{name}_{data_name}/trained_models/seed42/model_{name}_{data_name}.pt"
+    config_path = path + f"train_models/trained_models_{name}_{data_name}/trained_models/config.yml"
 
     
     config = util.load_config_file(config_path)
@@ -47,8 +48,8 @@ def main():
     
 
     # Import the testing data
-    training_data, test_data = select_data(name, data_name)
-    nbr_const, nbr_feat = util.print_data_deets(training_data, test_data)
+    _, test_data = select_data(name, data_name)
+    nbr_const, nbr_feat = util.print_data_deets(test_data, test_data)
     print("")
     print(util.tcols.OKGREEN, "The Test data has been successfully imported", util.tcols.ENDC)
     print("")

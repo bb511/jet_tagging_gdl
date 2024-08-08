@@ -11,7 +11,12 @@ model_hyperparameter:
   vector_neuron:
     out_channel: 5
     hidden : 20
-    num_layers: 4
+    num_layers: 5
+    add_mlp : False
+  vector_neuron_reg:
+    out_channel: 8
+    hidden : 40
+    num_layers: 5
     add_mlp : False
   vn_etaphi_rel:
     out_channel: 5
@@ -44,9 +49,9 @@ model_hyperparameter:
     norm: None
 
 training_hyperparams : 
-  epochs :  1
-  lr : 0.0001
-  batch_size: 256
+  epochs :  1000
+  lr : 0.001
+  batch_size: 1024
   loss_inv : False
 
 validation : True

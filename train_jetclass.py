@@ -3,7 +3,7 @@ import argparse
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--name", type=str, help="Name of the model you want to train")
-parser.add_argument("--config_file", type=str, help ="What are the configuration of your model", default= "config_equivariant.yml")
+parser.add_argument("--config_file", type=str, help ="What are the configuration of your model", default= "config_jetclass.yml")
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
 parser.add_argument("--seed", type=int, default=42)
 #parser.add_argument("--device", type=str, default='cuda:0')
@@ -26,7 +26,6 @@ import torch.nn.functional as F
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 
-import escnn.nn as enn
 import torch_geometric
 
 import yaml
@@ -58,24 +57,21 @@ def main(config):
     print('Subfile for each seeds are created')
 
     # Import the training and the validation data, sampled and normalised.
-    training_data, validation_data = select_data(name, data_name)
-
-
-    print(f"Training set size: {len(training_data)}")
-    print(f"Validation set size: {len(validation_data)}")
-
-
-    print(f"Training data shape: {training_data[:][0].shape}")
-    nbr_const = training_data[:][0].shape[1]
-    nbr_feat = training_data[:][0].shape[2]
-    print(f"Training labels shape: {training_data[:][1].shape}")
-    print("The training data and the validation data have been successfully imported")
+    training_data, train_sampler, validation_data = select_data(name, data_name)
     
-    train_loader = torch.utils.data.DataLoader(training_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
-    val_loader = torch.utils.data.DataLoader(validation_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
+    train_loader = torch.utils.data.DataLoader(training_data, batch_size=config["training_hyperparams"]["batch_size"], pin_memory = True, num_workers=12, sampler=train_sampler)#, collate_fn=custom_collate
+    val_loader = torch.utils.data.DataLoader(validation_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=False, pin_memory = True, num_workers=12)
+    
     x, _ = next(iter(train_loader))
+    print(f"Sample batch shape: {x.shape}")
+    nbr_const, nbr_feat = x.shape[1], x.shape[2]
     # Import and train the model.
-    model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
+    model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"])
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs!")
+        model = nn.DataParallel(model)
+
+    model = model.to(device)
     print('Model summary: ', model)
     util.compute_inference_time(model, x, name, device, config_path)
     util.weights_plot(model, name + data_name + '_init')
@@ -91,7 +87,11 @@ def main(config):
     # Saved model and plot the loss and accuracy evolution throught the epochs.
     model_file = os.path.join(outdir, f"model_{name}_{data_name}.pt")
     torch.save(model.state_dict(), model_file)
-
+    
+def custom_collate(batch):
+    features = torch.stack([item[0] for item in batch])
+    labels = torch.stack([item[1] for item in batch])
+    return features, labels
 
 def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr, batch_size, loss_inv):
     "Standard training function for pytorch model"

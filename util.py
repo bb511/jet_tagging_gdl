@@ -2,6 +2,7 @@
 
 import os
 import time
+import math
 
 import yaml
 import numpy as np
@@ -430,7 +431,7 @@ def dnn_output_uncertainty(outdir: str, all_fold_predictions: np.ndarray, name =
 def compute_inference_time(model, x, name, device, config_path):
     """Function that compute the inference time of a model"""
     batch_size = x.size(0)
-    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer"]:
+    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer", "vector_neuron_reg"]:
         print('')
     else:
         raise ValueError(
@@ -458,7 +459,7 @@ def check_invariance(model, x, name, device, config_path, val = False):
             return 1000000.0
 
     batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz", "vn_etaphi_rel", "transformer"]:
+    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz", "vn_etaphi_rel", "transformer", "vector_neuron_reg"]:
         input = x.to(device)
         rot_mats = []
         for _ in range(16):
@@ -500,7 +501,7 @@ def check_invariance_Lorentz(model, x, name, device, val = False):
             return 1000000.0
 
     batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer"]:
+    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer", "vector_neuron_reg"]:
         input = x.to(device)
         rot_mats = []
         for _ in range(16):
@@ -734,16 +735,61 @@ def check_inv(model, x, device):
         R = U@U
         rot_mats.append(R)
     err = np.zeros(len(rot_mats))
-    for i in range(len(rot_mats)):
-        input = from_pt_eta_phi_to_px_py_pz(input)
-        a = model(input)
-        b = model(input @ torch.tensor(rot_mats[i]).to(torch.float32).to(device))
-        err[i] = torch.norm(b-a)/torch.norm(a)
-            #print(torch.norm(b-a), torch.norm(a))
-            #c = model(input) @ rot_mat
-    mean_err = err.mean()
-    #print(f'The mean invariance error is {mean_err*100}%')
-    return mean_err
+    if x.shape[2] == 5:
+        for i in range(len(rot_mats)):
+            a = model(input)
+            px_py_pz = input[:, :, :3]
+            rot_input = px_py_pz @ torch.tensor(rot_mats[i]).to(torch.float32).to(device)
+            input_cat = torch.cat((rot_input, input[:,:,3:]), dim = 2)
+            b = model(input_cat)
+            err[i] = torch.norm(b-a)/torch.norm(a)
+                #print(torch.norm(b-a), torch.norm(a))
+                #c = model(input) @ rot_mat
+        mean_err = err.mean()
+        #print(f'The mean invariance error is {mean_err*100}%')
+        return mean_err
+    elif x.shape[2] == 3:
+        for i in range(len(rot_mats)):
+            a = model(input)
+            b = model(input @ torch.tensor(rot_mats[i]).to(torch.float32).to(device))
+            err[i] = torch.norm(b-a)/torch.norm(a)
+        mean_err = err.mean()
+        return mean_err
+    elif x.shape[2] == 4:
+        rot_mats = []
+        for _ in range(16):
+            R = np.random.rand(3, 3)
+            U, _, V = np.linalg.svd(R)
+            #generate two elements of SO(3)
+            P = U@U
+            Q = V@V
+            #R = U
+            M = np.zeros((4,4))
+            M[:-1, :-1] = P
+            M[-1,-1]= 1
+            M = torch.tensor(M).to(torch.float32).to(device)
+            N = np.zeros((4,4))
+            N[:-1, :-1] = np.transpose(Q)
+            N[-1,-1]= 1
+            N = torch.tensor(N).to(torch.float32).to(device)
+            rot_mats.append((M,N))
+        rapidity = torch.rand(len(rot_mats))
+        err = torch.zeros(len(rot_mats))
+        for i in range(len(rot_mats)):
+            # any matrix in SO(3,1) can be written as a product of the following matrices
+            matrix = rot_mats[i][0] @ torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0],[0,0,torch.cosh(rapidity[i]), torch.sinh(rapidity[i])], [0,0,torch.sinh(rapidity[i]), torch.cosh(rapidity[i])]]).to(torch.float32).to(device) @ rot_mats[i][1]
+            matrix = torch.transpose(matrix,1,0)
+            a = model(input)
+            b = model(input @ matrix)
+            
+            err[i] = torch.norm(b-a)/torch.norm(a)
+        mean_err = err.mean()
+        return mean_err
+    else:
+        raise ValueError(
+            f"The number of features should be 3, 4 or 5"
+            )
+        
 
 def augerino_loss(model, criterion, y_pred, y_true):
     theta = model.theta_tilde
@@ -896,3 +942,5 @@ def init_transformer_weights(model):
     if hasattr(model, 'pos_encoder') and hasattr(model.pos_encoder, 'pe'):
         with torch.no_grad():
             model.pos_encoder.pe.div_(math.sqrt(model.d_model))
+        
+

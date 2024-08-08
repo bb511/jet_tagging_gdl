@@ -1,0 +1,7 @@
+nohup python3 training_kfold.py --name deepset --data_name pt_eta_rel_phi_rel_16 --kfold 0 &
+nohup python3 training_kfold.py --name deepset --data_name pt_eta_rel_phi_rel_16 --kfold 1 &
+nohup python3 training_kfold.py --name deepset --data_name pt_eta_rel_phi_rel_16 --kfold 2 &
+nohup python3 training_kfold.py --name deepset --data_name pt_eta_rel_phi_rel_16 --kfold 3 &
+nohup python3 training_kfold.py --name deepset --data_name pt_eta_rel_phi_rel_16 --kfold 4
+
+python3 training_kfold.py --name $name --config_file $config_file --data_name $data_name 

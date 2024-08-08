@@ -2,7 +2,7 @@ import numpy as np
 
 import torch 
 
-from torch_geometric.data import Data # to create the graph data
+#from torch_geometric.data import Data # to create the graph data
 
 import util
 
@@ -17,6 +17,7 @@ def select_data(name : str, data_name : str):
         #"graph_net": import_data_graph,
         "transformer": import_data_without_prepossesing,
         "vn_etaphi_rel": import_data_without_prepossesing,
+        "vector_neuron_reg": import_data_without_prepossesing,
     }
     PATH = "/mnt/c/users/bonvi/Documents/deepset/data/"
     sel_path = {
@@ -47,9 +48,9 @@ def select_data(name : str, data_name : str):
         "px_py_pz_E_8": (PATH+"px_py_pz_E_8/processed/",8),
         "px_py_pz_E_16": (PATH+"px_py_pz_E_16/processed/",16),
         "px_py_pz_E_32": (PATH+"px_py_pz_E_32/processed/",32),
-        "data_aug_8":(PATH+"augmented_data/", 8),
-        "data_aug_16":(PATH+"augmented_data/", 16),
-        "data_aug_32":(PATH+"augmented_data/", 32),
+        "data_aug_8":(PATH+"jetid_px_py_pz_etarel_phirel/processed/", 8), #/augmented_data/ for the training data
+        "data_aug_16":(PATH+"jetid_px_py_pz_eta_rel_phi_rel_16/processed/", 16),
+        "data_aug_32":(PATH+"jetid_px_py_pz_eta_rel_phi_rel_32/processed/", 32),
     }
     
     data_path = sel_path.get(data_name, None)

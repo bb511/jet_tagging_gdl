@@ -53,42 +53,48 @@ def main(config):
 
     # Create subdir for each seed.
     config["outdir"] = os.path.join(config["outdir"], f"seed{args.seed}")
-    outdir = util.make_output_directory(f"trained_models_{name}_{data_name}", config["outdir"])
+    outdir = util.make_output_directory(f"value_accuracy_vs_nconst", config["outdir"])
     print('Subfile for each seeds are created')
 
     # Import the training and the validation data, sampled and normalised.
-    if name != "transformer":
-        train_data, valid_data = select_data(name, data_name)
-    else:
-        train_data, valid_data = select_data(name, data_name)
-    nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
-    util.print_data_deets(valid_data, "Validation")
+    training_data, test_data = select_data(name, data_name)
+    util.print_data_deets(training_data, test_data)
     print("The training data and the validation data have been successfully imported")
+    nbr_const = training_data[:][0].shape[1]
+    nbr_feat = training_data[:][0].shape[2]
+    train_load = torch.utils.data.DataLoader(training_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
+    valid_load = torch.utils.data.DataLoader(test_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
 
     # Import and train the model.
     accuracies = []
     nbr_pts = []
-    for i in range(1,33):
+    for i in range(28,33, 4):#
+        if i == 0:
+            i = 1
         print(f'Training the model with {i} constituents')
         model = get_model(name, i, nbr_feat, config["model_hyperparameter"]).to(device)
+        model.apply(util.init_weights)
 
-        hist = train_model(model, train_data, device, name, i,  **config["training_hyperparams"])
-        accu = evaluate_model(model, valid_data, 'cuda:0', 256, config_path, i)
+        hist = train_model(model, train_load, device, name, i,  **config["training_hyperparams"])
+        accu = evaluate_model(model, valid_load, 'cuda:0', 64, config_path, i)
         accuracies.append(accu.cpu().numpy())
         nbr_pts.append(i)
         del model
+    print(accuracies)
+    np.save(outdir + f'/accuracy_vs_constituents_{name}_{data_name}_bis.npy', accuracies)
+    np.save(outdir + f'nbr_pts_{name}_{data_name}.npy', nbr_pts)
     print('The model has been successfully trained')
     plt.figure(figsize=(10, 6))
     plt.plot(nbr_pts, accuracies, marker='o')
     plt.xlabel('Number of Constituents')
     plt.ylabel('Accuracy')
     plt.title('Model Accuracy vs Number of Constituents')
-    plt.savefig('./plot/accuracy_vs_constituents.png')
+    plt.savefig(f'./plot/accuracy_vs_constituents_{name}_{data_name}.png')
     plt.show()
     
 
 
-def train_model(net, training_set, device, name, i,  epochs, lr, batch_size, loss_inv):
+def train_model(net, train_data, device, name, i,  epochs, lr, batch_size, loss_inv):
     "Standard training function for pytorch model"
     l = 0.001
     criterion = nn.CrossEntropyLoss().to(device)
@@ -104,7 +110,6 @@ def train_model(net, training_set, device, name, i,  epochs, lr, batch_size, los
                                                             verbose=True,
                                                             )
     print('Optimizer Summary: ', optimizer)
-    train_data = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True, pin_memory = True, num_workers=1)
     print(f'Begining of training of model {name}')
     all_train_loss = []
     all_train_accu = []
@@ -134,6 +139,9 @@ def train_model(net, training_set, device, name, i,  epochs, lr, batch_size, los
                 loss = util.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, l, device)
             elif loss_inv == 'phi':
                 loss = util.inv_err_phi(net, criterion, x, y_pred, y_true, l, device)
+            elif loss_inv == "so3_eta_phi":
+                l = 0.001
+                loss = util.inv_err_rand_eta_phi(net, criterion, x, y_pred, y_true, l, device)
             else:
                 loss = criterion(y_pred, torch.argmax(y_true, dim = 1))
             optimizer.zero_grad()
@@ -156,11 +164,10 @@ def train_model(net, training_set, device, name, i,  epochs, lr, batch_size, los
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
         
     
-def evaluate_model(model, validation_set, device, batch_size, config_path, i):
+def evaluate_model(model, validation_loader, device, batch_size, config_path, i):
     print('Evaluation of the model')
     criterion = nn.CrossEntropyLoss().to(device)
     model.eval()  
-    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=batch_size, shuffle=False, pin_memory = True)  
     accu = 0
     loss = 0
     num_batch = 0
@@ -168,6 +175,7 @@ def evaluate_model(model, validation_set, device, batch_size, config_path, i):
         x = x.to(device)
         y_true = y.to(device)
         
+            
         x = x[:, :i, :]
         
         y_pred = model(x)

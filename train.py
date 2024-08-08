@@ -182,7 +182,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
         # print statistics
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
-        if "px_py_pz" in data_name and x.shape[2] == 3:
+        if "px_py_pz" in data_name:
             inv_err = util.check_inv(net, x, device)
         else:
             inv_err = 100

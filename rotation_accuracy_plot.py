@@ -1,14 +1,16 @@
+import argparse
+import os
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+import yaml
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-import numpy as np
-
-import matplotlib.pyplot as plt
-import yaml
-
 from import_data import select_data
 from import_model import get_model
+import util
 
 def create_rotation_matrix(angle, axis='x'):
     angle_rad = np.radians(angle)
@@ -24,7 +26,7 @@ def create_rotation_matrix(angle, axis='x'):
         return torch.tensor([[np.cos(angle_rad), -np.sin(angle_rad), 0],
                             [np.sin(angle_rad), np.cos(angle_rad), 0],
                             [0, 0, 1]])
-        
+
 def evaluate_model(model, data_loader, device, rotation_matrix=None):
     print('Evaluating the model')
     criterion = nn.CrossEntropyLoss().to(device)
@@ -40,12 +42,24 @@ def evaluate_model(model, data_loader, device, rotation_matrix=None):
             x = x.to(device)
             y_true = y_true.to(device)
             
+            if x.shape[-1] == 5:
+                px_py_pz = x[:, :, :3] 
+                eta_phi_rel = x[:, :, 3:]
+            else:
+                px_py_pz = x
+                eta_phi_rel = None
+            
             if rotation_matrix is not None:
-                x = torch.bmm(x, rotation_matrix.repeat(x.size(0), 1, 1).to(device))
+                px_py_pz = torch.bmm(px_py_pz, rotation_matrix.repeat(x.size(0), 1, 1).to(device))
+                
+            if eta_phi_rel is not None:
+                x = torch.cat((px_py_pz, eta_phi_rel), dim=-1)
+            else:
+                x = px_py_pz
             
             y_pred = model(x)
             
-            loss = criterion(y_pred, y_true)
+            loss = criterion(y_pred, torch.argmax(y_true, dim=1))
             
             total_correct += torch.sum(y_pred.max(dim=1)[1] == y_true.max(dim=1)[1]).item()
             total_samples += y_true.size(0)
@@ -60,80 +74,80 @@ def evaluate_model(model, data_loader, device, rotation_matrix=None):
 
     return accuracy, avg_loss
 
-def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def plot_rotation_accuracy(angles, results_x, results_y, results_z, model_name, data_name):
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle(f'Model Accuracy vs. Rotation Angle - {model_name} ({data_name})', fontsize=16)
 
-    model_name = 'deepset'
-    data_name = 'pt_eta_rel_phi_rel_8'
+    axes = [ax1, ax2, ax3]
+    results = [results_x, results_y, results_z]
+    titles = ['X-axis Rotation', 'Y-axis Rotation', 'Z-axis Rotation']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, Orange, Green
 
-    data, _ = select_data(model_name, data_name)
+    for ax, res, title, color in zip(axes, results, titles, colors):
+        ax.plot(angles, res, marker='o', color=color, linestyle='-', linewidth=2, markersize=6)
+        ax.set_xlabel('Rotation Angle (degrees)')
+        ax.set_ylabel('Accuracy')
+        ax.set_title(title)
+        ax.grid(True, linestyle='--', alpha=0.7)
+        ax.set_ylim(0, 0.8)
 
-    x, y = next(iter(data))
-    nbr_const = x.size(0)
-    nbr_feat = x.size(1)
-    print(f'Number of constituents: {nbr_const}')
-    print(f'Number of features: {nbr_feat}')
+    plt.tight_layout()
+    plt.savefig(f'./plot/rotation_accuracy_{model_name}_{data_name}.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
-    config_file = "config_equivariant.yml"
+    # Save the data to NPY file
+    np.save(f'./plot/rotation_accuracy_data_{model_name}_{data_name}.npy', 
+            {'angles': angles, 'accuracy_x': results_x, 'accuracy_y': results_y, 'accuracy_z': results_z})
 
-    with open(config_file, "r") as stream:
-        config = yaml.load(stream, Loader=yaml.Loader)
+def main(args):
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
-    model = get_model(model_name, nbr_const, nbr_feat, config["model_hyperparameter"])
-    
-    path = '/mnt/c/Users/bonvi/Documents/master_thesis/master_thesis_code/trained_models_deepset_pt_eta_rel_phi_rel_8/trained_models_pt_eta_phi_jet_center_8const/seed42/model_deepset_pt_eta_rel_phi_rel_8.pt'
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Testing done on {device}")
 
-    model.load_state_dict(torch.load(path))
-    model = model.to(device)
-    
-    data = DataLoader(data, batch_size=256, shuffle=False)
-            
+    path = "/mnt/c/Users/bonvi/Documents/"
+    model_file = path + f"train_models/trained_models_{args.name}_{args.data_name}/trained_models/seed{args.seed}/model_{args.name}_{args.data_name}.pt"
+    config_path = path + f"train_models/trained_models_{args.name}_{args.data_name}/trained_models/config.yml"
+
+    config = util.load_config_file(config_path)
+    print(f"Testing of the model {args.name} with data {args.data_name} using the config file {config_path}")
+
+    # Import the testing data
+    _, test_data = select_data(args.name, args.data_name)
+    nbr_const, nbr_feat = util.print_data_deets(test_data, test_data)
+    print(util.tcols.OKGREEN, "The Test data has been successfully imported", util.tcols.ENDC)
+
+    # Load the model from file
+    model = get_model(args.name, nbr_const, nbr_feat, config["model_hyperparameter"])
+    model.load_state_dict(torch.load(model_file))
+    model.to(device)
+    print(util.tcols.OKGREEN, f"Model {args.name} loaded from {model_file} and moved to {device}", util.tcols.ENDC)
+
+    # Evaluate the model
+    test_loader = DataLoader(test_data, batch_size=256, shuffle=False, pin_memory=True, num_workers=1)
+    evaluate_model(model, test_loader, device)
+
+    # Perform rotation tests
     angles = np.arange(0, 361, 30)
-    rotation_matrices_x = {angle: create_rotation_matrix(angle, axis='x') for angle in angles}
-    rotation_matrices_y = {angle: create_rotation_matrix(angle, axis='y') for angle in angles}
-    rotation_matrices_z = {angle: create_rotation_matrix(angle, axis='z') for angle in angles}
-    
-
-    results_x = []
-    results_y = []
-    results_z = []
+    results_x, results_y, results_z = [], [], []
     for angle in angles:
-        rotation_matrix_x = rotation_matrices_x[angle].float().to(device)
-        rotation_matrix_y = rotation_matrices_y[angle].float().to(device)
-        rotation_matrix_z = rotation_matrices_z[angle].float().to(device) 
-        accuracy, _ = evaluate_model(model, data, device, rotation_matrix_x)
-        results_x.append(accuracy)
-        accuracy, _ = evaluate_model(model, data, device, rotation_matrix_y)
-        results_y.append(accuracy)
-        accuracy, _ = evaluate_model(model, data, device, rotation_matrix_z)
-        results_z.append(accuracy)
-            
-    plt.figure(figsize=(12, 8))
-    plt.plot(angles, results_x, marker='o', label=model_name)
-
-    plt.xlabel('Rotation Angle in the x axis (degrees)')
-    plt.ylabel('Accuracy')
-    plt.title('Model Accuracy vs. Rotation Angle')
-    plt.legend()
-    plt.savefig(f'./plot/rotation_accuracy_x_{model_name}_{data_name}.png')
-
-    plt.figure(figsize=(12, 8))
-    plt.plot(angles, results_y, marker='o', label=model_name)
-
-    plt.xlabel('Rotation Angle in the y axis (degrees)')
-    plt.ylabel('Accuracy')
-    plt.title('Model Accuracy vs. Rotation Angle')
-    plt.legend()
-    plt.savefig(f'./plot/rotation_accuracy_y_{model_name}_{data_name}')
-
-    plt.figure(figsize=(12, 8))
-    plt.plot(angles, results_z, marker='o', label=model_name)
-
-    plt.xlabel('Rotation Angle in the z axis (degrees)')
-    plt.ylabel('Accuracy')
-    plt.title('Model Accuracy vs. Rotation Angle')
-    plt.legend()
-    plt.savefig(f'./plot/rotation_accuracy_z_{model_name}_{data_name}')
+        for axis, results in zip(['x', 'y', 'z'], [results_x, results_y, results_z]):
+            print(f'Rotation Axis: {axis}')
+            print(f'Rotation Angle: {angle} degrees')
+            print('---------------------------------')
+            rotation_matrix = create_rotation_matrix(angle, axis=axis).float().to(device)
+            accuracy, _ = evaluate_model(model, test_loader, device, rotation_matrix)
+            results.append(accuracy)
     
+    plot_rotation_accuracy(angles, results_x, results_y, results_z, args.name, args.data_name)
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--name", type=str, help="Name of the model you want to test")
+    parser.add_argument("--data_name", type=str, default='px_py_pz_8')
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    main(args)

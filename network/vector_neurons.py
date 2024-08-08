@@ -127,8 +127,7 @@ class CircularSlidingWindowWeightedMean(nn.Module):
     def forward(self, x):
         padding = self.window_size - 1
         x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
-        
-       
+    
         unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
         
         # Apply weights to the unfolded tensor
@@ -136,7 +135,6 @@ class CircularSlidingWindowWeightedMean(nn.Module):
         
         # Compute weighted mean
         windowed_weighted_mean = weighted_unfolded.sum(dim=-1) / self.weights.sum()
-       
         return windowed_weighted_mean
     
 class CircularSlidingWindowMean(nn.Module):
@@ -188,10 +186,12 @@ class Vect_Neuron(nn.Module):
             self.out = nn.Linear(self.hidden**2, self.out_channel)
                 
     def forward(self, x):
-        mask = (x.sum(dim=2) != 0).float().unsqueeze(2)
+        #jet_center = x[:, -1, :].unsqueeze(1).expand_as(x)
+        #mask = (x.sum(axis=-1) != 0).float()
+        #mask = mask.unsqueeze(-1).expand_as(x)
+        #x = x * mask + jet_center * (1 - mask)
         #x = self.sliding_window(x)
         #print(f'Number of zero value in the input {x.is_null().sum()}')
-        x = x * mask
         x = self.inp(x)
         #x = self.mixing1(x)
         for module in self.nn:

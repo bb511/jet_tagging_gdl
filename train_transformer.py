@@ -5,6 +5,7 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 parser.add_argument("--name", type=str, help="Name of the model you want to train")
 parser.add_argument("--config_file", type=str, help ="What are the configuration of your model", default= "config_equivariant.yml")
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
+parser.add_argument("--n_c", type=int, default=1)
 parser.add_argument("--seed", type=int, default=42)
 #parser.add_argument("--device", type=str, default='cuda:0')
 args = parser.parse_args()
@@ -63,6 +64,8 @@ def main(config):
     # Import the training and the validation data, sampled and normalised.
     train_data, valid_data = select_data(name, data_name)
     nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
+    nbr_const = args.n_c
+    print(f"Number of constituents: {nbr_const}")
     util.print_data_deets(valid_data, "Validation")
     print("The training data and the validation data have been successfully imported")
     train_load = torch.utils.data.DataLoader(train_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory=True, num_workers=1)
@@ -71,9 +74,9 @@ def main(config):
     # Import and train the model.
     model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
     print('Model summary: ', model)
-    util.compute_inference_time(model, x, name, device, config_path)
-    util.weights_plot(model, name + data_name + '_init')
-    util.check_permutation_invariance(model, x, name, device, config_path)
+    #util.compute_inference_time(model, x, name, device, config_path)
+    #util.weights_plot(model, name + data_name + '_init')
+    #util.check_permutation_invariance(model, x, name, device, config_path)
 
     train_model(model, train_load, valid_load, device, name, data_name, **config["training_hyperparams"], warmup_steps=1000)
     print('The model has been successfully trained')
@@ -95,6 +98,7 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr, batch_size, loss_inv, warmup_steps):
+    l = 0.001
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
 
@@ -130,6 +134,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
         
         for x, y in train_data:
             x, y = x.to(device), y.to(device)
+            x = x[:, :args.n_c, :]
             y_true = y
             
             if epoch == 0 and totnum_batches == 0:
@@ -151,6 +156,8 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
                 loss = util.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, 0.001, device)
             elif loss_inv == 'phi':
                 loss = util.inv_err_phi(net, criterion, x, y_pred, y_true, 0.001, device)
+            elif loss_inv == 'so3_eta_phi':
+                loss = util.inv_err_rand_eta_phi(net, criterion, x, y_pred, y_true, l, device)
             else:
                 loss = criterion(y_pred, torch.argmax(y_true, dim=1))
             
@@ -166,7 +173,10 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
         
         train_loss = batch_loss_sum / totnum_batches
         train_accu = batch_accu_sum / totnum_batches
-        inv_err = util.check_inv(net, x, device)
+        if 'px_py_pz' in data_name:
+            inv_err = util.check_inv(net, x, device)
+        else:
+            inv_err = 100
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
         all_inv_err.append(inv_err)
@@ -174,7 +184,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
         
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
-        #print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
+        print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
         print(f'[{epoch + 1}] Learning rate: {scheduler.get_last_lr()[0]}')
         
         batch_loss_sum, batch_accu_sum, totnum_batches = 0, 0, 0
@@ -183,6 +193,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
             net.eval()
             for x, y in valid_data:
                 x, y = x.to(device), y.to(device)
+                x = x[:, :args.n_c, :]
                 y_pred = net(x)
                 y_true = y
                 

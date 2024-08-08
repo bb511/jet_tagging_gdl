@@ -39,3 +39,7 @@ train_models/
 trained_models_transformer_px_py_pz_32/
 trained_models_transformer_pt_eta_rel_phi_rel_32/
 trained_models_transformer_pt_eta_rel_phi_rel_8/
+fold_history_0.npy
+trained_models_deepset_pt_eta_rel_phi_rel/
+value_accuracy_vs_nconst/trained_models/
+trained_models_transformer_pt_eta_rel_phi_rel/
