@@ -1,4 +1,4 @@
-# master_thesis_code
+# Between forced, learned or induced symmetries: Which is better for Deep Learning based jet tagging
 Code for the master thesis: Between forced, learned or induced symmetries: Which is better for Deep Learning based jet tagging
 
 ## hls4ml dataset
@@ -66,3 +66,5 @@ torchinfo
 deepspeed
 ```
 However I can not unsure the compatibility of the code if you install the libraries via this method
+
+## For the JetClass dataset I will work a bit more on the code
