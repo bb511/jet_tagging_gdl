@@ -31,7 +31,12 @@ The model specificity can be modify in the `config_equivariance.yml` file. This 
 
 Running the models on a SLURM based HPC cluster can be done via the SLURM script in the `slurm_scripts` folders. Make sure to adapt them for the specificity of your cluster.
 
-The pretrained models are saved in the `pretrain_model` folder. You can train the models yourselves by using the configuration files in the `pre_config_files` folder. For this use the command 
+The pretrained models are saved in the `pretrain_model` folder. To test them you can use the test script with the following command
+```
+python3 test.py --name deepset --data_name pt_etarel_phirel_8 --pretrained True
+``` 
+
+You can train the models yourselves by using the configuration files in the `pre_config_files` folder. For this use the command 
 ```
 python3 train.py --name vector_neuron(deepset) --data_name px_py_pz_jet_center_16 --config_file ./pre_config_files/config_vn_16.yml
 ```
