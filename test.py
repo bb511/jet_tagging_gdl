@@ -5,6 +5,7 @@ parser.add_argument("--name", type=str, help="Name of the model you want to trai
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
 parser.add_argument("--loss", type=str, default='default', choices=['default', 'so3', 'lorentz', 'jet_center', 'so3_eta_phi'], help = "Type of loss function to use")
 parser.add_argument("--path", type=str, default='trained_models', help = "Name of folder just before accessing the config file and seed folder")
+parser.add_argument("--pretrained", type = bool, default = False, help = "If the model is pretrained or not")
 parser.add_argument("--seed", type=int, default=42)
 #parser.add_argument("--device", type=str, default='cuda:0')
 args = parser.parse_args()
@@ -40,14 +41,26 @@ def main():
     data_name = args.data_name
     loss_name = args.loss
     folder_name = args.path
+    pretrained = args.pretrained
     seed = args.seed
     
-    file_name = f"{name}_{data_name}_{loss_name}" if loss_name != 'default' else f"{name}_{data_name}"
-    print(file_name)
     
-    path = "train_models/"
-    model_file = path + f"{file_name}/{folder_name}/seed{seed}/{file_name}.pt"
-    config_path = path + f"{file_name}/{folder_name}/config.yml"
+    
+    if pretrained:
+        file_name = f"{name}_{data_name}"
+        print(file_name)
+        path = "pretrain_models/"
+        
+        model_file = path + f"trained_models_{file_name}/trained_models/seed{seed}/model_{file_name}.pt"
+        config_path = path + f"trained_models_{file_name}/trained_models/config.yml"
+    else:
+        file_name = f"{name}_{data_name}_{loss_name}" if loss_name != 'default' else f"{name}_{data_name}"
+        print(file_name)
+        
+        path = "train_models/"
+    
+        model_file = path + f"{file_name}/{folder_name}/seed{seed}/{file_name}.pt"
+        config_path = path + f"{file_name}/{folder_name}/config.yml"
 
     
     config = util.load_config_file(config_path)

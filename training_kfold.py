@@ -33,6 +33,7 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 
 import util
+import custom_loss
 import math
 
 
@@ -55,7 +56,7 @@ def train_model(model, train_loader, criterion, optimizer, config, device):
         
         y_pred = model(x)
         if config["training_hyperparams"]["loss_inv"] == "so3_eta_phi":
-            loss = util.inv_err_rand_eta_phi(model, criterion, x, y_pred, y, 0.01, device)
+            loss = custom_loss.inv_err_rand_eta_phi(model, criterion, x, y_pred, y, 0.01, device)
         else:
             loss = criterion(y_pred, torch.argmax(y, dim=1))
         
@@ -86,7 +87,7 @@ def evaluate_model(model, val_loader, criterion, device):
             correct += predicted.eq(torch.argmax(y, dim=1)).sum().item()
     return running_loss / len(val_loader), correct / total
 
-def train_specific_fold(train_data, criterion, config, device, fold_number, total_folds=5, outdir="."):
+def train_specific_fold(train_data, criterion, config, device, fold_number, total_folds=5, outdir=".", plotdir = "/plot"):
     all_labels = []
     for _, y in train_data:
         all_labels.append(torch.argmax(y).item())
@@ -175,7 +176,7 @@ def train_specific_fold(train_data, criterion, config, device, fold_number, tota
 
     return fold_history, (fold_preds, fold_true), val_acc
 
-def plot_training_results_with_uncertainty(all_fold_histories, name):
+def plot_training_results_with_uncertainty(all_fold_histories, name, plotdir):
     num_epochs = len(all_fold_histories[0]['train_loss'])
     epochs = range(1, num_epochs + 1)
 
@@ -200,7 +201,7 @@ def plot_training_results_with_uncertainty(all_fold_histories, name):
             axs[i, j].grid(False)
 
     plt.tight_layout()
-    plt.savefig(f'plot/Training_Results_with_Uncertainty_{name}.png')
+    plt.savefig(f'{plotdir}/Training_Results_with_Uncertainty_{name}.png')
     plt.close()
 
 
@@ -222,20 +223,19 @@ def main(config):
     
     # Setup directories and config
     plotdir = util.make_output_directory("plot", file_name)
-    outdir = util.make_output_directory(f"kfold_model/trained_models_{name}", config["outdir"])
+    outdir = util.make_output_directory(f"kfold_model/trained_models_{name}_{data_name}_{loss_name}", config["outdir"])
     
     # Save the config file to the main dir
     util.save_config_file(config, outdir)
     config_path = os.path.join(f"kfold_model/{file_name}/", f"config_{file_name}.yml")
     config["outdir"] = os.path.join(config["outdir"], f"seed{args.seed}")
     print(f"Config file saved to {config_path}")
-    outdir = util.make_output_directory(f"kfold_model/{file_name}", config["outdir"])
 
     train_data, _ = select_data(name, data_name)
     
     criterion = nn.CrossEntropyLoss().to(device)
 
-    fold_history, fold_predictions, val_accuracy = train_specific_fold(train_data, criterion, config, device, args.kfold, outdir)
+    fold_history, fold_predictions, val_accuracy = train_specific_fold(train_data, criterion, config, device, args.kfold, outdir, plotdir)
     
     # Save results for this fold
     np.save(f'{outdir}/fold_history_{args.name}_{args.data_name}_{args.kfold}.npy', fold_history)
