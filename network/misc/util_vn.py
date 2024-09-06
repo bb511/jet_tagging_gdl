@@ -1,3 +1,5 @@
+# additional functions for the VN network
+# Notably, the VNMaxPool, VNStdFeature (for efficient invariant layer), VNBatchNorm classes are defined here
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -7,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 torch.cuda.manual_seed_all(15)
+from network.vector_neurons import VNLinearAndLeakyReLU
 
 class VNMaxPool(nn.Module):
     def __init__(self, in_channels):

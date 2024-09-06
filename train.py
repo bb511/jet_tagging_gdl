@@ -5,6 +5,7 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 parser.add_argument("--name", type=str, help="Name of the model you want to train")
 parser.add_argument("--config_file", type=str, help ="What are the configuration of your model", default= "config_equivariant.yml")
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
+parser.add_argument("--loss", type=str, default='default', choices=['default', 'so3', 'lorentz', 'jet_center', 'so3_eta_phi'], help = "Type of loss function to use")
 parser.add_argument("--seed", type=int, default=42)
 #parser.add_argument("--device", type=str, default='cuda:0')
 args = parser.parse_args()
@@ -26,39 +27,46 @@ import torch.nn.functional as F
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 
-import torch_geometric
-
 import yaml
-import deepspeed
 
 from import_data import select_data
 from import_model import get_model
 
+import custom_loss
+
 import util
-import pickle
+import plot_train
 
 def main(config):
     name = args.name
+    assert name != "transformer", "The transformer model is implemented in the script train_transformer.py"
     data_name = args.data_name
-    print(f"Training of the model {name} with data {data_name}")
+    loss_name = args.loss
+    
+    # Set up the file name
+    file_name = f"{name}_{data_name}_{loss_name}" if loss_name != 'default' else f"{name}_{data_name}"
+
+    print(f"Training of the model {name} with data {data_name} and using loss {loss_name}") 
         
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training done on {device}")
     
-    outdir = util.make_output_directory(f"train_models/trained_models_{name}_{data_name}/", config["outdir"])
+    plotdir = util.make_output_directory("plot", file_name)
+    outdir = util.make_output_directory(f"train_models/{file_name}/", config["outdir"])
+    
     # Save the config file to the main dir.
     util.save_config_file(config, outdir)
-    config_path = os.path.join(outdir, f"config_{name}_{data_name}.yml")
+    config_path = os.path.join(outdir, f"config_{file_name}.yml")
     print(f'Config file saved in {config_path}')
 
     # Create subdir for each seed.
     config["outdir"] = os.path.join(config["outdir"], f"seed{args.seed}")
-    outdir = util.make_output_directory(f"train_models/trained_models_{name}_{data_name}", config["outdir"])
+    outdir = util.make_output_directory(f"train_models/{file_name}", config["outdir"])
     print('Subfile for each seeds are created')
 
     # Import the training and the validation data, sampled and normalised.
-    training_data, test_data = select_data(name, data_name)
-    util.print_data_deets(training_data, test_data)
+    print(util.tcols.OKBLUE + "Importing data..." + util.tcols.ENDC)
+    training_data, _ = select_data(name, data_name)
     train_size = int(0.8 * len(training_data))
     val_size = len(training_data) - train_size
 
@@ -67,7 +75,7 @@ def main(config):
         training_data, 
         [train_size, val_size],
     )
-
+    print(util.tcols.OKGREEN + "Data imported." + util.tcols.ENDC)
     print(f"Training set size: {len(train_dataset)}")
     print(f"Validation set size: {len(val_dataset)}")
 
@@ -76,41 +84,56 @@ def main(config):
     nbr_const = train_dataset[:][0].shape[1]
     nbr_feat = train_dataset[:][0].shape[2]
     print(f"Training labels shape: {train_dataset[:][1].shape}")
-    print("The training data and the validation data have been successfully imported")
+    print(f"Validation data shape: {val_dataset[:][0].shape}")
+    print(f"Validation labels shape: {val_dataset[:][1].shape}")
     
     train_load = torch.utils.data.DataLoader(train_dataset, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
     valid_load = torch.utils.data.DataLoader(val_dataset, batch_size=config["training_hyperparams"]["batch_size"], shuffle=True, pin_memory = True, num_workers=1)
 
     # Import and train the model.
+    print("")
+    print(util.tcols.OKBLUE + "Importing model..." + util.tcols.ENDC)
     model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"]).to(device)
     model.apply(util.init_weights)
-    print('Model summary: ', model)
+    
+    print(util.tcols.OKCYAN + 'Model summary: ' + util.tcols.ENDC, '\n', model)
+    
+    # Check different properties of the model.
     x, _ = next(iter(train_load))
-    util.compute_inference_time(model,x, name, device, config_path)
-    util.weights_plot(model, name + data_name + '_init')
+    
+    print("\n")
+    print(util.tcols.OKBLUE + "Model specification in terms of inference time, FLOPs and number of parameters" + util.tcols.ENDC)
+    util.compute_inference_time(model, x, device)
+    util.compute_flops(model, x, device)
+    print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")
+    print("\n")
+    plot_train.weights_plot(model, plotdir, file_name + '_init')
+    print("\n")
+    print(util.tcols.OKBLUE + "Checking the invariance properties of the model..." + util.tcols.ENDC)
     if "px_py_pz_E" not in data_name:
-        util.check_invariance(model, x, name, device, config_path)
+        util.check_invariance(model, x, nbr_rot=32, device=device)
     else:
-        util.check_invariance_Lorentz(model, x, name, device, config_path)
-    util.check_permutation_invariance(model, x, name, device, config_path)
+        util.check_invariance_Lorentz(model, x, nbr_rot=32, device=device)
+    util.check_permutation_invariance(model, x, nbr_perm=32, device=device)
+    print("\n")
 
-    hist = train_model(model, train_load, valid_load, device, name, data_name, **config["training_hyperparams"])
+    hist = train_model(model, train_load, valid_load, device, name, data_name, loss_name, plotdir, **config["training_hyperparams"])
     print('The model has been successfully trained')
     
-    # Saved model and plot the loss and accuracy evolution throught the epochs.
-    model_file = os.path.join(outdir, f"model_{name}_{data_name}.pt")
+    # Saved model and plot the loss and accuracy evolution throught the epochs.3
+    model_file = os.path.join(outdir, f"{file_name}.pt")
     torch.save(model.state_dict(), model_file)
     print(f'Model saved at {model_file}')
 
 
-def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr, batch_size, loss_inv):
+def train_model(net, train_data, valid_data, device, name, data_name, loss_inv, plotdir, epochs, batch_size, lr, l = 0.001):
     "Standard training function for pytorch model"
-    l = 0.001
+    print(util.tcols.OKCYAN + f"Training of the model {name} with data {data_name} and using loss {loss_inv} with the following hyperparameters: epochs = {epochs}, batch_size = {batch_size}, learning rate = {lr}" + util.tcols.ENDC + '\n')
     criterion = nn.CrossEntropyLoss().to(device)
     if name not in ["vector_neuron", "vn_etaphi_rel", "vn_dgcnn"]:
         optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=1e-7)
     else:
-        optimizer = optim.RMSprop(net.parameters(), lr = 0.0294)#
+        optimizer = optim.RMSprop(net.parameters(), lr=lr) #get better performance with RMSprop for VN
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                             mode="max",
                                                             patience= 80,
@@ -128,44 +151,29 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
     epochs_no_improve = 0
     epochs_es_limit = 50
     best_accu = 0
-    total_params = sum(p.numel() for p in net.parameters())
-    print(f"Number of parameters: {total_params}")
-    print("")
-    next_epoch = 0
-    prof = deepspeed.profiling.flops_profiler.FlopsProfiler(net)
+    
     for epoch in range(epochs):  # loop over the dataset multiple times
         batch_loss_sum = 0
         batch_accu_sum = 0
         totnum_batches = 0
         net.train()
         print(f'Begining of Epoch {epoch + 1}/{epochs}')
-        count = 0
-        for x,y in train_data:
-            x = x.to(device)
-            y = y.to(device)
+        for x,y_true in train_data:
+            x, y_true = x.to(device), y_true.to(device)
             
-            # get the inputs; data is a list of [inputs, labels]
-            y_true = y
-            if epoch == 0 and count == 0 and name != "cg_net":
-                prof.start_profile()
-                y_pred = net(x)
-                prof.stop_profile()
-                print(util.tcols.OKGREEN + "Model flops: " + util.tcols.ENDC, end="")
-                print(f"{prof.get_total_flops()/ x.shape[0]}")
-                prof.end_profile()
-                print("")
-                count += 1
             y_pred = net(x)
+            
+            # compute the loss function based on the user choice
             if loss_inv =='so3':
-                l = 0.001
-                loss = util.inv_err_rand(net, criterion, x, y_pred, y_true, l, device)
+                loss = custom_loss.inv_err_rand(net, criterion, x, y_pred, y_true, l, 16, device)
             elif loss_inv == 'lorentz':
-                l = 0.001
-                loss = util.inv_err_lorentz(net, criterion, x, y_pred, y_true, l, device)
+                loss = custom_loss.inv_err_lorentz(net, criterion, x, y_pred, y_true, l, 16, device)
             elif loss_inv == 'jet_center':
-                loss = util.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, l, device)
+                loss = custom_loss.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, l, 16, device)
             elif loss_inv == 'so3_eta_phi':
-                loss = util.inv_err_rand_eta_phi(net, criterion, x, y_pred, y_true, l, device)
+                #loss = custom_loss.inv_err_deterministic_eta_phi(net, criterion, x, y_pred, y_true, l, 16, device)
+                #loss = custom_loss.inv_err_sobol_eta_phi(net, criterion, x, y_pred, y_true, l, 16, device)
+                loss = custom_loss.inv_err_rand_eta_phi(net, criterion, x, y_pred, y_true, l, 16, device)
             else:
                 loss = criterion(y_pred, torch.argmax(y_true, dim = 1))
             optimizer.zero_grad()
@@ -188,7 +196,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
             inv_err = 100
         all_train_loss.append(train_loss.item())
         all_train_accu.append(train_accu.item())
-        all_inv_err.append(inv_err)
+        all_inv_err.append(inv_err.item())
         print(f'[{epoch + 1}] Trained loss: {train_loss:.5f}')
         print(f'[{epoch + 1}] Trained accuracy: {train_accu:.5f}')
         print(f'[{epoch + 1}] Invariance relative error: {inv_err:.5f}')
@@ -229,24 +237,7 @@ def train_model(net, train_data, valid_data, device, name, data_name, epochs, lr
         scheduler.step(best_accu)
         if epochs_no_improve >= epochs_es_limit:
             break
-    plt.plot(all_train_loss, color="gray", label="Training Loss")
-    plt.plot(all_valid_loss, color="navy", label="Validation Loss")
-    plt.xlabel("Epochs")
-    plt.ylabel("Loss")
-    plt.savefig(f'plot/Loss_{name}_{data_name}')
-    plt.close()
-    plt.plot(all_train_accu, color="gray", label="Training Accuracy")
-    plt.plot(all_valid_accu, color="navy", label="Validation Accuracy")
-    plt.xlabel("Epochs")
-    plt.ylabel("Accuracy")
-    plt.savefig(f'plot/Accuracy_{name}_{data_name}')
-    plt.close()
-    plt.plot(all_inv_err, color="gray", label="Invariance Relative Error")
-    plt.xlabel("Epochs")
-    plt.ylabel("Invariance Relative Error")
-    plt.savefig(f'plot/Invariance_{name}_{data_name}')
-    plt.close()
-    print('Finished Training')
+    plot_train.plot_loss_accu(all_train_loss, all_train_accu, all_valid_loss, all_valid_accu, all_inv_err, name, data_name, loss_inv, plotdir)
     
 if __name__ == "__main__":
     with open(args.config_file, "r") as stream:

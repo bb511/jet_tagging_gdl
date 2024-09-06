@@ -12,7 +12,8 @@ torch.cuda.manual_seed_all(15)
 
 from torch.utils.checkpoint import checkpoint
 
-from jedi_data.vector_neurons import VNLinearAndLeakyReLU, VNStdFeature, VNMaxPool, mean_pool
+from network.vector_neurons import VNLinearAndLeakyReLU
+from network.misc.util_vn import VNStdFeature, VNMaxPool, mean_pool
 
 def knn(x, k):
     inner = 2*torch.matmul(x.transpose(2, 1), x)

@@ -1,3 +1,6 @@
+# this file contains the implementation of the graph neural network models
+# most of them are adapted from the PyTorch Geometric tutorials and documentation
+# https://pytorch-geometric.readthedocs.io/en/latest/notes/introduction.html
 import torch
 import torch.nn as nn
 import torch.optim as optim

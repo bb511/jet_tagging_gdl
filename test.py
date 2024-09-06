@@ -3,6 +3,8 @@ import argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--name", type=str, help="Name of the model you want to train")
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
+parser.add_argument("--loss", type=str, default='default', choices=['default', 'so3', 'lorentz', 'jet_center', 'so3_eta_phi'], help = "Type of loss function to use")
+parser.add_argument("--path", type=str, default='trained_models', help = "Name of folder just before accessing the config file and seed folder")
 parser.add_argument("--seed", type=int, default=42)
 #parser.add_argument("--device", type=str, default='cuda:0')
 args = parser.parse_args()
@@ -22,7 +24,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed_all(args.seed)
+#torch.cuda.manual_seed_all(args.seed)
 
 
 import yaml
@@ -31,13 +33,21 @@ from import_data import select_data
 from import_model import get_model
 
 import util
+import plot_train
 
 def main():
     name = args.name
     data_name = args.data_name
-    path = "/mnt/c/Users/bonvi/Documents/"
-    model_file = path + f"train_models/trained_models_{name}_{data_name}/trained_models/seed42/model_{name}_{data_name}.pt"
-    config_path = path + f"train_models/trained_models_{name}_{data_name}/trained_models/config.yml"
+    loss_name = args.loss
+    folder_name = args.path
+    seed = args.seed
+    
+    file_name = f"{name}_{data_name}_{loss_name}" if loss_name != 'default' else f"{name}_{data_name}"
+    print(file_name)
+    
+    path = "train_models/"
+    model_file = path + f"{file_name}/{folder_name}/seed{seed}/{file_name}.pt"
+    config_path = path + f"{file_name}/{folder_name}/config.yml"
 
     
     config = util.load_config_file(config_path)
@@ -45,6 +55,8 @@ def main():
         
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Testing done on {device}")
+    
+    plotdir = f"plot/{file_name}"
     
 
     # Import the testing data
@@ -55,28 +67,38 @@ def main():
     print("")
     
     # Load the model from file
-    model =  get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"])
+    model = get_model(name, nbr_const, nbr_feat, config["model_hyperparameter"])
     model.load_state_dict(torch.load(model_file))
     model.to(device)
     print("")
     print(util.tcols.OKGREEN, f"Model {name} loaded from {model_file} and moved to {device}", util.tcols.ENDC)
     print("")
 
-    # Evaluate the model on the validation set
+    # Set the model to evaluation mode
     model.eval()    
     print(f'Validation of the model {name} trained using the data {data_name}\n')
-    test_data = torch.utils.data.DataLoader(test_data, batch_size=16, shuffle=True, pin_memory = True, num_workers=1)
+    
+    # Create the test data loader
+    test_data = torch.utils.data.DataLoader(test_data, batch_size=config["training_hyperparams"]["batch_size"], shuffle=False, pin_memory = True, num_workers=1)
     x, _ = next(iter(test_data))
-    util.compute_inference_time(model, x, name, device, config_path)
+    
+    # Check different properties of the model.    
+    print(util.tcols.OKBLUE + "Model specification in terms of inference time, FLOPs and number of parameters" + util.tcols.ENDC)
+    util.compute_inference_time(model, x, device)
+    util.compute_flops(model, x, device)
+    print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}" + "\n")
+    plot_train.weights_plot(model, plotdir, file_name + '_test')
+    print("\n" + util.tcols.OKBLUE + "Checking the invariance properties of the model..." + util.tcols.ENDC)
     if "px_py_pz_E" not in data_name:
-        util.check_invariance(model, x, name, device, config_path)
+        util.check_invariance(model, x, nbr_rot=32, device=device)
     else:
-        util.check_invariance_Lorentz(model, x, name, device, config_path)        
-    util.check_permutation_invariance(model, x, name, device, config_path)
-    name = name + '_' + data_name
-    util.weights_plot(model, name + '_test')
-    evaluate_model(model, test_data, 'cuda:0')
-    plot_evaluation_metric(name, model, test_data, device = 'cuda:0')
+        util.check_invariance_Lorentz(model, x, nbr_rot=32, device=device)
+    util.check_permutation_invariance(model, x, nbr_perm=32, device=device)
+    print("\n")
+    
+    # Evaluate the model on the validation set
+    evaluate_model(model, test_data, device)
+    plot_evaluation_metric(name, model, test_data, plotdir, device = device)
     
 def evaluate_model(model, validation_set, device):
     print('Evaluation of the model\n')
@@ -97,7 +119,7 @@ def evaluate_model(model, validation_set, device):
     print(util.tcols.OKBLUE,'Test Accuracy of the model : {} %'.format(accu/num_batch), util.tcols.ENDC, '\n')
     print('The Test loss of the model : {} '.format(loss/num_batch))
 
-def plot_evaluation_metric(name, model, validation_set, device):
+def plot_evaluation_metric(name, model, validation_set, plotdir, device):
     y_true_all = []
     y_pred_all = []
     for x,y in validation_set:
@@ -111,8 +133,8 @@ def plot_evaluation_metric(name, model, validation_set, device):
     roc_curve_name = 'roc_curves_' + name
     y_pred_all = torch.cat(y_pred_all, dim = 0)
     y_true_all = torch.cat(y_true_all, dim = 0)
-    util.roc_curves('plot', y_pred_all, y_true_all, roc_curve_name)
-    util.dnn_output('plot', y_pred_all, name)
+    util.roc_curves(plotdir, y_pred_all, y_true_all, roc_curve_name)
+    util.dnn_output(plotdir, y_pred_all, name)
 
 if __name__ == "__main__":
 

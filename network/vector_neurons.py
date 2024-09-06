@@ -12,19 +12,25 @@ torch.cuda.manual_seed_all(15)
 
 
 class VNLinear(nn.Module):
-    def __init__(self, dim_in, dim_out):
+    """Vector Neuron Linear layer. 
+    The input is a 3D tensor of shape [batch, dim in , 3] (in the first layer: dim_in = number of constituents)
+    The output is a 3D tensor of shape [batch, dim out, 3] ."""
+    def __init__(self, dim_in:int, dim_out:int):
         super(VNLinear, self).__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
         
         self.linear = nn.Linear(dim_in, dim_out, bias = False)
-    def forward(self, x):
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
         x = self.linear(x.transpose(1,-1)).transpose(1,-1)
         #print(x.shape, x.nonzero().shape) # check if the output is sparse
         return x
     
     
 class VNLeakyReLU(nn.Module):
+    """Vector Neuron Leaky ReLU layer.
+    There is the option of sharing the learned direction for all the input features.
+    """
     def __init__(self, in_channels, share_nonlinearity=False, negative_slope=0.2):
         super(VNLeakyReLU, self).__init__()
         if share_nonlinearity == True:
@@ -35,7 +41,7 @@ class VNLeakyReLU(nn.Module):
     
     def forward(self, x):
         '''
-        x: point features of shape [B, N_feat, 3, N_samples, ...]
+        x: point features of shape [batch, in_channels, 3]
         '''
         d = self.map_to_dir(x.transpose(1,-1)).transpose(1,-1)
         dotprod = (x*d).sum(2, keepdim=True)
@@ -45,6 +51,7 @@ class VNLeakyReLU(nn.Module):
         return x_out
     
 class VNBatchNorm(nn.Module):
+    """Batch Normalization layer for Vector Neurons."""
     def __init__(self, num_features, dim):
         super(VNBatchNorm, self).__init__()
         self.dim = dim
@@ -69,7 +76,15 @@ class VNBatchNorm(nn.Module):
     
 
 class VNLinearAndLeakyReLU(nn.Module):
-    def __init__(self, in_channels, out_channels, dim=4, share_nonlinearity=False, use_batchnorm='norm', negative_slope=0.2):
+    """Vector Neuron Block with Linear, batchnorm and LeakyReLU layers."""
+    def __init__(self,
+                 in_channels:int, #number of input features should be dim_in*3
+                 out_channels:int, #number of output features should be dim_out*3
+                 dim:int=3, # size of the input data
+                 share_nonlinearity:bool=False, #share the nonlinearity
+                 use_batchnorm:str='norm', #use batchnorm or not
+                 negative_slope:float =0.2 #negative slope of the LeakyReLU
+                 ):
         super(VNLinearAndLeakyReLU, self).__init__()
         self.dim = dim
         self.share_nonlinearity = share_nonlinearity
@@ -97,62 +112,8 @@ class VNLinearAndLeakyReLU(nn.Module):
         return x_out
     
 
-class VNGeometricMixing(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(VNGeometricMixing, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        
-        self.VNLinearandLReLU_1 = VNLinearAndLeakyReLU(self.in_channels, self.out_channels,negative_slope =0)
-        self.VNLinearandLReLU_2 = VNLinearAndLeakyReLU(self.in_channels, self.out_channels, negative_slope =0)
-    
-    def forward(self, x):
-        x1 = self.VNLinearandLReLU_1(x)
-        x2 = self.VNLinearandLReLU_2(x)
-        
-        m = x1.transpose(1,-1) @ x2
-        
-        x = x @ m
-        return x
-class CircularSlidingWindowWeightedMean(nn.Module):
-    def __init__(self, window_size=8):
-        super(CircularSlidingWindowWeightedMean, self).__init__()
-        self.window_size = window_size
-        
-        # Create decreasing weights
-        weights = torch.linspace(1, 0, steps=window_size)
-        weights = weights.flip(0)  # Reverse the order to have decreasing weights
-        self.register_buffer('weights', weights.unsqueeze(0).unsqueeze(2))
-
-    def forward(self, x):
-        padding = self.window_size - 1
-        x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
-    
-        unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
-        
-        # Apply weights to the unfolded tensor
-        weighted_unfolded = unfolded * self.weights.reshape(1,1,-1)
-        
-        # Compute weighted mean
-        windowed_weighted_mean = weighted_unfolded.sum(dim=-1) / self.weights.sum()
-        return windowed_weighted_mean
-    
-class CircularSlidingWindowMean(nn.Module):
-    def __init__(self, window_size=8):
-        super(CircularSlidingWindowMean, self).__init__()
-        self.window_size = window_size
-
-    def forward(self, x):
-        padding = self.window_size - 1
-        x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
-        
-        unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
-        windowed_mean = unfolded.mean(dim=-1)
-        
-        return windowed_mean
-    
-
 class Vect_Neuron(nn.Module):
+    """Vector Neuron model for the input data with 3 features (px_py_pz)."""
     def __init__(self,
                 nbr_const: int, #nbr of constituents 
                 nbr_feat: int, #nbr of features 
@@ -171,11 +132,7 @@ class Vect_Neuron(nn.Module):
         
         self.inp = VNLinearAndLeakyReLU(self.in_channel, self.hidden,4)
         self.nn = nn.ModuleList([VNLinearAndLeakyReLU(self.hidden, self.hidden,4) for _ in range(self.num_layers-1)])
-        #self.mixing1 = VNGeometricMixing(self.hidden, self.hidden)
-        self.mixing2 = VNGeometricMixing(self.hidden, self.hidden)
-        #self.sliding_window = CircularSlidingWindowWeightedMean(24)
                                                                                 
-        
         self.before_scalar = VNLinearAndLeakyReLU(self.hidden, self.hidden, 4)
         if add_mlp:
             self.out1 = nn.Linear(self.hidden**2, 128)
@@ -186,19 +143,11 @@ class Vect_Neuron(nn.Module):
             self.out = nn.Linear(self.hidden**2, self.out_channel)
                 
     def forward(self, x):
-        #jet_center = x[:, -1, :].unsqueeze(1).expand_as(x)
-        #mask = (x.sum(axis=-1) != 0).float()
-        #mask = mask.unsqueeze(-1).expand_as(x)
-        #x = x * mask + jet_center * (1 - mask)
-        #x = self.sliding_window(x)
-        #print(f'Number of zero value in the input {x.is_null().sum()}')
         x = self.inp(x)
-        #x = self.mixing1(x)
         for module in self.nn:
             x = module(x)
-        #x = self.mixing2(x)
         x = self.before_scalar(x)
-        inv_x = x@(x.transpose(1,-1))
+        inv_x = x@(x.transpose(1,-1)) #invariant layer
         x = torch.flatten(inv_x, start_dim = 1, end_dim = -1)
         if self.add_mlp:
             out = self.out1(x)
@@ -211,7 +160,27 @@ class Vect_Neuron(nn.Module):
             out = self.out(x)
         return out
     
+
+    
+EPS = 1e-6
+
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                   ADDITIONAL CODE THAT WAS NOT USED IN THE FINAL IMPLEMENTATION, BUT CAN BE USED FOR FUTURE WORK
+#
+#                   IN PARTICULAR
+#                   - CircularSlidingWindowWeightedMean
+#                   - CircularSlidingWindowMean
+#                   - VNGeometricMixing
+#                   - Vect_Neuron_etaphi_rel
+#------------------------------------------------------------------------------------------------------------------------------------------------------#
+
 class Vect_Neuron_etaphi_rel(nn.Module):
+    """ Vector Neuron model for the input data with 5 features (px_py_pz_eta_rel_phi_rel). 
+        The input data is split into two tensors: px_py_pz and eta_phi.
+        The px_py_pz tensor goes through the vector neuron, while the eta_phi tensor is concatenated with the output of the vector neuron. 
+        The final output is obtained by passing the concatenated tensor through a multi-layer perceptron.
+    """
     def __init__(self, nbr_const, nbr_feat, out_channel, hidden, num_layers, hidden_mlp, num_layers_mlp):
         super(Vect_Neuron_etaphi_rel, self).__init__()
         assert nbr_feat == 5, "The number of features must be 3"
@@ -227,7 +196,7 @@ class Vect_Neuron_etaphi_rel(nn.Module):
         self.before_scalar = VNLinearAndLeakyReLU(self.hidden, 16, 4)
         self.out1 = nn.Linear(16**2 + nbr_const * 2, self.hidden_mlp)
         self.mlp_out = nn.ModuleList([nn.Linear(self.hidden_mlp, self.hidden_mlp) for _ in range(self.num_layers_mlp-1)])
-        self.act = nn.ReLU()   
+        self.act = nn.LeakyReLU()   
         self.out2 = nn.Linear(self.hidden_mlp, self.out_channel)
                 
     def forward(self, x):
@@ -258,5 +227,59 @@ class Vect_Neuron_etaphi_rel(nn.Module):
         out = self.out2(out)
         return out
     
+class VNGeometricMixing(nn.Module):
+    """Geometric mixing layer for vector neurons."""
+    def __init__(self, in_channels, out_channels):
+        super(VNGeometricMixing, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        
+        self.VNLinearandLReLU_1 = VNLinearAndLeakyReLU(self.in_channels, self.out_channels, use_batchnorm="norm", negative_slope=0.2)
+        self.VNLinearandLReLU_2 = VNLinearAndLeakyReLU(self.in_channels, self.out_channels, use_batchnorm="norm", negative_slope=0.2)
     
-EPS = 1e-6
+    def forward(self, x):
+        x1 = self.VNLinearandLReLU_1(x)
+        x2 = self.VNLinearandLReLU_2(x)
+        
+        m = x1.transpose(1,-1) @ x2
+        
+        x = x @ m
+        return x
+class CircularSlidingWindowWeightedMean(nn.Module):
+    """Circular sliding window with weighted mean for vector neurons. The purpose of this layer is to avoid zero inputs in the network"""
+    def __init__(self, window_size=8):
+        super(CircularSlidingWindowWeightedMean, self).__init__()
+        self.window_size = window_size
+        
+        # Create decreasing weights
+        weights = torch.linspace(1, 0, steps=window_size)
+        weights = weights.flip(0)  # Reverse the order to have decreasing weights
+        self.register_buffer('weights', weights.unsqueeze(0).unsqueeze(2))
+
+    def forward(self, x):
+        padding = self.window_size - 1
+        x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
+    
+        unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
+        
+        # Apply weights to the unfolded tensor
+        weighted_unfolded = unfolded * self.weights.reshape(1,1,-1)
+        
+        # Compute weighted mean
+        windowed_weighted_mean = weighted_unfolded.sum(dim=-1) / self.weights.sum()
+        return windowed_weighted_mean
+    
+class CircularSlidingWindowMean(nn.Module):
+    """Circular sliding window with mean for vector neurons. The purpose of this layer is to avoid zero inputs in the network. Not using weights"""
+    def __init__(self, window_size=8):
+        super(CircularSlidingWindowMean, self).__init__()
+        self.window_size = window_size
+
+    def forward(self, x):
+        padding = self.window_size - 1
+        x_padded = torch.cat([x, x[:, :padding, :]], dim=1)
+        
+        unfolded = x_padded.unfold(dimension=1, size=self.window_size, step=1)
+        windowed_mean = unfolded.mean(dim=-1)
+        
+        return windowed_mean

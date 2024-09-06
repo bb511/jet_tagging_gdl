@@ -198,7 +198,7 @@ def valid(model, valid_loader):
         print(f'Accuracy {accuracy/batch_idx:.4f}, Loss: {loss.item()/batch_idx:.4f}')
     return loss.item()/batch_idx, accuracy/batch_idx 
 
-data_name = "px_py_pz_E_8"
+data_name = "px_py_pz_8"
 train_data, valid_data = select_data("mlp_weak_loss", data_name)
 
 nbr_const =  8
@@ -215,7 +215,7 @@ model = MLP_weak_loss_lorentz(nbr_const = nbr_const,
                     device = 'cuda:0'
                     )
 
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.01)
 loss, l_rot_x, l_rot_y, l_rot_z = train(model, train_loader, optimizer, 10)
 print(f'Final loss: {loss.item():.4f}, L rot x: {torch.exp(l_rot_x).item():.4f}, L rot y: {torch.exp(l_rot_y).item():.4f}, L rot z: {torch.exp(l_rot_z).item():.4f}')
 

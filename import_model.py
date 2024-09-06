@@ -30,7 +30,6 @@ def get_model(name : str, nbr_const : int, nbr_feat : int, model_hyperparamter: 
         #"vn_dgcnn": lambda: VN_DGCNN(nbr_const, nbr_feat,**parameter),
         #"dgcnn": lambda: DGCNN(nbr_const, nbr_feat,**parameter),
         "transformer": lambda: Transformer(nbr_const, nbr_feat,**parameter),
-        "vector_neuron_reg": lambda:Vect_Neuron(nbr_const, nbr_feat,**parameter),
         #"graph_net": lambda: MultiLayerEdgeConv(nbr_const, nbr_feat,**parameter),
     }
     model = sel_model.get(name, lambda: None)()

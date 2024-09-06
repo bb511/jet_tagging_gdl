@@ -21,6 +21,7 @@ import util
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--name", type=str, help="Name of the model you want to train")
 parser.add_argument("--data_name", type=str, default='px_py_pz_8')
+parser.add_argument("--loss", type=str, default='default', choices=['default', 'so3', 'lorentz', 'jet_center', 'so3_eta_phi'], help = "Type of loss function to use")
 parser.add_argument("--config_file", type=str, help="Configuration of your model", default="config_equivariant.yml")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--kfold", type=int, default=None, help="Specific fold number to train (0-4)")
@@ -85,7 +86,7 @@ def evaluate_model(model, val_loader, criterion, device):
             correct += predicted.eq(torch.argmax(y, dim=1)).sum().item()
     return running_loss / len(val_loader), correct / total
 
-def train_specific_fold(train_data, criterion, config, device, fold_number, total_folds=5):
+def train_specific_fold(train_data, criterion, config, device, fold_number, total_folds=5, outdir="."):
     all_labels = []
     for _, y in train_data:
         all_labels.append(torch.argmax(y).item())
@@ -126,11 +127,11 @@ def train_specific_fold(train_data, criterion, config, device, fold_number, tota
     optimizer = optim.Adam(model.parameters(), lr=config["training_hyperparams"]["lr"])
     if args.name == "vector_neuron":
         optimizer = optim.RMSprop(model.parameters(), lr = 0.0294)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=80, factor=0.1)
 
     fold_history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
     best_val_loss = float('inf')
-    patience = 10
+    epochs_es_limit = 50
     epochs_no_improve = 0
 
     for epoch in range(config["training_hyperparams"]["epochs"]):
@@ -150,10 +151,10 @@ def train_specific_fold(train_data, criterion, config, device, fold_number, tota
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), f'./kfold_model/best_{args.name}_{args.data_name}_fold_{fold_number}.pt')
+            torch.save(model.state_dict(), f'{outdir}/best_{args.name}_{args.data_name}_fold_{fold_number}.pt')
         else:
             epochs_no_improve += 1
-            if epochs_no_improve == patience:
+            if epochs_no_improve >= epochs_es_limit:
                 print(f'Early stopping triggered after epoch {epoch+1}')
                 break
 
@@ -205,31 +206,40 @@ def plot_training_results_with_uncertainty(all_fold_histories, name):
 
 def main(config):
     name = args.name
-    data_name = args.data_name
-    
     assert name != "transformer", "Use another script for the transformer model"
+    data_name = args.data_name
+    loss_name = args.loss
+    
+    # Set up the file name
+    if loss_name == 'default':
+        file_name = f"{name}_{data_name}"
+    else:
+        file_name = f"{name}_{data_name}_{loss_name}"
     print(f"Training of the model {name} with data {data_name}")
     
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training done on {device}")
     
     # Setup directories and config
+    plotdir = util.make_output_directory("plot", file_name)
     outdir = util.make_output_directory(f"kfold_model/trained_models_{name}", config["outdir"])
+    
+    # Save the config file to the main dir
     util.save_config_file(config, outdir)
-    config_path = os.path.join(f"kfold_model/trained_models_{name}_{data_name}/trained_models", f"config_{name}_{data_name}.yml")
+    config_path = os.path.join(f"kfold_model/{file_name}/", f"config_{file_name}.yml")
     config["outdir"] = os.path.join(config["outdir"], f"seed{args.seed}")
-    outdir = util.make_output_directory(f"kfold_model/trained_models_{name}_{data_name}", config["outdir"])
+    print(f"Config file saved to {config_path}")
+    outdir = util.make_output_directory(f"kfold_model/{file_name}", config["outdir"])
 
-    train_data, test_data = select_data(name, data_name)
-    nbr_const, nbr_feat = util.print_data_deets(train_data, "Training")
+    train_data, _ = select_data(name, data_name)
     
     criterion = nn.CrossEntropyLoss().to(device)
 
-    fold_history, fold_predictions, val_accuracy = train_specific_fold(train_data, criterion, config, device, args.kfold)
+    fold_history, fold_predictions, val_accuracy = train_specific_fold(train_data, criterion, config, device, args.kfold, outdir)
     
     # Save results for this fold
-    np.save(f'fold_history_{args.kfold}.npy', fold_history)
-    np.save(f'fold_predictions_{args.kfold}.npy', fold_predictions)
+    np.save(f'{outdir}/fold_history_{args.name}_{args.data_name}_{args.kfold}.npy', fold_history)
+    np.save(f'{outdir}/fold_predictions_{args.name}_{args.data_name}_{args.kfold}.npy', fold_predictions)
     
     print(f"Fold {args.kfold} completed. Validation accuracy: {val_accuracy:.4f}")
 

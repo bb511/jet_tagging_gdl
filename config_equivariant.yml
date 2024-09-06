@@ -1,9 +1,9 @@
-outdir: 'trained_models'
+outdir: 'trained_models' # output directory for trained models (if you change this you should use the command --path 'your_new_outdir' when calling the test script)
 
 model_hyperparameter:
   deepset:
-    phi_layers: [32,32,32]
-    rho_layers: [32]
+    phi_layers: [64,64,32]
+    rho_layers: [32,32,16]
     activ: "relu"
     aggreg: "mean"
     dropout: -1
@@ -21,8 +21,8 @@ model_hyperparameter:
   vn_etaphi_rel:
     out_channel: 5
     hidden : 43
-    num_layers: 4
-    hidden_mlp : 16
+    num_layers: 5
+    hidden_mlp : 32
     num_layers_mlp : 3
   vector_neuron_lorentz:
     out_channel: 5
@@ -49,9 +49,8 @@ model_hyperparameter:
     norm: None
 
 training_hyperparams : 
-  epochs :  1000
-  lr : 0.001
-  batch_size: 1024
-  loss_inv : False
+  epochs :  3
+  lr : 0.01
+  batch_size: 256
 
 validation : True

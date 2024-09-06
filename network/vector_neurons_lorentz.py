@@ -1,4 +1,5 @@
 # adapted from https://github.com/FlyingGiraffe/vnn/blob/master/models/vn_layers.py
+# potentially use instead of the linear combination of the four vectors the linear combination of the 4-vectors divided by the number of 4-vectors in it
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,8 +29,14 @@ class VNLinear(nn.Module):
         self.dim_out = dim_out
         
         self.linear = nn.Linear(dim_in, dim_out, bias = False)
+        self.parameter = nn.Parameter(torch.ones(1))
     def forward(self, x):
-        x = self.linear(x.transpose(1,-1)).transpose(1,-1)
+        nbr_vectors = x.shape[1]
+        assert nbr_vectors != 0, "The number of vectors is zero"
+        norm_coeff = self.parameter / nbr_vectors
+        
+        x = self.linear(x.transpose(1,-1)).transpose(1,-1) #* norm_coeff # potentially use instead of the linear combination of the four vectors the linear combination of the 4-vectors divided by the number of 4-vectors in it
+        
         #print(x.shape, x.nonzero().shape) # check if the output is sparse
         return x
     

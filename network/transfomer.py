@@ -1,3 +1,6 @@
+# Transformer, this implementation is based on the paper "Attention is All You Need" (https://arxiv.org/abs/1706.03762)
+# and the PyTorch implementation (https://pytorch.org/docs/stable/_modules/torch/nn/modules/transformer.html#Transformer)
+# This has been suggested by Maximilian Herde (but I am the one to blame for wrong usage)
 import torch
 import torch.nn as nn
 

@@ -1,5 +1,5 @@
 # DeepSets implementation from DeepSets - Zaheer et. al.
-# This is modified from Patrick code
+# This is slightly modified from Patrick code
 
 import numpy as np
 

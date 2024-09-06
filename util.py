@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchinfo
+import deepspeed
 import matplotlib.pyplot as plt
 
 from network.deepsets import DeepSetsEquivariant
@@ -233,23 +234,7 @@ def flatten_vect(x:np.array):
         x_flat[i] = x[i].flatten('C')
     return x_flat
 
-def weights_plot(model, name = 'weights'):
-    """Plots the distribution of the weights of the model per layer"""
-    print(tcols.OKBLUE + "Plotting the weights of the model..." + tcols.ENDC)
-    num_layers = int(len(list(model.parameters())))#//2
-    print(f"Number of layers: {num_layers}")
-    fig, axs = plt.subplots(num_layers, 1, figsize=(20, 40))
-    fig.suptitle("Weights distribution per layer")
-    for idx, parameter in enumerate(model.parameters()):
-        if len(list(parameter.shape)) == 2:
-            axs[idx].set_title(f"Weights in layer {idx//2 + 1}")
-            axs[idx].hist(parameter.detach().cpu().numpy().flatten(), bins=100, alpha = 0.5, color="#648400")
-        else:
-            axs[idx].set_title(f"Bias in layer {idx//2 + 1}")
-            axs[idx].hist(parameter.detach().cpu().numpy().flatten(), bins=100, alpha = 0.5, color="#648FFF")
-    plt.savefig(f"plot/{name}_weights.png")
-    plt.close()
-    print(f"Weights plot saved to plot/{name}_weights.png")
+
 
 
 def compute_roc_stats(all_fold_predictions, n_classes=5):
@@ -428,226 +413,71 @@ def dnn_output_uncertainty(outdir: str, all_fold_predictions: np.ndarray, name =
     plt.close()
     print(f"DNN output histograms plot saved to {outdir}.")
     
-def compute_inference_time(model, x, name, device, config_path):
+def compute_inference_time(model:nn.Module, x:torch.Tensor, device):
     """Function that compute the inference time of a model"""
     batch_size = x.size(0)
-    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer", "vector_neuron_reg"]:
-        print('')
-    else:
-        raise ValueError(
-            f"The model {name} is not implemented!"
-            )
     data = x.to(device)
     t0 = time.time()
     y = model(data.to(device))
     t1 = time.time()
     inf_time = (t1-t0)/ batch_size
     print(f"The time take for inference over {1} datapoints, was {inf_time:.2E} seconds")
-
-
     
-def check_invariance(model, x, name, device, config_path, val = False):
-    nbr_const, nbr_feat = x.size(1), x.size(2)
+def compute_flops(model, x, device):
+    """Function that compute the number of flops of a model"""
+    x = x.to(device)
+    prof = deepspeed.profiling.flops_profiler.FlopsProfiler(model)
+    prof.start_profile()
+    model(x)
+    prof.stop_profile()
+    print(tcols.OKGREEN + "Model flops: " + tcols.ENDC, end="")
+    print(f"{prof.get_total_flops()/ x.shape[0]}")
+    prof.end_profile()
+
+def create_rot_matrices(nbr_rot:int):
+    """Function to create a rotation matrices using SVD decomposition"""
+    rot_mats = []
+    for _ in range(nbr_rot):
+        R = np.random.rand(3, 3)
+        U, _, __ = np.linalg.svd(R)
+        #generate an element of SO(3)
+        R = U@U
+        rot_mats.append(R)
+    return rot_mats
+    
+def check_invariance(model:nn.Module, x:torch.Tensor, nbr_rot:int, device):
+    """Function that checks the invariance of the model to rotations"""
+    
+    _, nbr_feat = x.size(1), x.size(2)
     try:
         assert nbr_feat == 3, "The number of features should be 3"
     except:
         if nbr_feat == 5:
             print(tcols.WARNING + "The number of features is 5, this should be the case only if you work with px,py,pz, eta_rel, phi_rel" + tcols.ENDC)
-        
         else:
             print("The number of features should be 3 for the invariance check!")
             return 1000000.0
 
-    batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz", "vn_etaphi_rel", "transformer", "vector_neuron_reg"]:
-        input = x.to(device)
-        rot_mats = []
-        for _ in range(16):
-            R = np.random.rand(3, 3)
-            U, _, __ = np.linalg.svd(R)
-            #generate an element of SO(3)
-            R = U@U
-            rot_mats.append(R)
-        err = np.zeros(len(rot_mats))
-        for i in range(len(rot_mats)):
-            a = model(input)
-            
-            if nbr_feat == 5:
-                rot_input = input[:, :, :3] @ torch.tensor(rot_mats[i]).to(torch.float32).to(device)
-                concat_input = torch.cat((rot_input, input[:,:,3:]), dim = 2)
-                b = model(concat_input)
-            else:
-                b = model(input @ torch.tensor(rot_mats[i]).to(torch.float32).to(device))
-            
-            err[i] = torch.norm(b-a)/torch.norm(a)
-        mean_err = err.mean()
-        print(f'The mean invariance error is {mean_err*100}%')
-    else:
-        raise ValueError(
-            f"The model {name} is not implemented!"
-            )
-        
-def check_invariance_Lorentz(model, x, name, device, val = False):
-    """Function that checks the invariance of the model to Lorentz transformations"""
-    nbr_const, nbr_feat = x.shape[1], x.shape[2]
-    try:
-        assert nbr_feat == 4, "The number of features should be 4"
-    except:
-        if nbr_feat == 5:
-            print(tcols.WARNING + "The number of features is 5, this should be the case only if you work with px,py,pz, eta_rel, phi_rel" + tcols.ENDC)
-        
-        else:
-            print("The number of features should be 4 for the invariance check!")
-            return 1000000.0
-
-    batch_size = 1000
-    if name in ["deepset", "vector_neuron", "vector_neuron_lorentz","vn_etaphi_rel", "transformer", "vector_neuron_reg"]:
-        input = x.to(device)
-        rot_mats = []
-        for _ in range(16):
-            R = np.random.rand(3, 3)
-            U, _, V = np.linalg.svd(R)
-            #generate two elements of SO(3)
-            P = U@U
-            Q = V@V
-            #R = U
-            M = np.zeros((4,4))
-            M[:-1, :-1] = P
-            M[-1,-1]= 1
-            M = torch.tensor(M).to(torch.float32).to(device)
-            N = np.zeros((4,4))
-            N[:-1, :-1] = np.transpose(Q)
-            N[-1,-1]= 1
-            N = torch.tensor(N).to(torch.float32).to(device)
-            rot_mats.append((M,N))
-        rapidity = torch.rand(len(rot_mats))
-        err = torch.zeros(len(rot_mats))
-        for i in range(len(rot_mats)):
-            # any matrix in SO(3,1) can be written as a product of the following matrices
-            matrix = rot_mats[i][0] @ torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0],[0,0,torch.cosh(rapidity[i]), torch.sinh(rapidity[i])], [0,0,torch.sinh(rapidity[i]), torch.cosh(rapidity[i])]]).to(torch.float32).to(device) @ rot_mats[i][1]
-            matrix = torch.transpose(matrix,1,0)
-            a = model(input)
-            
-            if nbr_feat == 5:
-                rot_input = input[:, :, :3] @ matrix
-                concat_input = torch.cat((rot_input, input[:,:,3:]), dim = 2)
-                b = model(concat_input)
-            else:
-                
-                b = model(input @ matrix)
-            
-            err[i] = torch.norm(b-a)/torch.norm(a)
-        mean_err = err.mean()
-        print(f'The mean invariance error is {mean_err*100}% for Lorentz transformations')
-    else:
-        raise ValueError(
-            f"The model {name} is not implemented!"
-            )
-        
-
-def create_rot_mat(theta, phi, psi, device):
-    """Function to create a rotation matrices from the Euler angles"""
-    dic_rot = {}
-    Rz = torch.tensor([[np.cos(theta), -np.sin(theta), 0],
-                    [np.sin(theta), np.cos(theta), 0],
-                    [0, 0, 1]]).to(device)
-    Ry = torch.tensor([[np.cos(phi), 0, np.sin(phi)],
-                    [0, 1, 0],
-                    [-np.sin(phi), 0, np.cos(phi)]]).to(device)
-    Rx = torch.tensor([[1, 0, 0],
-                    [0, np.cos(psi), -np.sin(psi)],
-                    [0, np.sin(psi), np.cos(psi)]]).to(device)
-    dic_rot['R'] = Rz @ Ry @ Rx
-    angles = np.linspace(0, 2*np.pi, 8)
-    for angle_theta in angles:
-        for angle_phi in angles:
-            for angle_psi in angles:
-                Rz = torch.tensor([[np.cos(theta + angle_theta), -np.sin(theta + angle_theta), 0],
-                            [np.sin(theta + angle_theta), np.cos(theta + angle_theta), 0],
-                            [0, 0, 1]])
-                Ry =torch.tensor([[np.cos(phi + angle_phi), 0, np.sin(phi + angle_phi)],
-                            [0, 1, 0],
-                            [-np.sin(phi + angle_phi), 0, np.cos(phi + angle_phi)]])
-                Rx = torch.tensor([[1, 0, 0],
-                            [0, np.cos(psi + angle_psi), -np.sin(psi + angle_psi)],
-                            [0, np.sin(psi + angle_psi), np.cos(psi + angle_psi)]])
-                dic_rot[f'{angle_theta}, {angle_phi}, {angle_psi}'] = Rz @ Ry @ Rx
-    dic_rot['Id'] = torch.eye(3)
-    return dic_rot
-
-
-def inv_err(model, criterion, x, y_pred, y_true, l, device):
-    """
-    Calculates the invariant error for a given model and input data.
-
-    Args:
-        model (torch.nn.Module): The model to evaluate.
-        criterion (torch.nn.Module): The loss function.
-        x (torch.Tensor): The input data.
-        y_pred (torch.Tensor): The predicted output.
-        y_true (torch.Tensor): The true output.
-        l (float): The weight for the mean error term.
-        device (torch.device): The device to perform computations on.
-
-    Returns:
-        torch.Tensor: The total loss, including the mean error and the invariant loss.
-    """
-    batch_size = 256
-    input = torch.randn((batch_size, x.shape[1], x.shape[2])).to(device)
-    theta, phi, psi = np.random.rand(3)
-    rot_mats = create_rot_mat(theta, phi, psi, device)
-    err = torch.zeros(rot_mats.shape[0])
-    for i in rot_mats.keys():
-        #input = from_pt_eta_phi_to_px_py_pz(input)
-        a = model(input)
-        b = model(input @ rot_mats[i])
-        err[i] = torch.norm(b-a)#/torch.norm(a)
-    mean_err = err.mean()
-    #print(f'The mean invariance error is {mean_err*100}%')
-    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
-
-def inv_err_rand(model, criterion, x, y_pred, y_true, l, device):
-    input = x
-    rot_mats = torch.zeros((16, 3,3)).to(device)
-    for i in range(rot_mats.shape[0]):
-        R = np.random.rand(3, 3)
-        U, _, __ = np.linalg.svd(R)
-        #generate an element of SO(3)
-        R = U@U
-        rot_mats[i] = torch.tensor(R).to(torch.float32).to(device)
-    err = torch.zeros(rot_mats.shape[0])
-    for i in range(rot_mats.shape[0]):
-        a = model(input)
-        b = model(input @ rot_mats[i])
-        err[i] = torch.norm(b-a)/torch.norm(a)
-    mean_err = err.mean()
-    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
-
-def inv_err_rand_eta_phi(model, criterion, x, y_pred, y_true, l, device):
-    input = x
-    assert x.shape[2] == 5, "The number of features should be 5"
-    rot_mats = torch.zeros((16, 3,3)).to(device)
-    for i in range(rot_mats.shape[0]):
-        R = np.random.rand(3, 3)
-        U, _, __ = np.linalg.svd(R)
-        #generate an element of SO(3)
-        R = U@U
-        rot_mats[i] = torch.tensor(R).to(torch.float32).to(device)
-    err = torch.zeros(rot_mats.shape[0])
-    for i in range(rot_mats.shape[0]):
-        a = model(input)
-        px_py_pz = input[:, :, :3]
-        rot_input = px_py_pz @ rot_mats[i]
-        concat_input = torch.cat((rot_input, input[:,:,3:]), dim = 2)
-        b = model(concat_input)
-        err[i] = torch.norm(b-a)/torch.norm(a)
-    mean_err = err.mean()
-    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
-
-def inv_error_lorentz(model, criterion, x, y_pred, y_true, l, device):
-    """Function that checks the invariance of the model to Lorentz transformations"""
+    input = x.to(device)
+    rot_mats = create_rot_matrices(nbr_rot)
     
-    input = x
+    err = np.zeros(len(rot_mats))
+    for i in range(len(rot_mats)):
+        a = model(input)
+        
+        if nbr_feat == 5:
+            rot_input = input[:, :, :3] @ torch.tensor(rot_mats[i]).to(torch.float32).to(device)
+            concat_input = torch.cat((rot_input, input[:,:,3:]), dim = 2)
+            b = model(concat_input)
+        else:
+            b = model(input @ torch.tensor(rot_mats[i]).to(torch.float32).to(device))
+        
+        err[i] = torch.norm(b-a)/torch.norm(a)
+    mean_err = err.mean()
+    print(f'The mean invariance error is {mean_err*100}%')
+    
+def create_Lorentz_mat(nbr_rot:int, device):
+    """Function to create Lorentz matrices using characterization of Lorentz transformations"""
     rot_mats = []
     for _ in range(16):
         R = np.random.rand(3, 3)
@@ -655,7 +485,6 @@ def inv_error_lorentz(model, criterion, x, y_pred, y_true, l, device):
         #generate two elements of SO(3)
         P = U@U
         Q = V@V
-        #R = U
         M = np.zeros((4,4))
         M[:-1, :-1] = P
         M[-1,-1]= 1
@@ -665,18 +494,34 @@ def inv_error_lorentz(model, criterion, x, y_pred, y_true, l, device):
         N[-1,-1]= 1
         N = torch.tensor(N).to(torch.float32).to(device)
         rot_mats.append((M,N))
+    return rot_mats
+    
+        
+def check_invariance_Lorentz(model, x, nbr_rot, device):
+    """Function that checks the invariance of the model to Lorentz transformations"""
+    nbr_const, nbr_feat = x.shape[1], x.shape[2]
+    try:
+        assert nbr_feat == 4, "The number of features should be 4"
+    except:
+        print("The number of features should be 4 for the invariance check!")
+        return 1000000.0
+
+    input = x.to(device)
+    rot_mats = create_Lorentz_mat(nbr_rot, device)
     rapidity = torch.rand(len(rot_mats))
     err = torch.zeros(len(rot_mats))
     for i in range(len(rot_mats)):
         # any matrix in SO(3,1) can be written as a product of the following matrices
         matrix = rot_mats[i][0] @ torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0],[0,0,torch.cosh(rapidity[i]), torch.sinh(rapidity[i])], [0,0,torch.sinh(rapidity[i]), torch.cosh(rapidity[i])]]).to(torch.float32).to(device) @ rot_mats[i][1]
         matrix = torch.transpose(matrix,1,0)
+        
         a = model(input)
         b = model(input @ matrix)
         
         err[i] = torch.norm(b-a)/torch.norm(a)
     mean_err = err.mean()
-    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
+    print(f'The mean invariance error is {mean_err*100}% for Lorentz transformations')
+
 
 def permute_constituents(data: torch.Tensor):
     """Applies a random translation to each data point."""
@@ -685,11 +530,10 @@ def permute_constituents(data: torch.Tensor):
 
     return data
 
-def check_permutation_invariance(model, x, name, device, config_path, val = False):
+def check_permutation_invariance(model, x, nbr_perm, device):
     """Function that checks the permutation invariance of the model"""
-    batch_size = 1000  
     input = x.to(device)
-    err = np.zeros(16)
+    err = np.zeros(nbr_perm)
     for i in range(err.shape[0]):
         a = model(input)
         b = model(permute_constituents(input).to(device))
@@ -698,42 +542,16 @@ def check_permutation_invariance(model, x, name, device, config_path, val = Fals
     print("The mean permutation invariance error is ", mean_err * 100, "%")
     return mean_err
 
-def permutation_err(model, criterion, x, y_pred, y_true, l, device):
-    """
-    Calculates the invariant error for a given model and input data.
-
-    Args:
-        model (torch.nn.Module): The model to evaluate.
-        criterion (torch.nn.Module): The loss function.
-        x (torch.Tensor): The input data.
-        y_pred (torch.Tensor): The predicted output.
-        y_true (torch.Tensor): The true output.
-        l (float): The weight for the mean error term.
-        device (torch.device): The device to perform computations on.
-
-    Returns:
-        torch.Tensor: The total loss, including the mean error and the invariant loss.
-    """
-    batch_size = 256
-    input = torch.randn((batch_size, x.shape[1], x.shape[2])).to(device)
-    err = np.zeros(16)
-    for i in range(err.shape[0]):
-        a = model(input)
-        b = model(permute_constituents(input).to(device))
-        err[i] = torch.norm(b-a)/torch.norm(a)
-    mean_err = err.mean()
-    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
 
 def check_inv(model, x, device):
+    """Function that checks the invariance of the model to rotations for the data
+        px_py_pz_eta_rel_phi_rel
+        px_py_pz
+        px_py_pz_E
+    """
     model.eval()
     input = x
-    rot_mats = []
-    for _ in range(16):
-        R = np.random.rand(3, 3)
-        U, _, __ = np.linalg.svd(R)
-        #generate an element of SO(3)
-        R = U@U
-        rot_mats.append(R)
+    rot_mats = create_rot_matrices(16)
     err = np.zeros(len(rot_mats))
     if x.shape[2] == 5:
         for i in range(len(rot_mats)):
@@ -743,10 +561,7 @@ def check_inv(model, x, device):
             input_cat = torch.cat((rot_input, input[:,:,3:]), dim = 2)
             b = model(input_cat)
             err[i] = torch.norm(b-a)/torch.norm(a)
-                #print(torch.norm(b-a), torch.norm(a))
-                #c = model(input) @ rot_mat
         mean_err = err.mean()
-        #print(f'The mean invariance error is {mean_err*100}%')
         return mean_err
     elif x.shape[2] == 3:
         for i in range(len(rot_mats)):
@@ -756,23 +571,7 @@ def check_inv(model, x, device):
         mean_err = err.mean()
         return mean_err
     elif x.shape[2] == 4:
-        rot_mats = []
-        for _ in range(16):
-            R = np.random.rand(3, 3)
-            U, _, V = np.linalg.svd(R)
-            #generate two elements of SO(3)
-            P = U@U
-            Q = V@V
-            #R = U
-            M = np.zeros((4,4))
-            M[:-1, :-1] = P
-            M[-1,-1]= 1
-            M = torch.tensor(M).to(torch.float32).to(device)
-            N = np.zeros((4,4))
-            N[:-1, :-1] = np.transpose(Q)
-            N[-1,-1]= 1
-            N = torch.tensor(N).to(torch.float32).to(device)
-            rot_mats.append((M,N))
+        rot_mats = create_Lorentz_mat(16, device)
         rapidity = torch.rand(len(rot_mats))
         err = torch.zeros(len(rot_mats))
         for i in range(len(rot_mats)):
@@ -792,6 +591,7 @@ def check_inv(model, x, device):
         
 
 def augerino_loss(model, criterion, y_pred, y_true):
+    """Custom loss function for the Augerino model"""
     theta = model.theta_tilde
     return  criterion(y_pred, torch.argmax(y_true, dim = 1)) - 0.1 * torch.norm(theta)**2
 
@@ -850,35 +650,6 @@ def preprocess_scalar(x: np.array) -> np.array:
     
     return z
 
-def inv_err_phi(model, criterion, x, y_pred, y_true, l, device):
-    """
-    Calculates the invariant error for a given model and input data.
-
-    Args:
-        model (torch.nn.Module): The model to evaluate.
-        criterion (torch.nn.Module): The loss function.
-        x (torch.Tensor): The input data.
-        y_pred (torch.Tensor): The predicted output.
-        y_true (torch.Tensor): The true output.
-        l (float): The weight for the mean error term.
-        device (torch.device): The device to perform computations on.
-
-    Returns:
-        torch.Tensor: The total loss, including the mean error and the invariant loss.
-    """
-    batch_size = 256
-    input = torch.randn((batch_size, x.shape[1], x.shape[2])).to(device)
-    phi = np.random.rand(1)
-    phi_list = np.linspace(0, 2*np.pi, 36)
-    err = torch.zeros(phi_list.shape[0])
-    for i in range(phi_list.shape[0]):
-        a = model(input)
-        phi_dim = input[:, :, 2] + phi_list[i]
-        rot_input = torch.cat((input[:, :, 0:2], phi_dim.unsqueeze(-1)), dim = 2)
-        b = model(rot_input)
-        err[i] = torch.norm(b-a)/torch.norm(a)
-    mean_err = err.mean()
-    return l * mean_err + criterion(y_pred, torch.argmax(y_true, dim = 1))
     
 def no_zero_loss(net, criterion, x, y_pred, y_true):
     batch_size = 256
