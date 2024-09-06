@@ -1,0 +1,55 @@
+model_hyperparameter:
+  deepset:
+    activ: relu
+    aggreg: mean
+    dropout: -1
+    output_dim: 5
+    phi_layers:
+    - 64
+    - 64
+    - 32
+    rho_layers:
+    - 32
+    - 32
+    - 16
+  dgcnn:
+    n_knn: 8
+    output: 5
+    pooling: mean
+  graph_net:
+    hidden_channels: 32
+    num_layers: 3
+    out_channels: 5
+  transformer:
+    d_models: 128
+    lifting_dim: 128
+    nhead: 8
+    norm: None
+    num_layers: 4
+    output_size: 5
+  vector_neuron:
+    add_mlp: false
+    hidden: 43
+    num_layers: 4
+    out_channel: 5
+  vector_neuron_lorentz:
+    hidden: 32
+    num_layers: 4
+    out_channel: 5
+  vn_dgcnn:
+    n_knn: 8
+    output: 5
+    pooling: mean
+  vn_etaphi_rel:
+    hidden: 43
+    hidden_mlp: 16
+    num_layers: 4
+    num_layers_mlp: 3
+    out_channel: 5
+outdir: trained_models_px_py_pz_eta_phi_sym_loss
+training_hyperparams:
+  batch_size: 64
+  epochs: 100
+  loss_inv: so3_eta_phi
+  lr: 0.001
+validation: true

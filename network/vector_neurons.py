@@ -1,9 +1,5 @@
 # adapted from https://github.com/FlyingGiraffe/vnn/blob/master/models/vn_layers.py
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-
 import torch 
 import torch.nn as nn
 import torch.optim as optim

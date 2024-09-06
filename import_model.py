@@ -7,16 +7,8 @@ import torch.nn.functional as F
 
 from network.deepsets import DeepSetsInvariant
 from network.vector_neurons import Vect_Neuron
-from network.vector_neurons import Vect_Neuron_etaphi_rel
-from network.vector_neurons_lorentz import Vect_Neuron_Lorentz
-#from network.vn_dgcnn import VN_DGCNN 
-#from network.dgcnn import DGCNN
 from network.transfomer import Transformer
-from network.vector_neurons import Vect_Neuron
-#from network.graph_net import MultiLayerEdgeConv
 
-import util
-import pickle
 
 def get_model(name : str, nbr_const : int, nbr_feat : int, model_hyperparamter: dict):
     """Function that choose the model to train"""
