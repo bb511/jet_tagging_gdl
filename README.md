@@ -51,9 +51,11 @@ The requirement for the code are put in the `equivariance_env.yml` file. Once yo
 conda create env --file equivariance_env.yml
 ```
 it should automatically create a environnement named equivariance_env. If this does not work here are the important requirement for the code to run
+```
 conda create -n myenv python=3.11 numpy=2.2.3 matplotlib=3.10.0 pytorch=2.6.0 pyyaml=6.0.2 pip=23.3.1
 conda activate myenv
 pip install torchinfo==1.8.0 deepspeed==0.16.4 scikit-learn==1.6.1 scipy==1.15.2 wget==3.2 h5py==3.13.0
+```
 ```
 torch
 tqmd
