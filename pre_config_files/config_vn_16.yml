@@ -1,0 +1,48 @@
+#outdir: 'trained_models' # output directory for trained models (if you change this you should use the command --path 'your_new_outdir' when calling the test script)
+outdir: 'folds_report_so3'
+
+model_hyperparameter:
+  deepset:
+    phi_layers: [64,64,32]
+    rho_layers: [32,32,16]
+    activ: "relu"
+    aggreg: "mean"
+    dropout: -1
+    output_dim: 5
+  vector_neuron:
+    out_channel: 5
+    hidden : 33
+    num_layers: 5
+    add_mlp : False
+  vector_neuron_so2:
+    out_channel: 5
+    hidden : 33
+    num_layers: 5
+    add_mlp : False
+  vector_neuron_lorentz:
+    out_channel: 5
+    hidden : 20
+    num_layers: 2
+  transformer:
+    lifting_dim: 128
+    num_layers: 4
+    d_models: 128
+    nhead: 8
+    output_size: 5
+    norm: None
+
+training_hyperparams : 
+  epochs : 2000
+  lr : 0.03
+  batch_size: 256
+
+data_hyperparams:
+  split_seed: 12
+  split_ration: 0.8
+  augment_seed: 15
+  augmentation_type: 'random'
+  norm: 'minmaxcustom'
+  norm_outside: True
+  total_folds: 5
+
+validation : True

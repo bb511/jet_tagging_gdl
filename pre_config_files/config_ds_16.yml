@@ -1,0 +1,73 @@
+#outdir: 'trained_models' # output directory for trained models (if you change this you should use the command --path 'your_new_outdir' when calling the test script)
+outdir: 'folds_report'
+
+model_hyperparameter:
+  deepset:
+    phi_layers: [64,32,32]
+    rho_layers: [32,16]
+    activ: "relu"
+    aggreg: "mean"
+    dropout: -1
+    output_dim: 5
+  vector_neuron:
+    out_channel: 5
+    hidden : 20
+    num_layers: 5
+    add_mlp : False
+  vector_neuron_reg:
+    out_channel: 8
+    hidden : 40
+    num_layers: 5
+    add_mlp : False
+  vn_etaphi_rel:
+    out_channel: 5
+    hidden : 43
+    num_layers: 5
+    hidden_mlp : 32
+    num_layers_mlp : 3
+  vector_neuron_lorentz:
+    out_channel: 5
+    hidden : 20
+    num_layers: 2
+  vn_dgcnn:
+    n_knn : 8
+    output : 5
+    pooling : "mean"
+  dgcnn:
+    n_knn : 8
+    output : 5
+    pooling : "mean"
+  graph_net:
+    hidden_channels : 32
+    out_channels : 5 
+    num_layers : 3
+  transformer:
+    lifting_dim: 128
+    num_layers: 4
+    d_models: 128
+    nhead: 8
+    output_size: 5
+    norm: None
+
+training_hyperparams : 
+  epochs :  300
+  lr : 0.0028
+  batch_size: 256
+
+data_hyperparams:
+  split_seed: 12
+  split_ration: 0.8
+  augment_seed: null
+  augmentation_type: 'scipy'
+  augmentation_space: 'so2'
+  compare_to_label: False     # when using rotation loss
+  filters:
+    pt: [0, 1600]
+    eta: [-3, 3]
+    etarel: [-0.5, 0.5]
+    phirel: [-0.5, 0.5]
+  norm: 'minmaxcustom'
+  norm_outside: True
+  total_folds: 5
+
+validation : True
