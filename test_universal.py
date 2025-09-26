@@ -1,7 +1,6 @@
 import os
 import argparse
 import yaml
-import json
 import pickle
 from pathlib import Path
 
@@ -20,21 +19,17 @@ import random
 #random.seed(args.seed)
 import numpy as np
 #np.random.seed(args.seed)
-import matplotlib.pyplot as plt
 
 import torch 
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
 #torch.manual_seed(args.seed)
 #torch.cuda.manual_seed_all(args.seed)
 
 from data_extraction import DataSelection
-from import_model_reorg import get_model
+from import_model import get_model
 import data.standardization as standardization
 import data.plot_data as plot_data
 
-import custom_loss_new as custom_loss
+import custom_loss as custom_loss
 import util
 import plot_train
 from test_helpers import evaluate_model, plot_evaluation_metric, convert_value
@@ -147,21 +142,7 @@ def main():
         else:
             model = get_model(name, nbr_const, nbr_feat, coef_norm, config["model_hyperparameter"]).to(device)
         
-        # print("phi layers:")
-        # for j, layer in enumerate(model.phi):
-        #     print(f"  phi[{j}]: {layer}")
-
-        # print("rho layers:")
-        # for j, layer in enumerate(model.rho):
-        #     print(f"  rho[{j}]: {layer}")
-
-        # try:
-        #     model.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
-        # except RuntimeError as e:
-        #     print(f"Skipping fold {i} due to model mismatch: {e}")
-        #     continue
         model.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
-        
         model.to(device)
         print("")
         print(util.tcols.OKGREEN, f"Model {name} loaded from {model_file} and moved to {device}", util.tcols.ENDC)

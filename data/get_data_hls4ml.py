@@ -10,10 +10,21 @@ import h5py
 import numpy as np
 from typing import List, Tuple
 
-import data.standardization as standardization
 import data.plot_data as plot_data
-from data.compute_jet_info import compute_center_xy, compute_center_xyz, compute_center_pt_eta_phi, compute_center_energy, compute_center_xyz_pt_eta_phi
-import data.compute_jet_info as cji
+from data.compute_jet_info import compute_center_xy, compute_center_xyz, compute_center_xyzE ,compute_center_pt_eta_phi, compute_center_xyz_pt_eta_phi
+
+class tcols:
+    """Pretty terminal colors ooooo."""
+
+    HEADER = "\033[95m"
+    OKBLUE = "\033[94m"
+    OKCYAN = "\033[96m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
 
 class HLS4MLData150(object):
     """Data class for importing and processing the jet data.
@@ -193,17 +204,9 @@ class HLS4MLData150(object):
         elif self.feats == 'pt_eta_phi_jet_center':
             return compute_center_pt_eta_phi(x_data)
         elif self.feats == 'px_py_pz_E_jet_center':
-            return compute_center_energy(x_data)
+            return compute_center_xyzE(x_data)
         else:
             raise ValueError(f"Feature selection {self.feats} not valid for jet center computation Feel free to add your own jet info computation function in the compute_jet_info.py file.")
-        
-    def _compute_inv_feat(self, x_data: np.ndarray):
-        if self.feats == 'ptrelinv_etarelinv_phirelinv':
-            return cji.compute_ptrelinv_etarelinv_phirelinv(x_data)
-        elif self.feats == 'px_py_pz_etarelinv_phirelinv':
-            return cji.compute_xyz_etarelinv_phirelinv(x_data)
-        else:
-            raise ValueError(f"Feature selection {self.feats} not valid for relative features computation. Feel free to add your own jet info computation function in the compute_jet_info.py file.")
         
     def _preproc_raw_data(self, x_data: np.ndarray, y_data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         x_data, y_data = self._cut_transverse_momentum(x_data, y_data)
@@ -211,8 +214,6 @@ class HLS4MLData150(object):
         
         if "jet_center" in self.data_name:
             x_data = self._compute_center(x_data)
-        elif "ptrelinv" in self.data_name or "etarelinv" in self.data_name or "phirelinv" in self.data_name:
-            x_data = self._compute_inv_feat(x_data)
         else: # as jet_center already automatically removes it if needed
             x_data = self._remove_pt_if_not_original(x_data)
         
@@ -373,92 +374,8 @@ class HLS4MLData150(object):
             return x_data, y_data
         else:
             raise ValueError(f"Normalization {self.norm} not supported anymore in this class. Please use 'nonorm' instead.")
-    #     else:
-    #         if not self.train:
-    #             x_data_train = self._load_preproc_train_data()
-    #             norm_params = standardization.fit_standardisation(self.norm, x_data_train)
-    #             del x_data_train
-    #         else:
-    #             norm_params = standardization.fit_standardisation(self.norm, x_data)
-
-    #         x_data = standardization.apply_standardisation(x_data, norm_params)
-
-    #         proc_folder = self.processed_data_path
-    #         np.save(proc_folder / f"x_{self.proc_output_name}", x_data)
-    #         np.save(proc_folder / f"y_{self.proc_output_name}", y_data)
-
-    #         return x_data, y_data
-    #     # --------- not used anymore ------------
-        
-    # # --------- not used anymore ------------
-    # def _load_preproc_train_data(self):
-    #     preproc_file_name = f"x_preproc_{self.data_name}_train_{self.nconst}const.npy"
-    #     try:
-    #         x_data_train = np.load(self.processed_data_path / preproc_file_name)
-    #     except OSError as e:
-    #         print(f"Process the training data with {self.nconst} const before the test data.")
-    #         print("Exiting...")
-    #         exit(1)
-
-    #     return x_data_train
-    # # --------- not used anymore ------------
-
-
-class tcols:
-    """Pretty terminal colors ooooo."""
-
-    HEADER = "\033[95m"
-    OKBLUE = "\033[94m"
-    OKCYAN = "\033[96m"
-    OKGREEN = "\033[92m"
-    WARNING = "\033[93m"
-    FAIL = "\033[91m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
-    
+            
 class HLS4MLDataJets(HLS4MLData150):
-    def __init__(self, 
-                root: str, # Path to the root directory 
-                train: bool,
-                jet_name:str = "px_py_pz", # Name of the jet features
-                data_name: str = "px_py_pz_150", # Name of the data
-                norm: str = 'nonorm', # Normalization type
-                 # Whether to import the training data or validation data
-                ):
-        super().__init__(root, data_name, norm, train)
-        self.jet_name = jet_name
-        
-        self.jet_data_path = self.data_path / f"jet_{self.jet_name}"
-        self.jet_output_name = f"{self.jet_name}_{self.type}.npy"
-        self.jet_data_path.mkdir(parents=True, exist_ok=True)
-        
-        self.jet = None
-        self._get_jet_data()
-            
-    def _check_jet_data_exists(self):
-        """Checks if the jet data already exists."""
-        jet_folder = self.jet_data_path
-        jet_file = jet_folder / f"jet_{self.jet_output_name}"
-        
-        if jet_file.is_file():
-            print(f"{tcols.OKGREEN}Jet data already exists. Loading from {jet_file}{tcols.ENDC}")
-            self.jet = np.load(jet_file)
-            return True
-        return False
-    
-    def _get_jet_data(self):
-        if not self._check_jet_data_exists():
-            if self.jet_name == "px_py_pz":
-                jet_data = np.sum(self.x_pro, axis=1)
-            else:
-                raise ValueError(f"Jet name {self.jet_name} not recognized. Please use 'px_py_pz' or other valid jet feature names.")
-            jet_dir = self.jet_data_path
-            np.save(jet_dir / f"jet_{self.jet_output_name}", jet_data)
-            self.jet = jet_data
-            
-    
-class HLS4MLDataJets_old(HLS4MLData150):
     """
     Handles compute/save/load of jet centers for any raw-x_data.
     """
@@ -542,6 +459,8 @@ class HLS4MLDataJets_old(HLS4MLData150):
             return compute_center_pt_eta_phi(x_raw, separated=True)
         if self.jet_name == 'px_py_pz_pt_eta_phi':
             return compute_center_xyz_pt_eta_phi(x_raw, separated=True)
+        if self.jet_name == 'px_py_pz_E':
+            return compute_center_xyzE(x_raw, separated=True)
         raise ValueError(f"Unknown jet_center feat: {self.jet_name}")
 
     def _get_jet_data(self):
@@ -552,6 +471,45 @@ class HLS4MLDataJets_old(HLS4MLData150):
             self.jet = self._compute_jet_data(self.x_raw)
             del self.x_raw
             
+# class HLS4MLDataJets_sum(HLS4MLData150):
+#     def __init__(self, 
+#                 root: str, # Path to the root directory 
+#                 train: bool,
+#                 jet_name:str = "px_py_pz", # Name of the jet features
+#                 data_name: str = "px_py_pz_150", # Name of the data
+#                 norm: str = 'nonorm', # Normalization type
+#                  # Whether to import the training data or validation data
+#                 ):
+#         super().__init__(root, data_name, norm, train)
+#         self.jet_name = jet_name
+        
+#         self.jet_data_path = self.data_path / f"jet_{self.jet_name}"
+#         self.jet_output_name = f"{self.jet_name}_{self.type}.npy"
+#         self.jet_data_path.mkdir(parents=True, exist_ok=True)
+        
+#         self.jet = None
+#         self._get_jet_data()
+            
+#     def _check_jet_data_exists(self):
+#         """Checks if the jet data already exists."""
+#         jet_folder = self.jet_data_path
+#         jet_file = jet_folder / f"jet_{self.jet_output_name}"
+        
+#         if jet_file.is_file():
+#             print(f"{tcols.OKGREEN}Jet data already exists. Loading from {jet_file}{tcols.ENDC}")
+#             self.jet = np.load(jet_file)
+#             return True
+#         return False
+    
+#     def _get_jet_data(self):
+#         if not self._check_jet_data_exists():
+#             if self.jet_name == "px_py_pz":
+#                 jet_data = np.sum(self.x_pro, axis=1)
+#             else:
+#                 raise ValueError(f"Jet name {self.jet_name} not recognized. Please use 'px_py_pz' or other valid jet feature names.")
+#             jet_dir = self.jet_data_path
+#             np.save(jet_dir / f"jet_{self.jet_output_name}", jet_data)
+#             self.jet = jet_data
     
     
 if __name__ == "__main__":

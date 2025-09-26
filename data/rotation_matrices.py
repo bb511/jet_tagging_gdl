@@ -3,6 +3,31 @@ from scipy.stats import qmc
 from scipy.spatial.transform import Rotation as R
 import torch
 
+#------------------------------SO(3) rotations--------------------------------#
+
+def sample_to_quaternion(sample):
+    theta1 = 2 * np.pi * sample[0]
+    theta2 = 2 * np.pi * sample[1]
+    u = sample[2]
+    v = sample[3]
+    
+    q = np.array([
+        np.sqrt(1 - u) * np.sin(theta1),
+        np.sqrt(1 - u) * np.cos(theta1),
+        np.sqrt(u) * np.sin(theta2),
+        np.sqrt(u) * np.cos(theta2)
+    ])
+    
+    return q / np.linalg.norm(q)
+
+def quaternion_to_rotation_matrix(q):
+    w, x, y, z = q
+    return np.array([
+        [1 - 2*y*y - 2*z*z,     2*x*y - 2*z*w,     2*x*z + 2*y*w],
+        [    2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z,     2*y*z - 2*x*w],
+        [    2*x*z - 2*y*w,     2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]
+    ])
+
 def create_rot_mat_sobol(num_rotations):
     sobol_engine = qmc.Sobol(d=4, scramble=True)
     sobol_samples = sobol_engine.random(n=num_rotations)
@@ -11,7 +36,6 @@ def create_rot_mat_sobol(num_rotations):
     for sample in sobol_samples:
         q = sample_to_quaternion(sample)
         rot_matrices.append(quaternion_to_rotation_matrix(q))
-    
     return np.array(rot_matrices)
 
 def create_rot_matrices_scipy(nbr_rot: int, seed: int = None):
@@ -48,28 +72,7 @@ def create_rot_mat_regular(num_rotations):
    
     return np.array(rot_matrices[:num_rotations])
 
-def sample_to_quaternion(sample):
-    theta1 = 2 * np.pi * sample[0]
-    theta2 = 2 * np.pi * sample[1]
-    u = sample[2]
-    v = sample[3]
-    
-    q = np.array([
-        np.sqrt(1 - u) * np.sin(theta1),
-        np.sqrt(1 - u) * np.cos(theta1),
-        np.sqrt(u) * np.sin(theta2),
-        np.sqrt(u) * np.cos(theta2)
-    ])
-    
-    return q / np.linalg.norm(q)
-
-def quaternion_to_rotation_matrix(q):
-    w, x, y, z = q
-    return np.array([
-        [1 - 2*y*y - 2*z*z,     2*x*y - 2*z*w,     2*x*z + 2*y*w],
-        [    2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z,     2*y*z - 2*x*w],
-        [    2*x*z - 2*y*w,     2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]
-    ])
+#------------------------------SO(2) rotations--------------------------------#
     
 def create_so2_rot_matrices(nbr_rot: int, seed: int = None):
     """Generate random SO(2) rotation matrices in the xy-plane (3x3 matrices)."""
@@ -86,6 +89,8 @@ def create_so2_rot_matrices(nbr_rot: int, seed: int = None):
     rot_mats[:, 2, 2] = 1.0  # pz unchanged
 
     return rot_mats
+
+#------------------------------Lorentz transformations--------------------------------#
 
 def create_Lorentz_mat(nbr_rot:int, device):
     """Function to create Lorentz matrices using characterization of Lorentz transformations"""
@@ -106,3 +111,43 @@ def create_Lorentz_mat(nbr_rot:int, device):
         N = torch.tensor(N).to(torch.float32).to(device)
         rot_mats.append((M,N))
     return rot_mats
+
+import numpy as np
+
+def create_lorentz_so2_rot_boost(nbr_rot: int, seed: int = None, eta_max: float = 2.0):
+    """
+    Generate random Lorentz transformations acting on vectors (px, py, pz, E).
+    Subgroup = SO(2) rotations around z + boosts along z.
+    Haar measure: θ ~ U[0,2π), η ~ U[-eta_max,eta_max].
+    """
+    seed = seed if seed is not None else np.random.randint(0, 1e6)
+    rng = np.random.default_rng(seed)
+
+    thetas = rng.uniform(0, 2 * np.pi, nbr_rot)  # SO(2) rotations
+    etas = rng.uniform(-eta_max, eta_max, nbr_rot)  # z-boosts
+
+    mats = np.zeros((nbr_rot, 4, 4), dtype=np.float32)
+
+    for i in range(nbr_rot):
+        theta = thetas[i]
+        eta = etas[i]
+
+        # rotation around z
+        R = np.array([
+            [np.cos(theta), -np.sin(theta), 0, 0],
+            [np.sin(theta),  np.cos(theta), 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+
+        # boost along z
+        B = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, np.cosh(eta), np.sinh(eta)],
+            [0, 0, np.sinh(eta), np.cosh(eta)]
+        ], dtype=np.float32)
+
+        mats[i] = B @ R
+
+    return mats

@@ -1,14 +1,20 @@
 #outdir: 'trained_models' # output directory for trained models (if you change this you should use the command --path 'your_new_outdir' when calling the test script)
-outdir: 'folds_report'
+outdir: 'l_pfn'
 
 model_hyperparameter:
-  deepset:
+  deepset: &deepset_params
     phi_layers: [64,32,32]
     rho_layers: [32,16]
     activ: "relu"
     aggreg: "mean"
     dropout: -1
     output_dim: 5
+  l_efn:
+    <<: *deepset_params
+  deepset_irc:
+    <<: *deepset_params
+  l_pfn:
+    <<: *deepset_params
   vector_neuron:
     out_channel: 5
     hidden : 20

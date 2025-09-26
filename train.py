@@ -12,6 +12,7 @@ parser.add_argument("--loss", type=str, default='default', choices=['default','s
 parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility (default: None)")
 parser.add_argument("--fold", type=int, default=None, help="Fold number for cross-validation (default: None)")
 parser.add_argument("--lam", type=float, default=0.001, help="Regularization weight λ, in case of using the symmetric loss")
+parser.add_argument("--nr_rot", type=int, default=8, help="Number of rotation matrices used for data augmentation")
 parser.add_argument("--outdir", type=str, default=None, help="Output directory for saving results, in case you want in a different file than in the config")
 parser.add_argument("--dataset_size", type=int, default=0, help="Size of the dataset to use for training. If 0, use the full dataset.")
 #parser.add_argument("--norm_outside", type=bool, default=True)
@@ -26,13 +27,13 @@ import torch.nn as nn
 import torch.optim as optim
 
 from data_extraction import DataSelection
-from import_model_reorg import get_model
+from import_model import get_model
 import data.standardization as standardization
 import data.plot_data as plot_data
 import util
 import plot_train
 from train_helpers import train_model, get_cosine_schedule_with_warmup
-import custom_loss_new as custom_loss
+import custom_loss as custom_loss
 
 if args.seed is not None:
     random.seed(args.seed)
@@ -89,6 +90,7 @@ def main(config):
         augment_seed=config["data_hyperparams"].get("augment_seed", 15),
         augmentation_type=config["data_hyperparams"].get("augmentation_type", 'scipy'),
         augmentation_space=config["data_hyperparams"].get("augmentation_space", 'so3'),
+        nbr_rot = args.nr_rot,
         norm_type=config["data_hyperparams"].get("norm", 'robust'),
         norm_outside=config["data_hyperparams"].get("norm_outside", True)
                                )

@@ -1,10 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
-
 import util
-
 
 def weights_plot(model: torch.nn.Module, plot_dir : str = "/plot",  name = 'weights'):
     """Plots the distribution of the weights of the model per layer

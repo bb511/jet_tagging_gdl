@@ -1,0 +1,16 @@
+AUC Scores:
+  Gluon: 0.8973845034405574
+  Quark: 0.8834085433499193
+  Top: 0.9411493745801413
+  W: 0.937439702718742
+  Z: 0.9231070166977869
+Invariance Properties:
+  Mean Invariance Error: 0.08150262018898502
+  Permutation Invariance: 2.1873440925190835e-07
+Model Specifications:
+  FLOPs: 113872.0
+  Inference Time (ms): 0.00014569517225027084
+  Number of Parameters: 5189
+Validation Performance:
+  Test Accuracy: 0.7088659405708313
+  Test Loss: 0.7980977097364861

@@ -6,8 +6,8 @@ username = 'sstelea'
 server = 'euler.ethz.ch'
 
 # User-defined parameter: total_folds
-total_folds = 5  # Set to None if no cross-validation is required
-run_name = "folds_report"
+total_folds = None  # Set to None if no cross-validation is required
+run_name = "decrease_flops3"
 
 # Connect to Euler cluster
 ssh_client = paramiko.SSHClient()
@@ -29,7 +29,7 @@ job_ids = []  # Store submitted job IDs
 for job in job_configs:
     if total_folds is not None:  # Cross-validation mode
         for fold in range(total_folds):  # Loop over folds
-            cmds = ['module load stack python_cuda/3.11.6;']  # Load required modules
+            cmds = ['module load stack/2024-06 gcc/12.2.0 python_cuda/3.11.6;']  # Load required modules
             cmds.append('cd jet_tagging; \n')  # Change directory to the project folder
 
             # Define SLURM job submission command with fold argument
@@ -58,7 +58,7 @@ for job in job_configs:
                 print(f"❌ Failed to submit job: {job['name']} (Fold {fold})")
                 print(stderr.read().decode())
     else:  # Original functionality (no cross-validation)
-        cmds = ['module load stack python_cuda/3.11.6;']  # Load required modules
+        cmds = ['module load stack/2024-06 gcc/12.2.0 python_cuda/3.11.6;']  # Load required modules
         cmds.append('cd jet_tagging; \n')  # Change directory to the project folder
 
         # Define SLURM job submission command without fold argument

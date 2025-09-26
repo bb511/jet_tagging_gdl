@@ -1,5 +1,5 @@
 #outdir: 'trained_models' # output directory for trained models (if you change this you should use the command --path 'your_new_outdir' when calling the test script)
-outdir: 'folds_so3_report'
+outdir: 'decrease_flops3'
 
 model_hyperparameter:
   deepset:

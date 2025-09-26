@@ -7,10 +7,8 @@ import torch
 import torch.nn as nn
 import deepspeed
 import matplotlib.pyplot as plt
-import data.standardization as standardization
 import matplotlib.pyplot as plt
 from sklearn import metrics
-import data.rotation_matrices as rm
 
 class tcols:
     """Pretty terminal colors ooooo."""

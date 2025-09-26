@@ -1,7 +1,6 @@
 import numpy as np
 import torch
-#from torch_geometric.data import Data # to create the graph data
-import util
+
 import data.get_data_hls4ml as get_data_hls4ml
 import data.data_augmentation as data_augmentation
 
@@ -14,7 +13,8 @@ from sklearn.model_selection import StratifiedKFold
 class DataSelection:
     def __init__(self, data_name: str, train: bool = True, jets=True,
                  dataset_size: int = None, split_ratio: float = 0.8, split_seed: int = 12, total_folds: int = 5, 
-                 augment_seed: int = 15, augmentation_type: str = 'scipy', augmentation_space='so3', filter_augmented: dict = {"eta":(-3,3), "pt":(0, 1600),"etarel":(-0.5,0.5), "phirel":(-0.5,0.5)},
+                 augment_seed: int = 15, augmentation_type: str = 'scipy', augmentation_space='so3', nbr_rot=8,
+                 filter_augmented: dict = {"eta":(-3,3), "pt":(0, 1600),"etarel":(-0.5,0.5), "phirel":(-0.5,0.5)},
                  norm_outside: bool = True, norm_type: str = 'minmaxcustom', norm_coef = None):
         
         self.true_data_name = data_name
@@ -27,17 +27,15 @@ class DataSelection:
             self.feat_name = "_".join(data_name.split("_")[:-3])
             self.data_name = self.feat_name + f"_{nbr_feat}"
             self.augment = True
-            if self.feat_name not in ['px_py_pz', 'px_py_pz_etarel_phirel']:
-                raise ValueError(f"Invalid feature name: {self.feat_name}. Expected 'px_py_pz' or 'px_py_pz_etarel_phirel'.")
-            self.augmentation = data_augmentation.DataAugmentation(self.feat_name, augmentation_type=augmentation_type, augmentation_space=augmentation_space, num_rotations=8, seed=augment_seed)
+            if self.feat_name not in ['px_py_pz', 'px_py_pz_etarel_phirel', 'px_py_pz_E', 'px_py_pz_E_etarel_phirel']:
+                raise ValueError(f"Invalid feature name: {self.feat_name}. Expected 'px_py_pz', 'px_py_pz_etarel_phirel', 'px_py_pz_E', or 'px_py_pz_E_etarel_phirel'.")
+            self.augmentation = data_augmentation.DataAugmentation(self.feat_name, augmentation_type=augmentation_type, augmentation_space=augmentation_space, num_rotations=nbr_rot, seed=augment_seed)
             
         else:
             self.data_name = data_name
             self.feat_name = "_".join(data_name.split("_")[:-1])
             self.augment = False
-            
-        #self.augment_seed = augment_seed
-        #self.augmentation_type = augmentation_type
+
         self.filter_augmented = filter_augmented
             
         self.split_ratio = split_ratio
@@ -51,17 +49,16 @@ class DataSelection:
         if self.train:
             self.train_data = get_data_hls4ml.HLS4MLData150(root=".", data_name=self.data_name, norm="nonorm", train=True)
             if self.jets:
-                self.jet_data = get_data_hls4ml.HLS4MLDataJets_old(root=".", jet_name="px_py_pz", train=True)
+                if 'px_py_pz_E' in self.data_name:
+                    self.jet_data = get_data_hls4ml.HLS4MLDataJets(root=".", jet_name="px_py_pz_E", train=True)
+                else:
+                    self.jet_data = get_data_hls4ml.HLS4MLDataJets(root=".", jet_name="px_py_pz", train=True)
         else:
             self.test_data = get_data_hls4ml.HLS4MLData150(root=".", data_name=self.data_name, norm="nonorm", train=False)
             if self.jets:
-                self.jet_data_test = get_data_hls4ml.HLS4MLDataJets_old(root=".", jet_name="px_py_pz", train=False)
+                self.jet_data_test = get_data_hls4ml.HLS4MLDataJets(root=".", jet_name="px_py_pz", train=False)
             
     def split_train(self, x, y, jet):
-        # if self.dataset_size is not None:
-        #     x = x[:self.dataset_size]
-        #     y = y[:self.dataset_size]
-        #     jet = jet[:self.dataset_size]
         if self.split_seed != None:
             if self.jets:
                 x, y, jet = shuffle(x, y, jet, random_state=self.split_seed)
@@ -127,16 +124,9 @@ class DataSelection:
         
         if self.augment:
             x_train, y_train, jet_train = self.augment_data(x_train, y_train, jet_train)
-            
-        # if self.dataset_size != 0:
-        #     x_train = x_train[:self.dataset_size]
-        #     y_train = y_train[:self.dataset_size]
-        #     if self.jets:
-        #         jet_train = jet_train[:self.dataset_size]
         
         if self.norm_coef is None:
             self.get_norm_params(x_train)
-            #self.get_norm_params(x) # for testing purposes
         
         if self.norm_outside:
             x_train = self.normalize_data(x_train)

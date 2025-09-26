@@ -1,14 +1,30 @@
 #outdir: 'trained_models' # output directory for trained models (if you change this you should use the command --path 'your_new_outdir' when calling the test script)
-outdir: 'folds_report'
+outdir: 'IRC_increase_size'
 
 model_hyperparameter:
-  deepset:
+  deepset: &deepset_params
     phi_layers: [32,32,32]
     rho_layers: [32]
     activ: "relu"
     aggreg: "mean"
     dropout: -1
     output_dim: 5
+  l_efn:
+    phi_layers: [128, 64]
+    rho_layers: [128, 64]
+    activ: "relu"
+    aggreg: "sum"   # <- mean breaks IRC, sum is the EFN way
+    dropout: -1
+    output_dim: 5
+  deepset_irc:
+    phi_layers: [128, 64]
+    rho_layers: [128, 64]
+    activ: "relu"
+    aggreg: "sum"   # not "mean"
+    dropout: -1
+    output_dim: 5
+  l_pfn:
+    <<: *deepset_params
   vector_neuron:
     out_channel: 5
     hidden : 20
@@ -51,7 +67,7 @@ model_hyperparameter:
 
 training_hyperparams : 
   epochs :  300
-  lr : 0.0028
+  lr : 0.001
   batch_size: 256
 
 data_hyperparams:

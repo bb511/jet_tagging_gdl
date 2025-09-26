@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import os
 import json
-import pickle
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
 class LogCountRobustScaler:
@@ -90,44 +89,6 @@ class MinMaxCustomScaler:
     def __repr__(self):
         return f"MinMaxCustomScaler(min={self.min:.3f}, max={self.max:.3f})"
     
-
-def fit_standardisation_old(method, data):
-    """
-    Fit the standardization parameters based on the chosen method.
-
-    :param method: str, 'minmax', 'robust', or 'standard'
-    :param data: numpy array of shape (n_samples, n_constituents, n_features)
-    :return: dict with fitted scaler(s)
-    """
-    n_features = data.shape[2]
-    params = {}
-
-    for i in range(n_features):
-        feature_data = data[:, :, i].reshape(-1, 1)
-        
-        if method == 'minmax':
-            scaler = MinMaxScaler()
-            scaler.fit(feature_data)
-            params[f'scaler_{i}'] = scaler
-        elif method == 'robust':
-            scaler = RobustScaler()
-            scaler.fit(feature_data)
-            params[f'scaler_{i}'] = scaler
-        elif method == 'standard':
-            scaler = StandardScaler()
-            scaler.fit(feature_data)
-            params[f'scaler_{i}'] = scaler
-        elif method == 'none':
-            params[f'scaler_{i}'] = None
-        else:
-            raise ValueError("Invalid normalization method. Choose 'minmax', 'robust', or 'standard'.")
-        
-    print("The normalisation parameters are: ")
-    print("\n".join(f"{param}: {value}" for param, value in params.items()))
-    print(f"{'':-<25}\n")
-
-    return params
-
 def fit_standardisation(method, data, feat="px_py_pz_etarel_phirel", consider_padding=True):
     """
     Fit the standardization parameters based on the chosen method, ignoring zero entries.
@@ -245,44 +206,36 @@ def fit_standardisation(method, data, feat="px_py_pz_etarel_phirel", consider_pa
             scaler.fit(data[:, :, 0].reshape(-1, 1))
             params[f'scaler_{0}'] = scaler
             params[f'scaler_{1}'] = scaler     
+            
+        elif feat == "px_py_pz_E":
+            scaler = MinMaxCustomScaler(range=(-2, 2))
+            scaler.fit(data[:, :, 2].reshape(-1, 1))
+            params[f'scaler_{0}'] = scaler
+            params[f'scaler_{1}'] = scaler
+            params[f'scaler_{2}'] = scaler
+            params[f'scaler_{3}'] = scaler
+            
+        elif feat == "px_py_pz_E_etarel_phirel":
+            scaler = MinMaxCustomScaler(range=(-2, 2))
+            scaler.fit(data[:, :, 2].reshape(-1, 1))
+            params[f'scaler_{0}'] = scaler
+            params[f'scaler_{1}'] = scaler
+            params[f'scaler_{2}'] = scaler
+            params[f'scaler_{3}'] = scaler
+            
+            scaler = MinMaxCustomScaler(range=(-1,1))
+            scaler.fit(data[:, :, 4].reshape(-1, 1))
+            params[f'scaler_{4}'] = scaler
+            
+            scaler = MinMaxCustomScaler(range=(-1,1))
+            scaler.fit(data[:, :, 5].reshape(-1, 1))
+            params[f'scaler_{5}'] = scaler
               
     print("The normalization parameters are: ")
     print("\n".join(f"{param}: {value}" for param, value in params.items()))
     print(f"{'':-<25}\n")
 
     return params
-
-def apply_standardisation_with_padding(data, params):
-    """
-    Apply the standardization to the data using pre-fitted parameters.
-
-    :param data: numpy array or PyTorch tensor of shape (n_samples, n_constituents, n_features)
-    :param params: dict with fitted scaler(s)
-    :return: normalized data with the same shape as input
-    """
-    if params[f'scaler_0'] is None:
-        normalized_data = data
-        
-    else:
-        is_tensor = isinstance(data, torch.Tensor)
-        
-        # If the input is a PyTorch tensor, move it to CPU and convert to NumPy
-        if is_tensor:
-            device = data.device  # Save the device (CPU or GPU)
-            data = data.cpu().numpy()  # Convert to NumPy array
-        
-        normalized_data = np.zeros_like(data)
-        for i in range(data.shape[2]):
-            feature_data = data[:, :, i].reshape(-1, 1)
-            scaler = params[f'scaler_{i}']
-            normalized_feature = scaler.transform(feature_data)
-            normalized_data[:, :, i] = normalized_feature.reshape(data.shape[0], data.shape[1])
-        
-        # If the input was a PyTorch tensor, convert back to tensor and move to the original device
-        if is_tensor:
-            normalized_data = torch.from_numpy(normalized_data).to(device)
-    
-    return normalized_data
 
 def apply_standardisation(data, params, with_padding=True):
     """
@@ -320,52 +273,9 @@ def apply_standardisation(data, params, with_padding=True):
             feature_data = feature_data.reshape(-1, 1)
             normalized_feature = scaler.transform(feature_data)
             normalized_data[:, :, i] = normalized_feature.reshape(data.shape[0], data.shape[1])
-
     if is_tensor:
         normalized_data = torch.from_numpy(normalized_data).to(device)
-
     return normalized_data
-
-# def apply_standardisation(data, params):
-#     """
-#     Apply the standardization to the data using pre-fitted parameters, ignoring zero values.
-
-#     :param data: numpy array or PyTorch tensor of shape (n_samples, n_constituents, n_features)
-#     :param params: dict with fitted scaler(s)
-#     :return: normalized data with the same shape as input
-#     """
-#     if params[f'scaler_0'] is None:
-#         normalized_data = data
-#     else:
-#         is_tensor = isinstance(data, torch.Tensor)
-        
-#         # If the input is a PyTorch tensor, move it to CPU and convert to NumPy
-#         if is_tensor:
-#             device = data.device  # Save the device (CPU or GPU)
-#             data = data.cpu().numpy()  # Convert to NumPy array
-        
-#         normalized_data = np.zeros_like(data)
-#         for i in range(data.shape[2]):
-#             feature_data = data[:, :, i]
-            
-#             # Create a mask for non-zero values
-#             non_zero_mask = feature_data != 0
-            
-#             # Apply standardization only to non-zero values
-#             scaler = params[f'scaler_{i}']
-#             if scaler is not None:
-#                 non_zero_data = feature_data[non_zero_mask].reshape(-1, 1)
-#                 normalized_non_zero_data = scaler.transform(non_zero_data).reshape(-1)
-#                 normalized_data[:, :, i][non_zero_mask] = normalized_non_zero_data
-            
-#             # Keep zero values as they are
-#             normalized_data[:, :, i][~non_zero_mask] = 0
-        
-#         # If the input was a PyTorch tensor, convert back to tensor and move to the original device
-#         if is_tensor:
-#             normalized_data = torch.from_numpy(normalized_data).to(device)
-    
-#     return normalized_data
 
 def inverse_standardisation(data, params, with_padding=True):
     """
@@ -410,53 +320,12 @@ def inverse_standardisation(data, params, with_padding=True):
     return denormalized_data
 
 
-# def inverse_standardisation(data, params):
-#     """
-#     Apply the inverse standardization to the data using pre-fitted parameters.
-
-#     :param data: numpy array or PyTorch tensor of shape (n_samples, n_constituents, n_features)
-#     :param params: dict with fitted scaler(s)
-#     :return: denormalized data with the same shape as input
-#     """
-#     if params[f'scaler_0'] is None:
-#         denormalized_data = data
-        
-#     else:
-#         is_tensor = isinstance(data, torch.Tensor)
-        
-#         # If the input is a PyTorch tensor, move it to CPU and convert to NumPy
-#         if is_tensor:
-#             device = data.device  # Save the device (CPU or GPU)
-#             data = data.cpu().numpy()  # Convert to NumPy array
-        
-#         denormalized_data = np.zeros_like(data)
-        
-#         for i in range(data.shape[2]):
-#             feature_data = data[:, :, i].reshape(-1, 1)
-#             scaler = params[f'scaler_{i}']
-#             denormalized_feature = scaler.inverse_transform(feature_data)
-#             denormalized_data[:, :, i] = denormalized_feature.reshape(data.shape[0], data.shape[1])
-        
-#         # If the input was a PyTorch tensor, convert back to tensor and move to the original device
-#         if is_tensor:
-#             denormalized_data = torch.from_numpy(denormalized_data).to(device)
-    
-#     return denormalized_data
-
 def save_normalization_coeff(params, json_file):
     """
     Save normalization parameters to disk.
     :param data_name: str, name of the dataset
     :param params: dict with fitted scaler(s)
     """
-    # Create directory if it doesn't exist
-    # if not os.path.exists("normalization_coef"):
-    #     os.makedirs("normalization_coef")
-    
-    # json_file = f"normalization_coef/normalization_parameters_{data_name}.json"
-    # if os.path.exists(json_file):
-    #     os.remove(json_file)
-    
     # Extract the numerical parameters from each scaler
     json_params = {}
     for key, scaler in params.items():

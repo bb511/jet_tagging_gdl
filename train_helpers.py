@@ -5,7 +5,7 @@ import torch.optim as optim
 import json
 import math
 
-import custom_loss_new as custom_loss
+import custom_loss as custom_loss
 import util
 import plot_train
 
@@ -32,6 +32,7 @@ def train_model(net, train_data, valid_data, device, criterion, optimizer, sched
     epochs_es_limit = 50
     best_accu = 0
     
+    # Evaluate invariance error on a subset of 100 samples to save time
     val_subset = Subset(valid_data.dataset, range(100))
     val_subset_loader = DataLoader(val_subset, batch_size=100, shuffle=False)
     
@@ -49,12 +50,8 @@ def train_model(net, train_data, valid_data, device, criterion, optimizer, sched
             y_pred = net(x)
             
             # compute the loss function based on the user choice
-            # if loss_inv =='so3':
-            #     loss = custom_loss.inv_err_rand(net, criterion, x, y_pred, y_true, l, 16, device)
             # elif loss_inv == 'lorentz':
             #     loss = custom_loss.inv_err_lorentz(net, criterion, x, y_pred, y_true, l, 16, device)
-            # elif loss_inv == 'jet_center':
-            #     loss = custom_loss.inv_err_px_py_pz_jet_center(net, criterion, x, y_pred, y_true, l, 16, device)
             if loss_inv == 'so3_eta_phi' or loss_inv == 'so3':
                 loss = custom_loss.inv_err_so3(net, criterion, x, y_pred, y_true, jet, coef_norm, l, rot_type, 16, device, filters, compare_to_label)
             elif loss_inv == 'so2_eta_phi' or loss_inv == 'so2':
@@ -153,7 +150,6 @@ def train_model(net, train_data, valid_data, device, criterion, optimizer, sched
         all_valid_accu.append(valid_accu.item())
         all_valid_inv_err.append(inv_err)
             
-        # print(util.tcols.OKCYAN + 'Model summary: ' + util.tcols.ENDC, '\n', net)
         model_file = os.path.join(outdir, f"{file_name}.pt")
         torch.save(net.state_dict(), model_file)
             
@@ -161,8 +157,6 @@ def train_model(net, train_data, valid_data, device, criterion, optimizer, sched
             best_model_file = os.path.join(outdir, f"{file_name}_best_val.pt")
             torch.save(net.state_dict(), best_model_file)
             print(f'Best model saved at {best_model_file}')
-                
-            # print(util.tcols.OKCYAN + 'Model summary: ' + util.tcols.ENDC, '\n', net)
                 
         if round(valid_accu.cpu().item(), 3) <= round(best_accu, 3):
             epochs_no_improve += 1
@@ -173,6 +167,7 @@ def train_model(net, train_data, valid_data, device, criterion, optimizer, sched
         if name != "transformer":
             scheduler.step(best_accu)
         
+        # DISABLED EARLY STOPPING FOR THE MOMENT
         # if epochs_no_improve >= epochs_es_limit:
         #     if name in ["vector_neuron", "vector_neuron_so2"]:
         #         continue
