@@ -1,0 +1,83 @@
+[2026-03-22 13:15:10,942][src.utils.utils][INFO] - [rank: 0] Enforcing tags! <cfg.extras.enforce_tags=True>
+[2026-03-22 13:15:10,945][src.utils.utils][INFO] - [rank: 0] Printing config tree with Rich! <cfg.extras.print_config=True>
+[2026-03-22 13:15:10,972][__main__][INFO] - [rank: 0] Instantiating datamodule <src.data.hls4ml_datamodule.HLS4MLDataModule>
+[2026-03-22 13:15:11,732][__main__][INFO] - [rank: 0] Instantiating model <src.models.deepsets_module.DeepSetsInvariant>
+[2026-03-22 13:15:11,747][__main__][INFO] - [rank: 0] Instantiating callbacks...
+[2026-03-22 13:15:11,747][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-03-22 13:15:11,749][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.EarlyStopping>
+[2026-03-22 13:15:11,749][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichModelSummary>
+[2026-03-22 13:15:11,749][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichProgressBar>
+[2026-03-22 13:15:11,750][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.LearningRateMonitor>
+[2026-03-22 13:15:11,750][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <src.callbacks.plotting_callbacks.PlottingCallback>
+[2026-03-22 13:15:11,752][__main__][INFO] - [rank: 0] Instantiating loggers...
+[2026-03-22 13:15:11,753][src.utils.instantiators][INFO] - [rank: 0] Instantiating logger <lightning.pytorch.loggers.csv_logs.CSVLogger>
+[2026-03-22 13:15:11,753][__main__][INFO] - [rank: 0] Instantiating trainer <lightning.pytorch.trainer.Trainer>
+[2026-03-22 13:15:11,837][__main__][INFO] - [rank: 0] Logging hyperparameters!
+[2026-03-22 13:15:11,844][__main__][INFO] - [rank: 0] Starting training!
+[2026-03-22 13:15:13,632][src.utils.utils][ERROR] - [rank: 0] 
+Traceback (most recent call last):
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/utils/utils.py"[0m, line [35m71[0m, in [35mwrap[0m
+    metric_dict, object_dict = [31mtask_func[0m[1;31m(cfg=cfg)[0m
+                               [31m~~~~~~~~~[0m[1;31m^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/train.py"[0m, line [35m87[0m, in [35mtrain[0m
+    [31mtrainer.fit[0m[1;31m(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))[0m
+    [31m~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m584[0m, in [35mfit[0m
+    [31mcall._call_and_handle_interrupt[0m[1;31m([0m
+    [31m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^[0m
+        [1;31mself,[0m
+        [1;31m^^^^^[0m
+    ...<6 lines>...
+        [1;31mweights_only,[0m
+        [1;31m^^^^^^^^^^^^^[0m
+    [1;31m)[0m
+    [1;31m^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/call.py"[0m, line [35m49[0m, in [35m_call_and_handle_interrupt[0m
+    return trainer_fn(*args, **kwargs)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m630[0m, in [35m_fit_impl[0m
+    [31mself._run[0m[1;31m(model, ckpt_path=ckpt_path, weights_only=weights_only)[0m
+    [31m~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m1079[0m, in [35m_run[0m
+    results = self._run_stage()
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m1121[0m, in [35m_run_stage[0m
+    [31mself._run_sanity_check[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m1150[0m, in [35m_run_sanity_check[0m
+    [31mval_loop.run[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~[0m[1;31m^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/loops/utilities.py"[0m, line [35m179[0m, in [35m_decorator[0m
+    return loop_run(self, *args, **kwargs)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/loops/evaluation_loop.py"[0m, line [35m146[0m, in [35mrun[0m
+    [31mself._evaluation_step[0m[1;31m(batch, batch_idx, dataloader_idx, dataloader_iter)[0m
+    [31m~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/loops/evaluation_loop.py"[0m, line [35m441[0m, in [35m_evaluation_step[0m
+    output = call._call_strategy_hook(trainer, hook_name, *step_args)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/call.py"[0m, line [35m329[0m, in [35m_call_strategy_hook[0m
+    output = fn(*args, **kwargs)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/strategies/strategy.py"[0m, line [35m412[0m, in [35mvalidation_step[0m
+    return [31mself.lightning_module.validation_step[0m[1;31m(*args, **kwargs)[0m
+           [31m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/models/deepsets_module.py"[0m, line [35m162[0m, in [35mvalidation_step[0m
+    loss, preds, targets = [31mself.model_step[0m[1;31m(batch)[0m
+                           [31m~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/models/deepsets_module.py"[0m, line [35m123[0m, in [35mmodel_step[0m
+    logits = self.forward(x)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/models/deepsets_module.py"[0m, line [35m95[0m, in [35mforward[0m
+    phi_out = self.phi(x)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/nn/modules/module.py"[0m, line [35m1775[0m, in [35m_wrapped_call_impl[0m
+    return [31mself._call_impl[0m[1;31m(*args, **kwargs)[0m
+           [31m~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/nn/modules/module.py"[0m, line [35m1786[0m, in [35m_call_impl[0m
+    return forward_call(*args, **kwargs)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/nn/modules/container.py"[0m, line [35m250[0m, in [35mforward[0m
+    input = module(input)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/nn/modules/module.py"[0m, line [35m1775[0m, in [35m_wrapped_call_impl[0m
+    return [31mself._call_impl[0m[1;31m(*args, **kwargs)[0m
+           [31m~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/nn/modules/module.py"[0m, line [35m1786[0m, in [35m_call_impl[0m
+    return forward_call(*args, **kwargs)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/nn/modules/linear.py"[0m, line [35m134[0m, in [35mforward[0m
+    return [31mF.linear[0m[1;31m(input, self.weight, self.bias)[0m
+           [31m~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+[1;35mRuntimeError[0m: [35mmat1 and mat2 shapes cannot be multiplied (4096x16 and 3x64)[0m
+[2026-03-22 13:15:13,639][src.utils.utils][INFO] - [rank: 0] Output dir: /Users/amishgogia/jet_tagging_pytorch_hydra/logs/train/runs/2026-03-22_13-15-10

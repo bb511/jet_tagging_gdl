@@ -1,0 +1,112 @@
+model:
+  _target_: src.models.deepsets_module.DeepSetsInvariant
+  nbr_feats: 3
+  phi_layers:
+  - 64
+  - 64
+  - 32
+  rho_layers:
+  - 32
+  - 32
+  - 16
+  activation: relu
+  aggregation: sum
+  dropout: -1
+  output_dim: 5
+  mask: true
+  optimizer:
+    _target_: torch.optim.Adam
+    _partial_: true
+    lr: 0.0028
+    weight_decay: 1.0e-07
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 0.0001
+  compile: false
+model/params/total: 9221
+model/params/trainable: 9221
+model/params/non_trainable: 0
+data:
+  _target_: src.data.hls4ml_datamodule.HLS4MLDataModule
+  data_dir: ${paths.root_dir}/datasets/
+  batch_size: 128
+  num_workers: 0
+  pin_memory: false
+  nconstituents: 32
+  features:
+  - pt
+  - etarel
+  - phirel
+  augmentation_scheme: none
+  augmentation_seed: ${seed}
+  rotation_nbr_rot: 8
+  rotation_shuffle: true
+  lorentz_nbr_rot: 8
+  lorentz_eta_max: 2.0
+trainer:
+  _target_: lightning.pytorch.trainer.Trainer
+  default_root_dir: ${paths.output_dir}
+  min_epochs: 1
+  max_epochs: 10
+  accelerator: cpu
+  devices: 1
+  check_val_every_n_epoch: 1
+  deterministic: false
+callbacks:
+  model_checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    filename: epoch_{epoch:03d}
+    monitor: val/acc
+    verbose: false
+    save_last: true
+    save_top_k: 1
+    mode: max
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_train_steps: null
+    train_time_interval: null
+    every_n_epochs: null
+    save_on_train_epoch_end: null
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: val/acc
+    min_delta: 0.0
+    patience: 100
+    verbose: false
+    mode: max
+    strict: true
+    check_finite: true
+    stopping_threshold: null
+    divergence_threshold: null
+    check_on_train_epoch_end: null
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: -1
+  rich_progress_bar:
+    _target_: lightning.pytorch.callbacks.RichProgressBar
+  lr_monitor:
+    _target_: lightning.pytorch.callbacks.LearningRateMonitor
+    logging_interval: epoch
+  plotting:
+    _target_: src.callbacks.plotting_callbacks.PlottingCallback
+    class_names:
+    - g
+    - q
+    - W
+    - Z
+    - t
+    show: false
+extras:
+  ignore_warnings: false
+  enforce_tags: true
+  print_config: true
+task_name: train
+tags:
+- dev
+ckpt_path: null
+seed: null

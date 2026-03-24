@@ -1,0 +1,4 @@
+plotting:
+  _target_: src.callbacks.plotting_callbacks.PlottingCallback
+  class_names: ["g", "q", "W", "Z", "t"]
+  show: false

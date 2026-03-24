@@ -1,0 +1,71 @@
+[2026-03-22 13:21:41,217][src.utils.utils][INFO] - [rank: 0] Enforcing tags! <cfg.extras.enforce_tags=True>
+[2026-03-22 13:21:41,221][src.utils.utils][INFO] - [rank: 0] Printing config tree with Rich! <cfg.extras.print_config=True>
+[2026-03-22 13:21:41,249][__main__][INFO] - [rank: 0] Instantiating datamodule <src.data.hls4ml_datamodule.HLS4MLDataModule>
+[2026-03-22 13:21:42,132][__main__][INFO] - [rank: 0] Instantiating model <src.models.deepsets_module.DeepSetsInvariant>
+[2026-03-22 13:21:42,148][__main__][INFO] - [rank: 0] Instantiating callbacks...
+[2026-03-22 13:21:42,148][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-03-22 13:21:42,153][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.EarlyStopping>
+[2026-03-22 13:21:42,155][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichModelSummary>
+[2026-03-22 13:21:42,156][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.RichProgressBar>
+[2026-03-22 13:21:42,156][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <lightning.pytorch.callbacks.LearningRateMonitor>
+[2026-03-22 13:21:42,157][src.utils.instantiators][INFO] - [rank: 0] Instantiating callback <src.callbacks.plotting_callbacks.PlottingCallback>
+[2026-03-22 13:21:42,159][__main__][INFO] - [rank: 0] Instantiating loggers...
+[2026-03-22 13:21:42,159][src.utils.instantiators][INFO] - [rank: 0] Instantiating logger <lightning.pytorch.loggers.csv_logs.CSVLogger>
+[2026-03-22 13:21:42,161][__main__][INFO] - [rank: 0] Instantiating trainer <lightning.pytorch.trainer.Trainer>
+[2026-03-22 13:21:42,211][__main__][INFO] - [rank: 0] Logging hyperparameters!
+[2026-03-22 13:21:42,219][__main__][INFO] - [rank: 0] Starting training!
+[2026-03-22 13:21:50,285][src.utils.utils][INFO] - [rank: 0] Saved training curves to: /Users/amishgogia/jet_tagging_pytorch_hydra/logs/train/runs/2026-03-22_13-21-41/plots/training_curves.png
+[2026-03-22 13:21:55,828][src.utils.utils][INFO] - [rank: 0] Saved ROC curves to: /Users/amishgogia/jet_tagging_pytorch_hydra/logs/train/runs/2026-03-22_13-21-41/plots/roc_curves.png
+[2026-03-22 13:21:55,830][__main__][INFO] - [rank: 0] Starting testing!
+[2026-03-22 13:21:57,522][src.utils.utils][ERROR] - [rank: 0] 
+Traceback (most recent call last):
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/utils/utils.py"[0m, line [35m71[0m, in [35mwrap[0m
+    metric_dict, object_dict = [31mtask_func[0m[1;31m(cfg=cfg)[0m
+                               [31m~~~~~~~~~[0m[1;31m^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/src/train.py"[0m, line [35m97[0m, in [35mtrain[0m
+    [31mtrainer.test[0m[1;31m(model=model, datamodule=datamodule, ckpt_path=ckpt_path)[0m
+    [31m~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m821[0m, in [35mtest[0m
+    return [31mcall._call_and_handle_interrupt[0m[1;31m([0m
+           [31m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^[0m
+        [1;31mself, self._test_impl, model, dataloaders, ckpt_path, verbose, datamodule, weights_only[0m
+        [1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1;31m)[0m
+    [1;31m^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/call.py"[0m, line [35m49[0m, in [35m_call_and_handle_interrupt[0m
+    return trainer_fn(*args, **kwargs)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m864[0m, in [35m_test_impl[0m
+    results = self._run(model, ckpt_path=ckpt_path, weights_only=weights_only)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/trainer.py"[0m, line [35m1046[0m, in [35m_run[0m
+    [31mself._checkpoint_connector._restore_modules_and_callbacks[0m[1;31m(ckpt_path, weights_only)[0m
+    [31m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/connectors/checkpoint_connector.py"[0m, line [35m410[0m, in [35m_restore_modules_and_callbacks[0m
+    [31mself.resume_start[0m[1;31m(checkpoint_path, weights_only=weights_only)[0m
+    [31m~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/trainer/connectors/checkpoint_connector.py"[0m, line [35m83[0m, in [35mresume_start[0m
+    loaded_checkpoint = self.trainer.strategy.load_checkpoint(checkpoint_path, weights_only=weights_only)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/pytorch/strategies/strategy.py"[0m, line [35m368[0m, in [35mload_checkpoint[0m
+    return [31mself.checkpoint_io.load_checkpoint[0m[1;31m(checkpoint_path, weights_only=weights_only)[0m
+           [31m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/fabric/plugins/io/torch_io.py"[0m, line [35m91[0m, in [35mload_checkpoint[0m
+    return pl_load(path, map_location=map_location, weights_only=weights_only)
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/lightning/fabric/utilities/cloud_io.py"[0m, line [35m73[0m, in [35m_load[0m
+    return [31mtorch.load[0m[1;31m([0m
+           [31m~~~~~~~~~~[0m[1;31m^[0m
+        [1;31mf,[0m
+        [1;31m^^[0m
+        [1;31mmap_location=map_location,  # type: ignore[arg-type][0m
+        [1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+        [1;31mweights_only=weights_only,[0m
+        [1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1;31m)[0m
+    [1;31m^[0m
+  File [35m"/Users/amishgogia/jet_tagging_pytorch_hydra/HYDRA/lib/python3.13/site-packages/torch/serialization.py"[0m, line [35m1529[0m, in [35mload[0m
+    raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+[1;35m_pickle.UnpicklingError[0m: [35mWeights only load failed. This file can still be loaded, to do so you have two options, [1mdo those steps only if you trust the source of the checkpoint[0m. 
+	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
+	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
+	WeightsUnpickler error: Unsupported global: GLOBAL omegaconf.listconfig.ListConfig was not an allowed global by default. Please use `torch.serialization.add_safe_globals([omegaconf.listconfig.ListConfig])` or the `torch.serialization.safe_globals([omegaconf.listconfig.ListConfig])` context manager to allowlist this global if you trust this class/function.
+
+Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.[0m
+[2026-03-22 13:21:57,532][src.utils.utils][INFO] - [rank: 0] Output dir: /Users/amishgogia/jet_tagging_pytorch_hydra/logs/train/runs/2026-03-22_13-21-41

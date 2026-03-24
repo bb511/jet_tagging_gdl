@@ -1,0 +1,26 @@
+# nconst=8: phi [32,32,32], rho [32], relu, mean, no dropout, mask=True
+_target_: src.models.deepsets_module.DeepSetsInvariant
+
+nbr_feats: 3
+phi_layers: [32, 32, 32]
+rho_layers: [32]
+activation: "relu"
+aggregation: "mean"
+dropout: -1
+output_dim: 5
+mask: true
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 1e-7
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: "max"
+  patience: 80
+  factor: 0.1
+  threshold: 1e-4
+compile: false

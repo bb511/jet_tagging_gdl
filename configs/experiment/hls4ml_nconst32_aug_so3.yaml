@@ -1,0 +1,20 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=hls4ml_nconst32_aug_so3
+
+defaults:
+  - override /data: hls4ml
+  - override /model: deepsets_32
+
+tags: ["hls4ml", "nconst-32", "aug-so3"]
+seed: 12345
+
+data:
+  nconstituents: 32
+  augmentation_scheme: so3
+  rotation_nbr_rot: 8
+  batch_size: 256
+
+trainer:
+  max_epochs: 300
