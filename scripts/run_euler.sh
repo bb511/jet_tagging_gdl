@@ -10,16 +10,18 @@
 
 # ---------------------------------------------------------------
 # Single experiment on ETH Euler
-#
+
 # Usage:
-#   sbatch scripts/run_euler.sh hls4ml_nconst16_aug_so2
-#   sbatch scripts/run_euler.sh                          # uses default
+#   sbatch scripts/run_euler.sh transformer hls4ml_nconst16_aug_so2
+#   sbatch scripts/run_euler.sh                          # uses defaults
 # ---------------------------------------------------------------
 
 set -euo pipefail
 
-# Experiment name (first argument, or default)
-EXPERIMENT="${1:-hls4ml_nconst32_aug_none}"
+# Model name (first argument, or default)
+MODEL="${1:-deepsets_32}"
+# Experiment name (second argument, or default)
+EXPERIMENT="${2:-hls4ml_nconst32_aug_none}"
 
 # Project root (where this repo lives on Euler)
 export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,16 +30,16 @@ cd "$PROJECT_ROOT"
 # Create slurm log directory
 mkdir -p logs/slurm
 
-# Activate your environment — uncomment and edit the line that matches your setup:
-# source /cluster/home/$USER/miniconda3/bin/activate deepsets
-# source "$PROJECT_ROOT/bin/activate"
+# Activate your environment
+source "$PROJECT_ROOT/HYDRA/bin/activate"
 
 echo "============================================"
 echo "Job ID:       $SLURM_JOB_ID"
 echo "Node:         $(hostname)"
 echo "GPU:          $CUDA_VISIBLE_DEVICES"
+echo "Model:        $MODEL"
 echo "Experiment:   $EXPERIMENT"
 echo "Project root: $PROJECT_ROOT"
 echo "============================================"
 
-python src/train.py experiment="$EXPERIMENT" trainer=gpu
+python src/train.py model="$MODEL" experiment="$EXPERIMENT" trainer=gpu

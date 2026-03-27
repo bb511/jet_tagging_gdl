@@ -117,6 +117,13 @@ class HLS4MLDataModule(LightningDataModule):
     # ---------------------------------------------------------------------
     def prepare_data(self) -> None:
         """Run the full data-preparation pipeline once."""
+        # Skip if processed data already exists on disk.
+        processed_dir = Path(self.processed_data_dir)
+        required = ["x_train.npy", "y_train.npy", "x_val.npy", "y_val.npy"]
+        if all((processed_dir / f).exists() for f in required):
+            print(f"Processed data already exists at {processed_dir}, skipping prepare_data.")
+            return
+
         "1. Download the tar files and extract the h5 files from them (if not already done)."
         self._download_data_from_url(self.raw_data_url, val=False)
         self._download_data_from_url(self.raw_data_url_val, val=True)
@@ -232,6 +239,7 @@ class HLS4MLDataModule(LightningDataModule):
         features: list,
     ) -> None:
         # Keep lazy fallback for direct method calls.
+        "1. First check if the raw data is already loaded in self attributes (from a previous prepare_data call), and if not, load it from the H5 files."
         if self.x_train_raw is None or self.y_train_raw is None or self.feature_names is None or self.pt_idx is None:
             self.x_train_raw, self.y_train_raw, self.feature_names, self.pt_idx = self._load_all_h5_files(
                 raw_data_dir, isVal=False
@@ -239,24 +247,29 @@ class HLS4MLDataModule(LightningDataModule):
         if self.x_val_raw is None or self.y_val_raw is None:
             self.x_val_raw, self.y_val_raw, _, _ = self._load_all_h5_files(raw_data_dir, isVal=True)
 
+        "2. Feed the raw data into the preprocessing pipeline. This includes nconst restriction, pt sorting, augmentation, and physics normalization. The final processed arrays are saved to disk and also cached in self attributes for potential direct use by the model."
         x_train_sorted = self._restrict_and_sort_by_pt(self.x_train_raw, self.pt_idx, nconstituents)
         x_val_sorted = self._restrict_and_sort_by_pt(self.x_val_raw, self.pt_idx, nconstituents)
 
+        "3. Augment the training data according to the specified scheme (none/so2/so3/lorentz). The augmented data is cached in self attributes and also saved to disk in the processed_data_dir."
         x_train_aug, y_train_aug = self._setup_augmentation_schemes(x_train_sorted, self.y_train_raw)
         if self.feature_names is None:
             raise ValueError("feature_names is not available; cannot run normalization.")
-
+        
+        "4. Normalise the augmented data using the norm parameters from the un-augmented data."
         norm_params = self.fit_physics_norm(x_train_sorted, self.feature_names)
         x_train_aug = self.apply_physics_norm(x_train_aug, self.feature_names, norm_params)
         x_val_sorted = self.apply_physics_norm(x_val_sorted, self.feature_names, norm_params)
         self.norm_params = norm_params
         print("Applied physics normalization using train split statistics.")
 
+        "5. Print out shapes and stats of the final processed arrays, and save them to disk."
         print("Processed train shape:", x_train_aug.shape)
         print("Processed train labels shape:", y_train_aug.shape)
         print("Processed val shape:", x_val_sorted.shape)
         print("Processed val labels shape:", self.y_val_raw.shape)
 
+        "6. Save the augmented and normalised arrays to disk as .npy files."
         self._save_processed_arrays(
             processed_data_dir=processed_data_dir,
             x_train=x_train_aug,
@@ -358,6 +371,7 @@ class HLS4MLDataModule(LightningDataModule):
             return self._apply_lorentz_augmentation(x_train, y_train)
         raise ValueError(f"Unknown augmentation scheme: {self.augmentation_scheme}")
 
+    "Create a map for the features and get the indices for the required features for augmentation. If any of the required features are missing, print a warning and return the un-augmented data."
     def _feature_index(self, *candidate_names: str) -> Optional[int]:
         if self.feature_names is None:
             return None
@@ -836,26 +850,35 @@ class HLS4MLDataModule(LightningDataModule):
                 "Processed arrays are missing. Run `prepare_data()` first. "
                 f"Missing files: {missing_paths}"
             )
-
+        # Before we save the final dataloaders we have to restrict their features to the requested subset in sef.features (if not None). We can get the column indices for the requested features from the norm_params.npz file that was saved during prepare_data. If self.features is None, we load all features.
+        feature_indices = self._get_feature_indices(processed_dir)
         if stage in (None, "fit") and (not hasattr(self, "data_train") or self.data_train is None):
             x_train = np.load(x_train_path, allow_pickle=False)
             y_train = np.load(y_train_path, allow_pickle=False)
             x_val = np.load(x_val_path, allow_pickle=False)
             y_val = np.load(y_val_path, allow_pickle=False)
-
-            self.data_train = TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train))
-            self.data_val = TensorDataset(torch.from_numpy(x_val), torch.from_numpy(y_val))
+            print(f"Raw data shapes  — x_train: {x_train.shape}, y_train: {y_train.shape}, x_val: {x_val.shape}, y_val: {y_val.shape}")
+            if feature_indices is not None:
+                x_train = x_train[:, :, feature_indices]
+                x_val = x_val[:, :, feature_indices]
+            print(f"Processed shapes — x_train: {x_train.shape}, y_train: {y_train.shape}, x_val: {x_val.shape}, y_val: {y_val.shape}")
+            self.data_train = TensorDataset(torch.from_numpy(x_train).float(), torch.from_numpy(y_train).float())
+            self.data_val = TensorDataset(torch.from_numpy(x_val).float(), torch.from_numpy(y_val).float())
 
         if stage in (None, "validate") and (not hasattr(self, "data_val") or self.data_val is None):
             x_val = np.load(x_val_path, allow_pickle=False)
             y_val = np.load(y_val_path, allow_pickle=False)
-            self.data_val = TensorDataset(torch.from_numpy(x_val), torch.from_numpy(y_val))
+            if feature_indices is not None:
+                x_val = x_val[:, :, feature_indices]
+            self.data_val = TensorDataset(torch.from_numpy(x_val).float(), torch.from_numpy(y_val).float())
 
         if stage in (None, "test", "predict") and (not hasattr(self, "data_test") or self.data_test is None):
             if not hasattr(self, "data_val") or self.data_val is None:
                 x_val = np.load(x_val_path, allow_pickle=False)
                 y_val = np.load(y_val_path, allow_pickle=False)
-                self.data_val = TensorDataset(torch.from_numpy(x_val), torch.from_numpy(y_val))
+                if feature_indices is not None:
+                    x_val = x_val[:, :, feature_indices]
+                self.data_val = TensorDataset(torch.from_numpy(x_val).float(), torch.from_numpy(y_val).float())
             # No separate test split yet; re-use validation split for test/predict.
             self.data_test = self.data_val
 
@@ -931,5 +954,5 @@ class HLS4MLDataModule(LightningDataModule):
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[2]
     data_module = HLS4MLDataModule(data_dir=str(project_root / "datasets"))
-    data_module.prepare_data()
-    data_module.setup(stage="fit")
+    # data_module.prepare_data()
+    # data_module.setup(stage="fit")

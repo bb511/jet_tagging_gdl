@@ -34,7 +34,7 @@ class PlottingCallback(Callback):
     def _plot_training_curves(self, trainer: Trainer, save_dir: Path) -> None:
         csv_path = None
         for logger in trainer.loggers:
-            if hasattr(logger, "log_dir"):
+            if hasattr(logger, "log_dir") and logger.log_dir is not None:
                 candidate = Path(logger.log_dir) / "metrics.csv"
                 if candidate.exists():
                     csv_path = str(candidate)

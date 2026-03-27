@@ -6,7 +6,13 @@ import rootutils
 import torch
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
+import omegaconf
 from omegaconf import DictConfig
+
+# PyTorch 2.6+ defaults to weights_only=True in torch.load, which rejects
+# OmegaConf types saved inside Lightning checkpoints (hyperparameters).
+torch.serialization.safe_globals([omegaconf.base.ContainerMetadata])
+torch.serialization.add_safe_globals([omegaconf.listconfig.ListConfig])
 
 rootutils.setup_root(__file__, dotenv=True, pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -94,7 +100,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if ckpt_path == "":
             log.warning("Best ckpt not found! Using current weights for testing...")
             ckpt_path = None
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
+        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path, weights_only=False)
         log.info(f"Best ckpt path: {ckpt_path}")
 
     test_metrics = trainer.callback_metrics

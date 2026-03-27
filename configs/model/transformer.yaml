@@ -1,0 +1,31 @@
+_target_: src.models.transformer_module.Transformer
+
+nbr_const: ${data.nconstituents}
+nbr_feat: 3
+lifting_dim: 128
+d_models: 128
+nhead: 8
+num_layers: 4
+output_size: 5
+norm: null
+use_mask: false
+fill_masked: false
+bias: true
+coef_norm: null
+fast_path: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-6
+  weight_decay: 1e-4
+
+# We have to implement the custom scheduler in the codebase since the default PyTorch implementation does not support the "warmup" phase.
+scheduler:
+  _target_: src.utils.utils.get_cosine_schedule_with_warmup
+  _partial_: true
+  num_warmup_steps: 1000
+  num_cycles: 0.5
+  last_epoch: -1
+
+compile: false

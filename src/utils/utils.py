@@ -1,3 +1,4 @@
+import math
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from omegaconf import DictConfig
+import torch.optim as optim
 
 from src.utils import pylogger, rich_utils
 
@@ -132,7 +134,7 @@ def plot_features_overlap_from_datasets(
     num_cols: int = 3,
     bins: int = 60,
     save_dir: Optional[str] = None,
-    show: bool = True,
+    show: bool = False,
 ) -> None:
     """Overlay original vs augmented feature distributions loaded from datasets directory.
 
@@ -437,10 +439,10 @@ def compute_kfold_accuracy(
         print(f"\n--- Fold {fold + 1}/{k} ---")
         L.seed_everything(seed + fold, workers=True)
 
-        x_train_fold = torch.from_numpy(x_data[train_idx])
-        y_train_fold = torch.from_numpy(y_data[train_idx])
-        x_val_fold = torch.from_numpy(x_data[val_idx])
-        y_val_fold = torch.from_numpy(y_data[val_idx])
+        x_train_fold = torch.from_numpy(x_data[train_idx]).float()
+        y_train_fold = torch.from_numpy(y_data[train_idx]).float()
+        x_val_fold = torch.from_numpy(x_data[val_idx]).float()
+        y_val_fold = torch.from_numpy(y_data[val_idx]).float()
 
         train_loader = DataLoader(
             TensorDataset(x_train_fold, y_train_fold),
@@ -479,3 +481,14 @@ def compute_kfold_accuracy(
     print(f"Per-fold: {accuracies}")
 
     return mean_acc, std_acc, accuracies
+
+
+def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, num_cycles=0.5, last_epoch=-1):
+    """Custom learning rate scheduler for transformers"""
+    def lr_lambda(current_step):
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1, num_warmup_steps))
+        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+
+    return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)

@@ -1,0 +1,13 @@
+_target_: src.data.hls4ml_datamodule.HLS4MLDataModule
+data_dir: ${paths.root_dir}/datasets/
+batch_size: 128
+num_workers: 0
+pin_memory: False
+nconstituents: 32
+features: ["pt", "etarel", "phirel"]
+augmentation_scheme: none
+augmentation_seed: ${seed}
+rotation_nbr_rot: 8
+rotation_shuffle: True
+lorentz_nbr_rot: 8
+lorentz_eta_max: 2.0
