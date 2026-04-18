@@ -1,20 +1,21 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=hls4ml_nconst8_aug_so3
+# python src/train.py experiment=hls4ml_nconst8_aug_so2
 
 defaults:
   - override /data: hls4ml
   - override /model: deepsets_8
 
-tags: ["hls4ml", "nconst-8", "aug-so3"]
+tags: ["hls4ml", "nconst-8", "aug-so2"]
 seed: 12345
 
 data:
   nconstituents: 8
-  augmentation_scheme: so3
+  method: augmentation
+  augmentation_scheme: so2
   rotation_nbr_rot: 8
   batch_size: 256
 
 trainer:
-  max_epochs: 300
+  max_epochs: 1

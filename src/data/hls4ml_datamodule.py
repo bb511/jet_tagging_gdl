@@ -1,6 +1,15 @@
+"""
+This is a common data loader for my repo. I have overall 2 methods implemented for symmetry training
+I want to optimised this file to be robust to all three methods:
+1. Augmentation
+2. Symmetry Loss
+3. Another Method
+"""
+ 
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
+import logging
 import os
 import tarfile
 
@@ -20,6 +29,8 @@ try:
 except Exception:
     ipy_display = None
 from src.utils.utils import plot_features_overlap_from_datasets
+
+log = logging.getLogger(__name__)
 
 CENTERED_FEATURES = {
     "j1_px",
@@ -57,7 +68,8 @@ class HLS4MLDataModule(LightningDataModule):
 
     def __init__(
         self,
-        data_dir: str = "../datasets/",
+        data_dir: str = "/cluster/scratch/agogia/datasets/",
+        method: str = "augmentation",
         batch_size: int = 256,
         num_workers: int = 7,
         pin_memory: bool = False,
@@ -78,14 +90,23 @@ class HLS4MLDataModule(LightningDataModule):
         self.pin_memory = pin_memory
         self.nconstituents = nconstituents
         self.features = features if features is not None else ["pt", "etarel", "phirel"]
+        self.features = features if features is not None else ["px", "py", "pz", "etarel", "phirel"]
+        self.method = method.lower()
+        if self.method not in {"augmentation", "symm_loss"}:
+            raise ValueError(
+                f"Unsupported method '{method}'. Expected one of: ['augmentation', 'symm_loss']."
+            )
 
         # Augmentation config.
-        self.augmentation_scheme = augmentation_scheme.lower()
-        if self.augmentation_scheme not in {"none", "so2", "so3", "lorentz"}:
+        requested_scheme = augmentation_scheme.lower()
+        if requested_scheme not in {"none", "so2", "so3", "lorentz"}:
             raise ValueError(
                 f"Unsupported augmentation_scheme='{augmentation_scheme}'. "
                 "Expected one of: ['none', 'so2', 'so3', 'lorentz']."
             )
+        # Assign augmentation scheme directly, do not force 'none' for symm_loss anymore
+        self.augmentation_scheme = requested_scheme
+
         self._rng = np.random.default_rng(augmentation_seed)
         self.rotation_nbr_rot = rotation_nbr_rot
         self.rotation_shuffle = rotation_shuffle
@@ -97,6 +118,16 @@ class HLS4MLDataModule(LightningDataModule):
         self.raw_data_dir = os.path.join(data_dir, "raw")
         nconst_tag = "full" if self.nconstituents is None or self.nconstituents <= 0 else f"nconst_{self.nconstituents}"
         self.processed_data_dir = os.path.join(data_dir, "processed", self.augmentation_scheme, nconst_tag)
+        # Store processed data in separate subfolders for augmentation and symm_loss methods
+        if self.method == "augmentation":
+            method_dir = "augmentation"
+            self.processed_data_dir = os.path.join("/cluster/scratch/agogia/datasets/", "processed", method_dir, self.augmentation_scheme, nconst_tag)
+        elif self.method == "symm_loss":
+            method_dir = "symm_loss"
+            self.processed_data_dir = os.path.join("/cluster/scratch/agogia/datasets/", "processed", method_dir, nconst_tag)
+        else:
+            method_dir = "other"
+            self.processed_data_dir = os.path.join("/cluster/scratch/agogia/datasets/", "processed", method_dir, self.augmentation_scheme, nconst_tag)
 
         # Dataset URLs.
         self.raw_data_url = "https://zenodo.org/records/3602260/files/hls4ml_LHCjet_150p_train.tar.gz"
@@ -115,6 +146,16 @@ class HLS4MLDataModule(LightningDataModule):
     # ---------------------------------------------------------------------
     # Public pipeline
     # ---------------------------------------------------------------------
+    def _processed_arrays_exist(self, processed_data_dir: str) -> bool:
+        processed_dir = Path(processed_data_dir)
+        required = (
+            processed_dir / "x_train.npy",
+            processed_dir / "y_train.npy",
+            processed_dir / "x_val.npy",
+            processed_dir / "y_val.npy",
+        )
+        return all(path.exists() for path in required)
+
     def prepare_data(self) -> None:
         """Run the full data-preparation pipeline once."""
         # Skip if processed data already exists on disk.
@@ -134,9 +175,80 @@ class HLS4MLDataModule(LightningDataModule):
         )
         self.x_val_raw, self.y_val_raw, _, _ = self._load_all_h5_files(self.raw_data_dir, isVal=True)
 
-        "3. Feed the raw data into the preprocessing pipeline. This includes nconst restriction, pt sorting, augmentation, and physics normalization. The final processed arrays are saved to disk and also cached in self attributes for potential direct use by the model."
-        self._pre_proc_raw_data(self.raw_data_dir, self.processed_data_dir, self.nconstituents, self.features)
+        if self._skip_prepare_data:
+            return
 
+        # Reuse existing processed arrays if available.
+        if self._processed_arrays_exist(self.processed_data_dir):
+            print(
+                "Processed arrays already exist in "
+                f"{self.processed_data_dir}. Skipping preparation."
+            )
+            return
+        if self.method == "augmentation":
+            """Run the full data-preparation pipeline for augmentation experiments."""
+            raw_path = Path(self.raw_data_dir)
+            has_tar = any(raw_path.glob("*.tar.gz"))
+            has_h5 = any(raw_path.rglob("*.h5"))
+            if not has_tar and not has_h5:
+                self._download_data_from_url(self.raw_data_url, val=False)
+                self._download_data_from_url(self.raw_data_url_val, val=True)
+            else:
+                print("Raw data already exists. Moving to pre-processing...")
+
+            self.x_train_raw, self.x_val_raw, self.y_train_raw, self.y_val_raw, self.feature_names, self.pt_idx = self._load_all_h5_files(self.raw_data_dir, isTest=False)
+            self._pre_proc_raw_data(self.raw_data_dir, self.processed_data_dir, self.nconstituents, self.features)
+
+        elif self.method == "symm_loss":
+            """Run a separate data-preparation pipeline for symmetry loss experiments."""
+            raw_path = Path(self.raw_data_dir)
+            has_tar = any(raw_path.glob("*.tar.gz"))
+            has_h5 = any(raw_path.rglob("*.h5"))
+            if not has_tar and not has_h5:
+                self._download_data_from_url(self.raw_data_url, val=False)
+                self._download_data_from_url(self.raw_data_url_val, val=True)
+            else:
+                print("Raw data already exists. Moving to pre-processing for symm_loss...")
+
+            self.x_train_raw, self.x_val_raw, self.y_train_raw, self.y_val_raw, self.feature_names, self.pt_idx = self._load_all_h5_files(self.raw_data_dir, isTest=False)
+            self._pre_proc_symm_loss_data(self.raw_data_dir, self.processed_data_dir, self.nconstituents, self.features)
+
+        else:
+            raise ValueError(
+                f"Unsupported method '{self.method}'. Expected 'augmentation' or 'symm_loss'."
+            )
+
+    def _pre_proc_symm_loss_data(
+        self,
+        raw_data_dir: str,
+        processed_data_dir: str,
+        nconstituents: int,
+        features: list,
+    ) -> None:
+        """
+        Preprocessing pipeline for symmetry loss experiments:
+        Restricts the number of constituents, sorts by pt, and applies normalization.
+        """
+        print("[symm_loss] Restricting number of constituents, sorting by pt, and applying normalization.")
+        if self.x_train_raw is None or self.y_train_raw is None or self.feature_names is None or self.pt_idx is None:
+            self.x_train_raw, self.x_val_raw, self.y_train_raw, self.y_val_raw, self.feature_names, self.pt_idx = self._load_all_h5_files(
+                raw_data_dir, isTest=False
+            )
+        x_train_sorted = self._restrict_and_sort_by_pt(self.x_train_raw, self.pt_idx, nconstituents)
+        x_val_sorted = self._restrict_and_sort_by_pt(self.x_val_raw, self.pt_idx, nconstituents)
+        # Fit normalization on train, apply to both train and val
+        norm_params = self.fit_physics_norm(x_train_sorted, self.feature_names)
+        x_train_norm = self.apply_physics_norm(x_train_sorted, self.feature_names, norm_params)
+        x_val_norm = self.apply_physics_norm(x_val_sorted, self.feature_names, norm_params)
+        self.norm_params = norm_params
+        self._save_processed_arrays(
+            processed_data_dir=processed_data_dir,
+            x_train=x_train_norm,
+            y_train=self.y_train_raw,
+            x_val=x_val_norm,
+            y_val=self.y_val_raw,
+            norm_params=norm_params,
+        )
     # ---------------------------------------------------------------------
     # Step 1: Download/extract
     # ---------------------------------------------------------------------
@@ -850,6 +962,7 @@ class HLS4MLDataModule(LightningDataModule):
                 "Processed arrays are missing. Run `prepare_data()` first. "
                 f"Missing files: {missing_paths}"
             )
+        
         # Before we save the final dataloaders we have to restrict their features to the requested subset in sef.features (if not None). We can get the column indices for the requested features from the norm_params.npz file that was saved during prepare_data. If self.features is None, we load all features.
         feature_indices = self._get_feature_indices(processed_dir)
         if stage in (None, "fit") and (not hasattr(self, "data_train") or self.data_train is None):
@@ -882,6 +995,12 @@ class HLS4MLDataModule(LightningDataModule):
             # No separate test split yet; re-use validation split for test/predict.
             self.data_test = self.data_val
 
+        # Always load feature_names from norm_params.npz if available
+        npz_path = Path(self.processed_data_dir) / "norm_params.npz"
+        if npz_path.exists():
+            npz = np.load(npz_path, allow_pickle=False)
+            self.feature_names = list(npz["feature_names"])
+
         # Optional diagnostic plot: only when augmentation is enabled and feature metadata is available.
         should_plot = (
             stage in (None, "fit")
@@ -912,6 +1031,28 @@ class HLS4MLDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
             shuffle=True,
         )
+        # Create the train and val set using the training data
+
+        if self.method == "augmentation":
+            return DataLoader(
+                dataset=self.data_train,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                pin_memory=self.pin_memory,
+                
+                shuffle=True,
+            )
+        if self.method == "symm_loss":
+            # For symmetry loss we only need to sort the data and dont need to augment it
+            return DataLoader(
+                dataset=self.data_train,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                pin_memory=self.pin_memory,
+                shuffle=True,
+            )
+        else:
+            raise ValueError(f"Unsupported method '{self.method}' for train_dataloader. Expected 'augmentation' or 'symm_loss'.")
 
     def val_dataloader(self) -> DataLoader[Any]:
         """Create and return the validation dataloader.
@@ -952,7 +1093,4 @@ class HLS4MLDataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    project_root = Path(__file__).resolve().parents[2]
-    data_module = HLS4MLDataModule(data_dir=str(project_root / "datasets"))
-    # data_module.prepare_data()
-    # data_module.setup(stage="fit")
+    pass

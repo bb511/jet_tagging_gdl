@@ -1,0 +1,26 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=hls4ml_symm_loss_nconst8_lorentz
+
+defaults:
+  - override /data: hls4ml
+  - override /model: deepsets_8
+
+tags: ["hls4ml", "nconst-8", "symm-loss"]
+seed: 12345
+
+data:
+  nconstituents: 8
+  method: symm_loss
+
+batch_size: 256
+
+callbacks:
+  invariance_metric: null
+
+model:
+  group: lorentz
+
+trainer:
+  max_epochs: 300

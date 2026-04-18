@@ -12,6 +12,7 @@ seed: 12345
 
 data:
   nconstituents: 32
+  method: augmentation
   augmentation_scheme: lorentz
   lorentz_nbr_rot: 8
   lorentz_eta_max: 2.0

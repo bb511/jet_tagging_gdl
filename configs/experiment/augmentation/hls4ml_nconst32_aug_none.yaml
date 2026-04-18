@@ -12,6 +12,7 @@ seed: 12345
 
 data:
   nconstituents: 32
+  method: augmentation
   augmentation_scheme: none
   batch_size: 256
 

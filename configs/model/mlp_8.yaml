@@ -1,0 +1,26 @@
+# MLP for nconst=8: in_dim = 8 * 5 = 40
+_target_: src.models.mlp_module.MLPClassifier
+
+nbr_feats: 5
+nconstituents: 8
+hidden_layers: [64, 32]
+output_dim: 5
+activation: "relu"
+method: ${data.method}
+batchnorm: false
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 1e-7
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: "max"
+  patience: 80
+  factor: 0.1
+  threshold: 1e-4
+
+compile: false

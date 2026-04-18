@@ -4,11 +4,13 @@ _target_: src.models.deepsets_module.DeepSetsInvariant
 nbr_feats: 3
 phi_layers: [32, 32, 32]
 rho_layers: [32]
+method: ${data.method}
 activation: "relu"
 aggregation: "mean"
 dropout: -1
 output_dim: 5
 mask: true
+
 
 optimizer:
   _target_: torch.optim.Adam

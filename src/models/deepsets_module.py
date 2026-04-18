@@ -4,7 +4,13 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
+from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 import torch.nn as nn
+
+
+
+from torch.nn.functional import cross_entropy
+from torchinfo import summary as torchinfo_summary
 
 
 def _get_act(name: str) -> nn.Module:
@@ -35,6 +41,7 @@ class DeepSetsInvariant(LightningModule):
         phi_layers: list,
         rho_layers: list,
         activation: str,
+        method: str,
         aggregation: str,
         dropout: float,
         output_dim: int,
@@ -42,6 +49,7 @@ class DeepSetsInvariant(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None,
         compile: bool,
+        group: str,
     ) -> None:
         super().__init__()
 
@@ -49,6 +57,11 @@ class DeepSetsInvariant(LightningModule):
         self.save_hyperparameters(logger=False)
 
         self.activ_name = activation
+
+        # Symmetry method
+        self.method = method
+        self.group = group
+
         self.aggregation = aggregation
         self.mask_enabled = mask
 
@@ -72,7 +85,11 @@ class DeepSetsInvariant(LightningModule):
         self.rho = nn.Sequential(*rho_blocks)
 
         # loss function
-        self.criterion = torch.nn.CrossEntropyLoss()
+        if self.method == "augmentation":
+            self.criterion = torch.nn.CrossEntropyLoss()
+        
+        elif self.method == "symm_loss":
+            self.criterion = combine_with_symmetry_loss
 
         # metric objects for calculating and averaging accuracy across batches
         self.train_acc = Accuracy(task="multiclass", num_classes=output_dim)
@@ -121,9 +138,22 @@ class DeepSetsInvariant(LightningModule):
         if y.ndim > 1 and y.shape[1] > 1:
             y = torch.argmax(y, dim=1)
         logits = self.forward(x)
-        loss = self.criterion(logits, y)
-        preds = torch.argmax(logits, dim=1)
-        return loss, preds, y
+        if self.method == "augmentation":
+            loss = self.criterion(logits, y)
+            preds = torch.argmax(logits, dim=1)
+            return loss, preds, y
+
+        else:
+            if self.group.lower() == "lorentz":
+                feature_names = self.trainer.datamodule.feature_names if hasattr(self.trainer, "datamodule") else None
+                x_sym, _ = build_symmetric_batch(x, group=self.group, feature_names=feature_names)
+            else:
+                x_sym, _ = build_symmetric_batch(x, group=self.group)
+            cls_loss = cross_entropy(logits, y)
+            logits_sym = self.forward(x_sym)
+            loss = self.criterion(cls_loss, logits, logits_sym, weight=0.1)
+            preds = torch.argmax(logits, dim=1)
+            return loss, preds, y
 
     # ------------------------------------------------------------------
     # Training

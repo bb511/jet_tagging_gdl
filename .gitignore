@@ -1,0 +1,52 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.py[cod]
+*.so
+
+# Ignore virtual environments and Python environment folders
+HYDRA/
+lib/
+lib64/
+include/
+share/
+pyvenv.cfg
+bin/
+
+# Ignore logs and outputs
+logs/
+logs/slurm/
+logs/train/
+results/
+*.out
+*.log
+
+# Ignore Hydra outputs and working directories
+outputs/
+output/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore build artifacts
+dist/
+build/
+*.egg-info/
+
+# Ignore data and scratch directories
+data/
+*.npz
+*.csv
+*.tex
+
+# Ignore user-specific files
+*.swp
+*.swo
+*~

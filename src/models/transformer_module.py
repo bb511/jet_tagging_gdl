@@ -7,6 +7,8 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
+from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
+from torch.nn.functional import cross_entropy
 import torch.nn as nn
 
 # This is a baseline implementation for the Transformer model. I need to modify it for the structure of this repo
@@ -28,7 +30,8 @@ class Transformer(LightningModule):
                 fast_path: bool = False,
                 optimizer: Optional[torch.optim.Optimizer] = None,
                 scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-                compile: bool = False):
+                compile: bool = False,
+                group: str = "so2"):
         
         super(Transformer, self).__init__()
         
@@ -45,7 +48,10 @@ class Transformer(LightningModule):
         self.use_mask = use_mask
         self.fill_masked = fill_masked
 
-        self.criterion = torch.nn.CrossEntropyLoss()
+        if self.method == "augmentation":   
+            self.criterion = torch.nn.CrossEntropyLoss()
+        elif self.method == "symm_loss":
+            self.criterion = combine_with_symmetry_loss
 
         # metric objects for calculating and averaging accuracy across batches
         self.train_acc = Accuracy(task="multiclass", num_classes=output_size)
@@ -60,7 +66,8 @@ class Transformer(LightningModule):
         # for tracking best so far validation accuracy
         self.val_acc_best = MaxMetric()
 
-        
+        self.group = group
+
         # Store normalization method
         if coef_norm is None:
             self.norm_method = 'none'
@@ -103,9 +110,22 @@ class Transformer(LightningModule):
         if y.ndim > 1 and y.shape[1] > 1:
             y = torch.argmax(y, dim=1)
         logits = self.forward(x)
-        loss = self.criterion(logits, y)
-        preds = torch.argmax(logits, dim=1)
-        return loss, preds, y
+        if self.method == "augmentation":
+            loss = self.criterion(logits, y)
+            preds = torch.argmax(logits, dim=1)
+            return loss, preds, y
+
+        else:
+            if self.group.lower() == "lorentz":
+                feature_names = self.trainer.datamodule.feature_names if hasattr(self.trainer, "datamodule") else None
+                x_sym, _ = build_symmetric_batch(x, group=self.group, feature_names=feature_names)
+            else:
+                x_sym, _ = build_symmetric_batch(x, group=self.group)
+            cls_loss = cross_entropy(logits, y)
+            logits_sym = self.forward(x_sym)
+            loss = self.criterion(cls_loss, logits, logits_sym, weight=0.1)
+            preds = torch.argmax(logits, dim=1)
+            return loss, preds, y
     
     def on_train_start(self) -> None:
         self.val_loss.reset()

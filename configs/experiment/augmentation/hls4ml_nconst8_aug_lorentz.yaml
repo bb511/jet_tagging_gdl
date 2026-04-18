@@ -1,17 +1,18 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=hls4ml_nconst16_aug_lorentz
+# python src/train.py experiment=hls4ml_nconst8_aug_lorentz
 
 defaults:
   - override /data: hls4ml
-  - override /model: deepsets_16
+  - override /model: deepsets_8
 
-tags: ["hls4ml", "nconst-16", "aug-lorentz"]
+tags: ["hls4ml", "nconst-8", "aug-lorentz"]
 seed: 12345
 
 data:
-  nconstituents: 16
+  nconstituents: 8
+  method: augmentation
   augmentation_scheme: lorentz
   lorentz_nbr_rot: 8
   lorentz_eta_max: 2.0
