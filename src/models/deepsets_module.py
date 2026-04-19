@@ -4,23 +4,23 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
-from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
-import torch.nn as nn
-from torch.nn.functional import cross_entropy
 from torchinfo import summary as torchinfo_summary
+from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
+from torch.nn.functional import cross_entropy
+import torch.nn as nn
 
 
 def _get_act(name: str) -> nn.Module:
     """Return a *new* activation module from its name."""
     activations = {
-        "relu": lambda: nn.ReLU(inplace=True),
-        "tanh": lambda: nn.Tanh(),
+        "relu":    lambda: nn.ReLU(inplace=True),
+        "tanh":    lambda: nn.Tanh(),
         "sigmoid": lambda: nn.Sigmoid(),
     }
     factory = activations.get(name)
     if factory is None:
         raise ValueError(
-            f"Activation '{name}' not implemented! Add it to _get_act() in deepsets_module.py."
+            f"Activation '{name}' not implemented. Add it to _get_act() in deepsets_module.py."
         )
     return factory()
 
@@ -29,8 +29,15 @@ class DeepSetsInvariant(LightningModule):
     """Deep Sets permutation-invariant network for jet classification.
 
     Architecture (Zaheer et al.):
-        phi : per-particle MLP  ->  aggregation (sum/mean/max)  ->  rho : post-aggregation MLP
+        phi : per-particle MLP → aggregation (sum/mean/max) → rho : post-aggregation MLP
+
+    Supported methods:
+        - augmentation   : data pre-augmented on disk; standard CE loss
+        - symm_loss      : unaugmented data + symmetry regularisation loss
+        - another_method : placeholder, uses standard CE loss
     """
+
+    SUPPORTED_METHODS = {"augmentation", "symm_loss", "another_method"}
 
     def __init__(
         self,
@@ -46,21 +53,24 @@ class DeepSetsInvariant(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None,
         compile: bool,
-        group: str,
+        group: str = "so2",
     ) -> None:
         super().__init__()
-
-        # stores all init args in self.hparams and in the checkpoint
         self.save_hyperparameters(logger=False)
 
-        self.activ_name = activation
-
-        # Symmetry method
-        self.method = method
-        self.group = group
-
-        self.aggregation = aggregation
+        # Validate method
+        if method not in self.SUPPORTED_METHODS:
+            raise ValueError(
+                f"Unsupported method '{method}'. Expected one of: {self.SUPPORTED_METHODS}."
+            )
+        self.method       = method
+        self.group        = group
+        self.activ_name   = activation
+        self.aggregation  = aggregation
         self.mask_enabled = mask
+
+        # Example input for torchinfo and RichModelSummary
+        self.example_input_array = torch.randn(2, 32, nbr_feats)
 
         # --- phi network (per-particle) ---
         phi_blocks: list[nn.Module] = []
@@ -81,25 +91,36 @@ class DeepSetsInvariant(LightningModule):
                 rho_blocks.append(_get_act(self.activ_name))
         self.rho = nn.Sequential(*rho_blocks)
 
-        # loss function
-        if self.method == "augmentation":
-            self.criterion = torch.nn.CrossEntropyLoss()
-        
-        elif self.method == "symm_loss":
+        # Loss
+        if self.method == "symm_loss":
             self.criterion = combine_with_symmetry_loss
+        else:
+            self.criterion = nn.CrossEntropyLoss()
 
-        # metric objects for calculating and averaging accuracy across batches
-        self.train_acc = Accuracy(task="multiclass", num_classes=output_dim)
-        self.val_acc = Accuracy(task="multiclass", num_classes=output_dim)
-        self.test_acc = Accuracy(task="multiclass", num_classes=output_dim)
-
-        # for averaging loss across batches
-        self.train_loss = MeanMetric()
-        self.val_loss = MeanMetric()
-        self.test_loss = MeanMetric()
-
-        # for tracking best so far validation accuracy
+        # Metrics
+        self.train_acc    = Accuracy(task="multiclass", num_classes=output_dim)
+        self.val_acc      = Accuracy(task="multiclass", num_classes=output_dim)
+        self.test_acc     = Accuracy(task="multiclass", num_classes=output_dim)
+        self.train_loss   = MeanMetric()
+        self.val_loss     = MeanMetric()
+        self.test_loss    = MeanMetric()
         self.val_acc_best = MaxMetric()
+
+        # feature_names populated in setup() from the datamodule
+        self.feature_names = None
+
+        # ----------------------------------------------------------------
+        # Compute FLOPs in __init__ — model fully built, no trainer needed.
+        # Stored in hparams: available from the very first hook (including
+        # sanity-check validation), persisted in checkpoints, and logged
+        # to MLflow automatically via log_hyperparameters.
+        # ----------------------------------------------------------------
+        stats = torchinfo_summary(
+            self,
+            input_data=self.example_input_array,
+            verbose=0,
+        )
+        self.hparams["flops"] = float(stats.total_mult_adds)
 
     # ------------------------------------------------------------------
     # Forward
@@ -108,7 +129,6 @@ class DeepSetsInvariant(LightningModule):
         x = x.to(torch.float32)
         phi_out = self.phi(x)
 
-        # zero-out phi outputs for padded (zero) constituents
         if self.mask_enabled:
             mask = (x.abs().sum(dim=2) > 0).float().unsqueeze(-1)
             phi_out = phi_out * mask
@@ -125,114 +145,78 @@ class DeepSetsInvariant(LightningModule):
         return self.rho(pooled)
 
     # ------------------------------------------------------------------
-    # Shared step
+    # Shared step — branched cleanly by method
     # ------------------------------------------------------------------
     def model_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x, y = batch
-        # convert one-hot labels to class indices if needed
         if y.ndim > 1 and y.shape[1] > 1:
             y = torch.argmax(y, dim=1)
-        logits = self.forward(x)
-        if self.method == "augmentation":
-            loss = self.criterion(logits, y)
-            preds = torch.argmax(logits, dim=1)
-            return loss, preds, y
 
-        else:
+        logits = self.forward(x)
+
+        if self.method == "symm_loss":
+            # Lorentz boosts require feature_names; SO2/SO3 do not
             if self.group.lower() == "lorentz":
-                feature_names = self.trainer.datamodule.feature_names if hasattr(self.trainer, "datamodule") else None
-                x_sym, _ = build_symmetric_batch(x, group=self.group, feature_names=feature_names)
+                if self.feature_names is None:
+                    raise RuntimeError(
+                        "feature_names is None — Lorentz symm_loss requires feature_names. "
+                        "Ensure setup() has been called so the datamodule populates it."
+                    )
+                x_sym, _ = build_symmetric_batch(x, group=self.group, feature_names=self.feature_names)
             else:
                 x_sym, _ = build_symmetric_batch(x, group=self.group)
-            cls_loss = cross_entropy(logits, y)
+
             logits_sym = self.forward(x_sym)
-            loss = self.criterion(cls_loss, logits, logits_sym, weight=0.1)
-            preds = torch.argmax(logits, dim=1)
-            return loss, preds, y
+            cls_loss   = cross_entropy(logits, y)
+            loss, _    = self.criterion(cls_loss, logits, logits_sym, weight=0.1)
+
+        else:
+            # augmentation / another_method — plain cross-entropy
+            loss = self.criterion(logits, y)
+
+        preds = torch.argmax(logits, dim=1)
+        return loss, preds, y
+
+    # ------------------------------------------------------------------
+    # Setup — grab feature_names from datamodule once trainer is attached
+    # ------------------------------------------------------------------
+    def setup(self, stage: str) -> None:
+        if hasattr(self.trainer, "datamodule") and self.trainer.datamodule is not None:
+            self.feature_names = self.trainer.datamodule.feature_names
+            if (
+                self.method == "symm_loss"
+                and self.group.lower() == "lorentz"
+                and self.feature_names is None
+            ):
+                raise RuntimeError(
+                    "datamodule.feature_names is None after setup(). "
+                    "Ensure HLS4MLDataModule.setup() populates feature_names from norm_params.npz."
+                )
 
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
     def on_train_start(self) -> None:
-        # Log all metrics with dummy values to ensure CSVLogger header includes all fields
-        self.log("train/acc", 0.0)
-        self.log("model/flops", float(getattr(self, "flops", 0.0)))
-        self.log("train/loss", 0.0)
-        self.log("val/loss", 0.0)
-        self.log("val/acc", 0.0)
-        self.log("val/acc_best", 0.0)
-        self.log("test/loss", 0.0)
-        self.log("test/acc", 0.0)
-        if hasattr(self, "val_loss"):
-            self.val_loss.reset()
-        if hasattr(self, "val_acc"):
-            self.val_acc.reset()
-        if hasattr(self, "val_acc_best"):
-            self.val_acc_best.reset()
-
-    def on_train_epoch_end(self) -> None:
-        train_loss = self.train_loss.compute() if hasattr(self, "train_loss") else 0.0
-        train_acc = self.train_acc.compute() if hasattr(self, "train_acc") else 0.0
-        self.log("train/loss", train_loss)
-        self.log("train/acc", train_acc)
-        self.log("model/flops", float(getattr(self, "flops", 0.0)))
-        self.log("val/loss", 0.0)
-        self.log("val/acc", 0.0)
-        self.log("val/acc_best", 0.0)
-        self.log("test/loss", 0.0)
-        self.log("test/acc", 0.0)
-        print(
-            f"Epoch {self.current_epoch} ended. "
-            f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}"
-        )
-
-    def on_validation_epoch_end(self) -> None:
-        acc = self.val_acc.compute() if hasattr(self, "val_acc") else 0.0
-        val_loss = self.val_loss.compute() if hasattr(self, "val_loss") else 0.0
-        val_acc_best = self.val_acc_best.compute() if hasattr(self, "val_acc_best") else 0.0
-        self.log("val/loss", val_loss)
-        self.log("val/acc", acc)
-        self.log("val/acc_best", val_acc_best, sync_dist=True, prog_bar=True)
-        self.log("train/loss", 0.0)
-        self.log("train/acc", 0.0)
-        self.log("model/flops", float(getattr(self, "flops", 0.0)))
-        self.log("test/loss", 0.0)
-        self.log("test/acc", 0.0)
-        print(
-            f"Epoch {self.current_epoch} ended. "
-            f"Val Loss: {val_loss:.4f}, Val Acc: {acc:.4f}, "
-            f"Val Acc Best: {val_acc_best:.4f}"
-        )
-
-    def on_test_epoch_end(self) -> None:
-        test_loss = self.test_loss.compute() if hasattr(self, "test_loss") else 0.0
-        test_acc = self.test_acc.compute() if hasattr(self, "test_acc") else 0.0
-        self.log("test/loss", test_loss)
-        self.log("test/acc", test_acc)
-        self.log("train/loss", 0.0)
-        self.log("train/acc", 0.0)
-        self.log("model/flops", float(getattr(self, "flops", 0.0)))
-        self.log("val/loss", 0.0)
-        self.log("val/acc", 0.0)
-        self.log("val/acc_best", 0.0)
+        # Reset val metrics so sanity-check values don't bleed into epoch 0
+        self.val_loss.reset()
+        self.val_acc.reset()
+        self.val_acc_best.reset()
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         loss, preds, targets = self.model_step(batch)
-
         self.train_loss(loss)
         self.train_acc(preds, targets)
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
-
+        self.log("train/acc",  self.train_acc,  on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
     def on_train_epoch_end(self) -> None:
         train_loss = self.train_loss.compute()
-        train_acc = self.train_acc.compute()
+        train_acc  = self.train_acc.compute()
         print(
             f"Epoch {self.current_epoch} ended. "
             f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}"
@@ -245,11 +229,10 @@ class DeepSetsInvariant(LightningModule):
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> None:
         loss, preds, targets = self.model_step(batch)
-
         self.val_loss(loss)
         self.val_acc(preds, targets)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc",  self.val_acc,  on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         acc = self.val_acc.compute()
@@ -269,28 +252,17 @@ class DeepSetsInvariant(LightningModule):
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> None:
         loss, preds, targets = self.model_step(batch)
-
         self.test_loss(loss)
         self.test_acc(preds, targets)
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/acc",  self.test_acc,  on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self) -> None:
         pass
 
     # ------------------------------------------------------------------
-    # Setup & optimizers
+    # Optimizers
     # ------------------------------------------------------------------
-    def setup(self, stage: str) -> None:
-        if stage == "fit":
-            stats = torchinfo_summary(
-                self,
-                input_data=self.example_input_array,
-                verbose=0,
-            )
-            self.flops = float(stats.total_mult_adds)
-            self.hparams["flops"] = self.flops  # persisted in checkpoint + MLflow
-
     def configure_optimizers(self) -> Dict[str, Any]:
         optimizer = self.hparams.optimizer(params=self.trainer.model.parameters())
         if self.hparams.scheduler is not None:
@@ -299,8 +271,8 @@ class DeepSetsInvariant(LightningModule):
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "monitor": "val/acc",
-                    "interval": "epoch",
+                    "monitor":   "val/acc",
+                    "interval":  "epoch",
                     "frequency": 1,
                 },
             }

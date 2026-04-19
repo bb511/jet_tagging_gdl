@@ -7,11 +7,10 @@ defaults:
   - data: hls4ml
   - model: deepsets_32
   - callbacks: default
-  - logger: many_loggers
+  - logger: mlflow
   - trainer: mps
   - paths: default
   - extras: default
-
 
   # experiment configs allow for version control of specific hyperparameters
   # e.g. best hyperparameters for given model and datamodule
@@ -28,7 +27,12 @@ defaults:
   - debug: null
 
 
-n_folds: 1
+
+# Use n_folds from the data config for k-fold cross-validation
+# This makes k-fold logic work for any model (MLP, DeepSets, Transformer)
+# Set n_folds in your data config (e.g., configs/data/hls4ml.yaml)
+# Example: n_folds: 5
+
 
 # task name, determines output directory path
 task_name: "train"

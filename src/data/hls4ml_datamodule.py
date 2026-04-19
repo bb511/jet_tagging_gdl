@@ -569,10 +569,13 @@ class HLS4MLDataModule(LightningDataModule):
                 x_train = x_train[:, :, feature_indices]
                 x_val   = x_val[:,   :, feature_indices]
 
-            log.info(
-                f"[setup] Fold {self.fold_idx + 1}/{self.n_folds} — "
-                f"x_train: {x_train.shape}, x_val: {x_val.shape}"
-            )
+            if self.n_folds > 1:
+                log.info(
+                    f"==================================================="
+                    f"[setup] FOLD {self.fold_idx + 1}/{self.n_folds} — "
+                    f"x_train: {x_train.shape}, x_val: {x_val.shape}"
+                    f"==================================================="
+                )
 
             self.data_train = TensorDataset(
                 torch.from_numpy(x_train).float(),

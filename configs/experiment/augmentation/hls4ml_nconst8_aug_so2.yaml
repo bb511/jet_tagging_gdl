@@ -16,6 +16,7 @@ data:
   augmentation_scheme: so2
   rotation_nbr_rot: 8
   batch_size: 256
+  n_folds: 1
 
 trainer:
   max_epochs: 300

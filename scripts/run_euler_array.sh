@@ -93,10 +93,17 @@ if (( SLURM_ARRAY_TASK_ID >= ${#EXPERIMENTS[@]} )); then
     exit 0
 fi
 
+
 EXPERIMENT="${EXPERIMENTS[$SLURM_ARRAY_TASK_ID]}"
 
 MODEL_FLAG=$(resolve_model_flag "$MODEL" "$EXPERIMENT")
 RUN_NAME="${EXPERIMENT}_${METHOD}"
+
+# Extract nconst from experiment string if present
+NCONST=""
+if [[ "$EXPERIMENT" =~ nconst([0-9]+) ]]; then
+    NCONST="${BASH_REMATCH[1]}"
+fi
 
 # Create slurm log directory
 mkdir -p logs/slurm/${SLURM_ARRAY_JOB_ID}
@@ -115,6 +122,12 @@ echo "GPU:          $CUDA_VISIBLE_DEVICES"
 echo "Model:        $MODEL"
 echo "Method:       $METHOD"
 echo "Experiment:   $EXPERIMENT"
+echo "Nconst:       $NCONST"
 echo "============================================"
 
-srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu n_folds=5
+# For transformer, override data.nconstituents if NCONST is set
+if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +n_folds=5
+else
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +n_folds=5 +max_epochs=1
+fi
