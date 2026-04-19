@@ -7,12 +7,10 @@ defaults:
   - data: hls4ml
   - model: deepsets_32
   - callbacks: default
-  - logger: csv
-  - trainer: mps 
+  - logger: many_loggers
+  - trainer: mps
   - paths: default
   - extras: default
-  - hydra: default
-
 
 
   # experiment configs allow for version control of specific hyperparameters
@@ -29,6 +27,9 @@ defaults:
   # debugging config (enable through command line, e.g. `python train.py debug=default)
   - debug: null
 
+
+n_folds: 1
+
 # task name, determines output directory path
 task_name: "train"
 
@@ -42,7 +43,7 @@ train: True
 
 # evaluate on test set, using best model weights achieved during training
 # lightning chooses best weights based on the metric specified in checkpoint callback
-test: False
+test: True
 
 # simply provide checkpoint path to resume training
 ckpt_path: null

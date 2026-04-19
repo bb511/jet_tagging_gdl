@@ -1,0 +1,5 @@
+invariance_metric:
+  _target_: src.callbacks.invariance_metric_callback.InvarianceMetricCallback
+  num_samples: 10000
+  lorentz_eta_max: 2.0
+  seed: 42

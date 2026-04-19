@@ -6,9 +6,6 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 import torch.nn as nn
-
-
-
 from torch.nn.functional import cross_entropy
 from torchinfo import summary as torchinfo_summary
 
@@ -159,9 +156,67 @@ class DeepSetsInvariant(LightningModule):
     # Training
     # ------------------------------------------------------------------
     def on_train_start(self) -> None:
-        self.val_loss.reset()
-        self.val_acc.reset()
-        self.val_acc_best.reset()
+        # Log all metrics with dummy values to ensure CSVLogger header includes all fields
+        self.log("train/acc", 0.0)
+        self.log("model/flops", float(getattr(self, "flops", 0.0)))
+        self.log("train/loss", 0.0)
+        self.log("val/loss", 0.0)
+        self.log("val/acc", 0.0)
+        self.log("val/acc_best", 0.0)
+        self.log("test/loss", 0.0)
+        self.log("test/acc", 0.0)
+        if hasattr(self, "val_loss"):
+            self.val_loss.reset()
+        if hasattr(self, "val_acc"):
+            self.val_acc.reset()
+        if hasattr(self, "val_acc_best"):
+            self.val_acc_best.reset()
+
+    def on_train_epoch_end(self) -> None:
+        train_loss = self.train_loss.compute() if hasattr(self, "train_loss") else 0.0
+        train_acc = self.train_acc.compute() if hasattr(self, "train_acc") else 0.0
+        self.log("train/loss", train_loss)
+        self.log("train/acc", train_acc)
+        self.log("model/flops", float(getattr(self, "flops", 0.0)))
+        self.log("val/loss", 0.0)
+        self.log("val/acc", 0.0)
+        self.log("val/acc_best", 0.0)
+        self.log("test/loss", 0.0)
+        self.log("test/acc", 0.0)
+        print(
+            f"Epoch {self.current_epoch} ended. "
+            f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}"
+        )
+
+    def on_validation_epoch_end(self) -> None:
+        acc = self.val_acc.compute() if hasattr(self, "val_acc") else 0.0
+        val_loss = self.val_loss.compute() if hasattr(self, "val_loss") else 0.0
+        val_acc_best = self.val_acc_best.compute() if hasattr(self, "val_acc_best") else 0.0
+        self.log("val/loss", val_loss)
+        self.log("val/acc", acc)
+        self.log("val/acc_best", val_acc_best, sync_dist=True, prog_bar=True)
+        self.log("train/loss", 0.0)
+        self.log("train/acc", 0.0)
+        self.log("model/flops", float(getattr(self, "flops", 0.0)))
+        self.log("test/loss", 0.0)
+        self.log("test/acc", 0.0)
+        print(
+            f"Epoch {self.current_epoch} ended. "
+            f"Val Loss: {val_loss:.4f}, Val Acc: {acc:.4f}, "
+            f"Val Acc Best: {val_acc_best:.4f}"
+        )
+
+    def on_test_epoch_end(self) -> None:
+        test_loss = self.test_loss.compute() if hasattr(self, "test_loss") else 0.0
+        test_acc = self.test_acc.compute() if hasattr(self, "test_acc") else 0.0
+        self.log("test/loss", test_loss)
+        self.log("test/acc", test_acc)
+        self.log("train/loss", 0.0)
+        self.log("train/acc", 0.0)
+        self.log("model/flops", float(getattr(self, "flops", 0.0)))
+        self.log("val/loss", 0.0)
+        self.log("val/acc", 0.0)
+        self.log("val/acc_best", 0.0)
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -227,7 +282,14 @@ class DeepSetsInvariant(LightningModule):
     # Setup & optimizers
     # ------------------------------------------------------------------
     def setup(self, stage: str) -> None:
-        pass
+        if stage == "fit":
+            stats = torchinfo_summary(
+                self,
+                input_data=self.example_input_array,
+                verbose=0,
+            )
+            self.flops = float(stats.total_mult_adds)
+            self.hparams["flops"] = self.flops  # persisted in checkpoint + MLflow
 
     def configure_optimizers(self) -> Dict[str, Any]:
         optimizer = self.hparams.optimizer(params=self.trainer.model.parameters())

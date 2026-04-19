@@ -5,7 +5,7 @@ batch_size: 256
 num_workers: 3
 pin_memory: False
 nconstituents: 32
-features: ["pt", "etarel", "phirel"]
+features: ["px", "py", "pz", "etarel", "phirel"]
 augmentation_scheme: none
 augmentation_seed: ${seed}
 rotation_nbr_rot: 8

@@ -4,8 +4,11 @@ defaults:
   - rich_progress_bar
   - lr_monitor
   - plotting
+  - early_stopping
   - _self_
-
+  - invariance_metric
+  - results_table
+  
 model_checkpoint:
   dirpath: ${paths.output_dir}/checkpoints
   filename: "epoch_{epoch:03d}"
