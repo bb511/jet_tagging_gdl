@@ -12,3 +12,4 @@ rotation_nbr_rot: 8
 rotation_shuffle: True
 lorentz_nbr_rot: 8
 lorentz_eta_max: 2.0
+n_folds: 5

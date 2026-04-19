@@ -17,6 +17,7 @@ data:
   lorentz_nbr_rot: 8
   lorentz_eta_max: 2.0
   batch_size: 256
+  n_folds: 1
 
 trainer:
   max_epochs: 300
