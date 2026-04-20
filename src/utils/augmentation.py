@@ -134,11 +134,11 @@ def apply_so2_single_rotation(
     pz_r = vec_rot[:, :, 2]
     pt_r, _, phi_r = px_py_pz_to_pt_eta_phi(px_r, py_r, pz_r)
 
-    x_new[:, :, px_idx] = px_r
-    x_new[:, :, py_idx] = py_r
-    x_new[:, :, pz_idx] = pz_r
-    x_new[:, :, pt_idx] = pt_r
-    x_new[:, :, phi_idx] = phi_r
+    # Only update features if their indices are valid and within bounds
+    n_feats = x_new.shape[2]
+    for idx, arr in zip([px_idx, py_idx, pz_idx, pt_idx, phi_idx], [px_r, py_r, pz_r, pt_r, phi_r]):
+        if idx is not None and 0 <= idx < n_feats:
+            x_new[:, :, idx] = arr
     return x_new
 
 

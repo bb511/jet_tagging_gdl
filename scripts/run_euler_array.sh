@@ -17,6 +17,10 @@
 #   sbatch scripts/run_euler_array.sh transformer augmentation
 #   sbatch scripts/run_euler_array.sh deepsets symm_loss
 #   sbatch scripts/run_euler_array.sh mlp symm_loss
+#
+# Task-id mapping:
+#   augmentation: task 0-3 -> nconst=8, task 4-7 -> nconst=16, task 8-11 -> nconst=32
+#   symm_loss:    task 0-2 -> nconst=8, task 3-5 -> nconst=16, task 6-8  -> nconst=32
 # ---------------------------------------------------------------
 
 set -euo pipefail
@@ -26,6 +30,8 @@ MODEL="${1:?Usage: sbatch scripts/run_euler_array.sh <model_name> <augmentation|
 # Method from command-line argument (required).
 METHOD_RAW="${2:?Usage: sbatch scripts/run_euler_array.sh <model_name> <augmentation|symm_loss>}"
 METHOD="$(echo "$METHOD_RAW" | tr '[:upper:]' '[:lower:]')"
+# Any extra Hydra overrides passed after model/method, e.g. trainer.max_epochs=1
+EXTRA_ARGS=("${@:3}")
 
 resolve_model_flag() {
     local model="$1"
@@ -89,6 +95,7 @@ fi
 # If the job array is larger than the chosen method's experiment set, skip extras.
 if (( SLURM_ARRAY_TASK_ID >= ${#EXPERIMENTS[@]} )); then
     echo "Task ${SLURM_ARRAY_TASK_ID} has no experiment for method '${METHOD}'. Skipping."
+    echo "Hint: nconst=32 is task 8-11 (augmentation) or 6-8 (symm_loss)."
     exit 0
 fi
 
@@ -113,6 +120,10 @@ LOG_BASE="logs/slurm/${SLURM_ARRAY_JOB_ID}/${MODEL}_${METHOD}_${EXPERIMENT_BASEN
 exec > "${LOG_BASE}.out" 2> "${LOG_BASE}.err"
 # SLURM will handle stdout and stderr redirection
 
+# Force a unique Hydra run dir per SLURM array task to avoid checkpoint collisions
+# between concurrent tasks with different model shapes.
+HYDRA_RUN_DIR="logs/train/runs/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}_${MODEL}_${METHOD}_${EXPERIMENT_BASENAME}"
+
 echo "============================================"
 echo "Job ID:       $SLURM_ARRAY_JOB_ID"
 echo "Task ID:      $SLURM_ARRAY_TASK_ID"
@@ -126,7 +137,7 @@ echo "============================================"
 
 # For transformer, override data.nconstituents if NCONST is set
 if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +data.n_folds=5
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" "${EXTRA_ARGS[@]}"
 else
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.n_folds=5
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" "${EXTRA_ARGS[@]}"
 fi

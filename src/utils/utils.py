@@ -129,6 +129,7 @@ def plot_features_overlap_from_datasets(
     feature_names: list,
     class_idx: int,
     augmentation_scheme: str,
+    method: Optional[str] = None,
     nconstituents: Optional[int] = 32,
     split: str = "train",
     num_cols: int = 3,
@@ -139,10 +140,10 @@ def plot_features_overlap_from_datasets(
     """Overlay original vs augmented feature distributions loaded from datasets directory.
 
     Expected directory layout:
-    - <datasets_dir>/processed/none/<nconst_tag>/x_<split>.npy
-    - <datasets_dir>/processed/none/<nconst_tag>/y_<split>.npy
-    - <datasets_dir>/processed/<augmentation_scheme>/<nconst_tag>/x_<split>.npy
-    - <datasets_dir>/processed/<augmentation_scheme>/<nconst_tag>/y_<split>.npy
+    - Legacy:
+      <datasets_dir>/processed/<scheme>/<nconst_tag>/...
+    - Method-aware (preferred):
+      <datasets_dir>/processed/<method>/<scheme>/<nconst_tag>/...
     """
     split = split.lower()
     if split not in {"train", "val"}:
@@ -154,8 +155,12 @@ def plot_features_overlap_from_datasets(
 
     nconst_tag = "full" if nconstituents is None or nconstituents <= 0 else f"nconst_{nconstituents}"
     base = Path(datasets_dir) / "processed"
-    orig_dir = base / "none" / nconst_tag
-    aug_dir = base / scheme / nconst_tag
+    if method is not None and method != "":
+        orig_dir = base / method / "none" / nconst_tag
+        aug_dir = base / method / scheme / nconst_tag
+    else:
+        orig_dir = base / "none" / nconst_tag
+        aug_dir = base / scheme / nconst_tag
 
     x_orig_path = orig_dir / f"x_{split}.npy"
     y_orig_path = orig_dir / f"y_{split}.npy"

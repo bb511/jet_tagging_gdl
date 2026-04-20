@@ -38,9 +38,12 @@ class MLPClassifier(LightningModule):
         optimizer: torch.optim.Optimizer = None,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         compile: bool = False,
+        group: str = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
+
+        self.group = group
 
         # Validate method
         if method not in self.SUPPORTED_METHODS:
@@ -93,7 +96,12 @@ class MLPClassifier(LightningModule):
             input_data=self.example_input_array,
             verbose=0,
         )
-        self.hparams["flops"] = float(stats.total_mult_adds)
+        mult_adds = float(stats.total_mult_adds)
+        total_flops = 2.0 * mult_adds
+        # Keep backwards compatibility (`flops`) but store explicit names too.
+        self.hparams["flops_mult_adds"] = mult_adds
+        self.hparams["flops_total"] = total_flops
+        self.hparams["flops"] = total_flops
 
     # ------------------------------------------------------------------
     # Forward

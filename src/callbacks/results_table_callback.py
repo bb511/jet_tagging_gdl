@@ -192,7 +192,12 @@ class ResultsTableCallback(L.Callback):
     def on_fit_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         metrics = trainer.callback_metrics
         inv = self._extract_invariance(metrics)
-        flops = self._to_float(pl_module.hparams.get("flops", float("nan")))
+        flops = self._to_float(
+            pl_module.hparams.get(
+                "flops_total",
+                pl_module.hparams.get("flops", float("nan")),
+            )
+        )
 
         self._fold_invariance.append(inv)
         self._fold_flops.append(flops)

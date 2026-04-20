@@ -20,3 +20,6 @@ model:
 
 trainer:
   max_epochs: 300
+
+callbacks:
+  invariance_metric: Null

@@ -143,7 +143,19 @@ class HLS4MLDataModule(LightningDataModule):
             if self.nconstituents is None or self.nconstituents <= 0
             else f"nconst_{self.nconstituents}"
         )
+        # Canonical layout (method-aware):
+        #   <data_dir>/processed/<method>/<augmentation_scheme>/<nconst_tag>/
+        # This prevents collisions between augmentation and symm_loss pipelines.
         self.processed_data_dir = os.path.join(
+            self.data_path,
+            "processed",
+            self.method,
+            self.augmentation_scheme,
+            nconst_tag,
+        )
+        # Backward-compatibility layout used in older runs:
+        #   <data_dir>/processed/<augmentation_scheme>/<nconst_tag>/
+        self.legacy_processed_data_dir = os.path.join(
             self.data_path,
             "processed",
             self.augmentation_scheme,
@@ -214,13 +226,33 @@ class HLS4MLDataModule(LightningDataModule):
             for fname in ("x_train.npy", "y_train.npy", "x_val.npy", "y_val.npy")
         )
 
+    def _resolve_processed_dir(self) -> str:
+        """Resolve processed dir, preferring canonical method-aware path.
+
+        If only legacy arrays exist, reuse them for compatibility with older runs.
+        """
+        if self._processed_arrays_exist(self.processed_data_dir):
+            return self.processed_data_dir
+        if self._processed_arrays_exist(self.legacy_processed_data_dir):
+            log.warning(
+                "Using legacy processed directory layout: "
+                f"{self.legacy_processed_data_dir}. "
+                "Consider regenerating arrays into the method-aware path: "
+                f"{self.processed_data_dir}"
+            )
+            return self.legacy_processed_data_dir
+        return self.processed_data_dir
+
     def prepare_data(self) -> None:
         if self._skip_prepare_data:
             return
 
-        if self._processed_arrays_exist(self.processed_data_dir):
+        resolved_dir = self._resolve_processed_dir()
+        if self._processed_arrays_exist(resolved_dir):
+            # Stick to whichever existing layout was resolved so setup() reads the same files.
+            self.processed_data_dir = resolved_dir
             print(
-                f"Processed arrays already exist in {self.processed_data_dir}. "
+                f"Processed arrays already exist in {resolved_dir}. "
                 "Skipping preparation."
             )
             return
@@ -622,6 +654,7 @@ class HLS4MLDataModule(LightningDataModule):
                     feature_names=self.feature_names,
                     class_idx=0,
                     augmentation_scheme=self.augmentation_scheme,
+                    method=self.method,
                     nconstituents=self.nconstituents,
                     split="train",
                     save_dir=os.path.join(

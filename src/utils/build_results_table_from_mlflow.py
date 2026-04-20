@@ -180,6 +180,9 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
         flops = read_metric_last(run_dir / "metrics" / "model" / "flops")
 
         if math.isnan(flops):
+            # Prefer explicit total-FLOPs field when available.
+            flops = safe_float(read_text(run_dir / "params" / "model" / "flops_total"))
+        if math.isnan(flops):
             flops = safe_float(read_text(run_dir / "params" / "model" / "flops"))
 
         records.append(
