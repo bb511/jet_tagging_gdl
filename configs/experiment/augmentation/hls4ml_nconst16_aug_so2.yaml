@@ -1,7 +1,7 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=hls4ml_nconst16_aug_so2
+# python src/train.py experiment=augmentation/hls4ml_nconst16_aug_so2
 
 defaults:
   - override /data: hls4ml

@@ -1,7 +1,7 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=hls4ml_symm_loss_nconst8_so2
+# python src/train.py experiment=symm_loss/hls4ml_symm_loss_nconst8_so2
 
 defaults:
   - override /data: hls4ml
@@ -13,11 +13,7 @@ seed: 12345
 data:
   nconstituents: 8
   method: symm_loss
-
-batch_size: 256
-
-callbacks:
-  invariance_metric: null
+  batch_size: 256
 
 model:
   group: so2

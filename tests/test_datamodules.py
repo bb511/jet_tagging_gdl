@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 import torch
 
-from src.data.mnist_datamodule import MNISTDataModule
+mnist_module = pytest.importorskip(
+    "src.data.mnist_datamodule",
+    reason="MNISTDataModule is not part of this repository variant.",
+)
+MNISTDataModule = mnist_module.MNISTDataModule
 
 
 @pytest.mark.parametrize("batch_size", [32, 128])

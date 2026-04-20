@@ -144,7 +144,7 @@ class HLS4MLDataModule(LightningDataModule):
             else f"nconst_{self.nconstituents}"
         )
         self.processed_data_dir = os.path.join(
-            "/cluster/scratch/agogia/datasets/",
+            self.data_path,
             "processed",
             self.augmentation_scheme,
             nconst_tag,

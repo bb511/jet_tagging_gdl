@@ -1,7 +1,7 @@
 results_table:
   _target_: src.callbacks.results_table_callback.ResultsTableCallback
   output_path: "results/results_table.csv"
-  n_folds: ${n_folds}
+  n_folds: ${data.n_folds}
   model_name: ${model._target_}
   augmentation_scheme: ${data.augmentation_scheme}
   nconstituents: ${data.nconstituents}

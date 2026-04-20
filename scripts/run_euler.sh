@@ -12,7 +12,7 @@
 # Single experiment on ETH Euler
 
 # Usage:
-#   sbatch scripts/run_euler.sh transformer hls4ml_nconst16_aug_so2
+#   sbatch scripts/run_euler.sh transformer augmentation/hls4ml_nconst16_aug_so2
 #   sbatch scripts/run_euler.sh                          # uses defaults
 # ---------------------------------------------------------------
 
@@ -21,7 +21,7 @@ set -euo pipefail
 # Model name (first argument, or default)
 MODEL="${1:-deepsets_32}"
 # Experiment name (second argument, or default)
-EXPERIMENT="${2:-hls4ml_nconst32_aug_none}"
+EXPERIMENT="${2:-augmentation/hls4ml_nconst32_aug_none}"
 
 # Project root (where this repo lives on Euler)
 export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -13,14 +13,14 @@
 # Job array: runs all 12 experiments for a given model
 #
 # Usage:
-#   sbatch scripts/run_euler_array.sh deepsets     # uses model from experiment config
-#   sbatch scripts/run_euler_array.sh transformer  # overrides model to transformer
+#   sbatch scripts/symm_loss_run.sh deepsets     # uses model from experiment config
+#   sbatch scripts/symm_loss_run.sh transformer  # overrides model to transformer
 # ---------------------------------------------------------------
 
 set -euo pipefail
 
 # Model from command-line argument (required)
-MODEL="${1:?Usage: sbatch scripts/run_euler_array.sh <model_name>}"
+MODEL="${1:?Usage: sbatch scripts/symm_loss_run.sh <model_name>}"
 
 # Build model override flag
 # "deepsets" -> no override (experiment configs already pick deepsets_8/16/32)
@@ -51,7 +51,7 @@ resolve_model_flag() {
 # --- Experiments (nconst x augmentation) ---
 EXPERIMENTS=(
     # hls4ml_nconst8_aug_none
-    hls4ml_nconst8_aug_so2
+    symm_loss/hls4ml_symm_loss_nconst8_so2
     # hls4ml_nconst8_aug_so3
     # hls4ml_nconst8_aug_lorentz
     # hls4ml_nconst16_aug_none
@@ -91,5 +91,4 @@ echo "============================================"
 
 METHOD="symm_loss"
 
-srun python src/train.py $MODEL_FLAG $METHOD experiment="$EXPERIMENT" experiment_name="$EXPERIMENT" trainer=gpu n_folds=5
-
+srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$EXPERIMENT" trainer=gpu +data.method="$METHOD" +data.n_folds=5

@@ -2,12 +2,13 @@
 
 defaults:
   - _self_
-  - data: mnist # choose datamodule with `test_dataloader()` for evaluation
-  - model: mnist
+  - data: hls4ml
+  - model: deepsets_32
   - logger: null
-  - trainer: default
+  - trainer: mps
   - paths: default
   - extras: default
+  - optional local: default
   - hydra: default
 
 task_name: "eval"

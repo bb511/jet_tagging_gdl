@@ -13,9 +13,8 @@
 # Job array: runs method-specific experiments for a given model.
 #
 # Usage:
-#   sbatch scripts/run_euler_array.sh deepsets_32
-#   sbatch scripts/run_euler_array.sh transformer
 #   sbatch scripts/run_euler_array.sh deepsets augmentation
+#   sbatch scripts/run_euler_array.sh transformer augmentation
 #   sbatch scripts/run_euler_array.sh deepsets symm_loss
 #   sbatch scripts/run_euler_array.sh mlp symm_loss
 # ---------------------------------------------------------------
@@ -127,7 +126,7 @@ echo "============================================"
 
 # For transformer, override data.nconstituents if NCONST is set
 if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +n_folds=5
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +data.n_folds=5
 else
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +n_folds=5
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.n_folds=5
 fi

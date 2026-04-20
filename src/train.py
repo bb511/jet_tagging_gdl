@@ -52,6 +52,7 @@ def _run_one_fold(
     results_callback: Optional[ResultsTableCallback],
     fold_label: str,
     ckpt_path: Optional[str] = None,
+    use_results_callback: bool = True,
 ) -> Tuple[Trainer, LightningModule, Dict]:
     """Instantiate a fresh model/trainer/logger and run fit + test for one fold."""
 
@@ -61,9 +62,13 @@ def _run_one_fold(
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
 
+    # Optionally disable results callback for this run (e.g. main run when
+    # doing separate K-fold uncertainty evaluation).
+    if not use_results_callback:
+        callbacks = [c for c in callbacks if not isinstance(c, ResultsTableCallback)]
     # Replace the per-run ResultsTableCallback instance with the shared one
-    # so it accumulates metrics across all folds
-    if results_callback is not None:
+    # so it accumulates metrics across all folds.
+    elif results_callback is not None:
         callbacks = [
             results_callback if isinstance(c, ResultsTableCallback) else c
             for c in callbacks
@@ -110,9 +115,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     Structure:
         1. Main training run  — uses the full processed train/val split from disk
                                 (n_folds forced to 1, no KFold splitting)
-        2. K-fold runs        — 5 folds over the same pool for uncertainty estimation
-                                ResultsTableCallback accumulates all 5 folds and
-                                writes mean ± std after the last fold.
+        2. Optional K-fold runs — if ``data.n_folds >= 2``, run K folds over the
+                                same pool for uncertainty estimation.
 
     :param cfg: A DictConfig configuration composed by Hydra.
     :return: A tuple with metrics and dict with all instantiated objects.
@@ -128,13 +132,18 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
     datamodule.prepare_data()
 
+    # Resolve k-fold setting from data config.
+    kfold_n_cfg = cfg.data.get("n_folds", 1)
+    kfold_n = int(kfold_n_cfg) if kfold_n_cfg is not None else 1
+    run_kfold = kfold_n >= 2
+
     # ------------------------------------------------------------------
-    # ResultsTableCallback — ONE shared instance across ALL k-fold runs
-    # so it accumulates per-fold metrics and writes mean±std at the end.
-    # Not used for the main run (main run is not part of the CV estimate).
+    # ResultsTableCallback:
+    # - if run_kfold=True: use ONE shared instance across all folds
+    # - if run_kfold=False: keep the regular callback in the main run
     # ------------------------------------------------------------------
     results_callback: Optional[ResultsTableCallback] = None
-    if cfg.get("callbacks") and cfg.callbacks.get("results_table"):
+    if run_kfold and cfg.get("callbacks") and cfg.callbacks.get("results_table"):
         results_callback = hydra.utils.instantiate(cfg.callbacks.results_table)
         log.info("ResultsTableCallback instantiated (shared across k-fold runs).")
 
@@ -159,31 +168,33 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     main_trainer, main_model, main_callbacks, main_logger = _run_one_fold(
         cfg=cfg,
         datamodule=datamodule,
-        results_callback=None,          # main run does NOT feed ResultsTable
+        results_callback=None,          # use default per-run callback handling
         fold_label="main",
         ckpt_path=cfg.get("ckpt_path"),
+        use_results_callback=not run_kfold,
     )
     metric_dict.update({
         f"main/{k}": v for k, v in main_trainer.callback_metrics.items()
     })
 
     # ==================================================================
-    # RUNS 1–5 — K-fold cross validation for uncertainty estimation
-    # Restore n_folds to config value (default 5) for proper KFold splitting
+    # RUNS 1..K — Optional K-fold cross validation for uncertainty estimation
     # ==================================================================
-    kfold_n = cfg.data.get("n_folds", 5)
-    if kfold_n < 2:
-        kfold_n = 5          # enforce minimum of 2 folds for CV to make sense
+    if not run_kfold:
+        log.info(
+            "Skipping K-fold uncertainty evaluation because "
+            f"data.n_folds={kfold_n} (<2)."
+        )
+    else:
+        log.info("=" * 60)
+        log.info(f"  K-FOLD UNCERTAINTY EVALUATION (n_folds={kfold_n})")
+        log.info("=" * 60)
 
-    log.info("=" * 60)
-    log.info(f"  K-FOLD UNCERTAINTY EVALUATION (n_folds={kfold_n})")
-    log.info("=" * 60)
-
-    datamodule.n_folds = kfold_n    # re-enable KFold splitting
+        datamodule.n_folds = kfold_n    # re-enable KFold splitting
 
     last_trainer, last_model, last_callbacks, last_logger = None, None, None, None
 
-    for fold_idx in range(kfold_n):
+    for fold_idx in range(kfold_n if run_kfold else 0):
         log.info("=" * 60)
         log.info(f"  FOLD {fold_idx + 1}/{kfold_n}")
         log.info("=" * 60)
@@ -201,6 +212,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             results_callback=results_callback,  # shared — accumulates across folds
             fold_label=f"fold {fold_idx + 1}/{kfold_n}",
             ckpt_path=None,                     # each fold starts fresh
+            use_results_callback=True,
         )
 
         # Namespace fold metrics to avoid collisions
@@ -215,9 +227,12 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         last_logger    = fold_logger
 
     # Expose the final fold's raw metrics at the top level so Hydra's
-    # optimized_metric (e.g. val/acc_best) still works for multirun sweeps
+    # optimized_metric (e.g. val/acc_best) still works for multirun sweeps.
+    # If K-fold is disabled, expose main-run metrics instead.
     if last_trainer is not None:
         metric_dict.update(last_trainer.callback_metrics)
+    else:
+        metric_dict.update(main_trainer.callback_metrics)
 
     return metric_dict, {
         "cfg":        cfg,
