@@ -129,5 +129,5 @@ echo "============================================"
 if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
     srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +n_folds=5
 else
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +n_folds=5 +max_epochs=1
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +n_folds=5
 fi
