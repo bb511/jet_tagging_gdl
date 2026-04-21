@@ -633,14 +633,24 @@ class HLS4MLDataModule(LightningDataModule):
                 self.raw_data_dir, isTest=True
             )
             x_test = self._restrict_and_sort_by_pt(x_test, test_pt_idx, self.nconstituents)
+
+            # 2. normalise on FULL feature set (norm_params keys match full feature_names)
+            if self.norm_params is None or self.feature_names is None:
+                raise RuntimeError(
+                    "norm_params or feature_names is None during test setup. "
+                    "Ensure norm_params.npz was loaded at the top of setup()."
+                )
+            x_test = self.apply_physics_norm(x_test, self.feature_names, self.norm_params)
+
+            # 3. THEN select the subset of features the model actually uses
             if feature_indices is not None:
                 x_test = x_test[:, :, feature_indices]
+
             log.info(f"[setup] Test — x_test: {x_test.shape}, y_test: {y_test.shape}")
             self.data_test = TensorDataset(
                 torch.from_numpy(x_test).float(),
                 torch.from_numpy(y_test).float(),
-            )
-
+)
         # Optional overlap diagnostic plot (augmentation only)
         if (
             stage in (None, "fit")
