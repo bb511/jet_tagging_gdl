@@ -2,6 +2,13 @@
 
 Computes multiple invariance metrics d(f(x), f(T(x))) for each symmetry group
 (SO2, SO3, Lorentz) at the end of every validation epoch.
+
+Metrics:
+- Normalised L2
+- Cosine distance
+- Jensen-Shannon divergence
+- Flip rate
+- Orbit variance
 """
 
 import logging
@@ -35,7 +42,7 @@ class InvarianceMetricCallback(L.Callback):
         self.lorentz_eta_max = lorentz_eta_max
         self.rng = np.random.default_rng(seed)
 
-        self._x_val_raw: Optional[np.ndarray] = None
+        self._x_val_sorted: Optional[np.ndarray] = None
         self._feature_names: Optional[list] = None
         self._norm_params: Optional[dict] = None
         self._feature_indices: Optional[np.ndarray] = None
@@ -50,19 +57,19 @@ class InvarianceMetricCallback(L.Callback):
             log.warning("InvarianceMetricCallback: x_val_raw not available.")
             return
 
-        x_raw = dm.x_val_raw
-        n = min(self.num_samples, x_raw.shape[0])
-        idx = self.rng.choice(x_raw.shape[0], size=n, replace=False)
-        self._x_val_raw = x_raw[idx]
+        x_sorted = dm._restrict_and_sort_by_pt(
+            dm.x_val_raw, dm.pt_idx, dm.nconstituents
+        )
+
+        n = min(self.num_samples, x_sorted.shape[0])
+        idx = self.rng.choice(x_sorted.shape[0], size=n, replace=False)
+        self._x_val_sorted = x_sorted[idx]
 
         self._feature_names = dm.feature_names
         self._norm_params = dm.norm_params
         self._feature_indices = dm._get_feature_indices(
             Path(dm.processed_data_dir)
         )
-
-        if self._norm_params is None:
-            raise RuntimeError("Normalization params not found.")
 
         log.info(f"Cached {n} validation jets for invariance testing.")
 
@@ -93,16 +100,8 @@ class InvarianceMetricCallback(L.Callback):
 
         device = pl_module.device
 
-        # ✅ SORT AFTER TRANSFORM
-        x_raw_sorted = dm._restrict_and_sort_by_pt(
-            x_raw, dm.pt_idx, dm.nconstituents
-        )
-        x_aug_sorted = dm._restrict_and_sort_by_pt(
-            x_aug, dm.pt_idx, dm.nconstituents
-        )
-
-        x_orig_t = self._to_model_input(x_raw_sorted, dm).to(device)
-        x_aug_t = self._to_model_input(x_aug_sorted, dm).to(device)
+        x_orig_t = self._to_model_input(x_raw, dm).to(device)
+        x_aug_t = self._to_model_input(x_aug, dm).to(device)
 
         batch_size = 256
         all_orig, all_aug = [], []
@@ -115,14 +114,26 @@ class InvarianceMetricCallback(L.Callback):
         y_orig = torch.cat(all_orig, dim=0)
         y_aug = torch.cat(all_aug, dim=0)
 
+        # -----------------------
+        # 1. Normalised L2
+        # -----------------------
         diff_norm = (y_orig - y_aug).norm(dim=1)
         base_norm = y_orig.norm(dim=1)
-        l2_normed = (
-            0.0 if base_norm.mean() < 1e-12 else diff_norm.mean() / base_norm.mean()
-        )
 
-        cos_dist = (1 - F.cosine_similarity(y_orig, y_aug, dim=1)).mean().item()
+        mean_l2 = diff_norm.mean().item()
+        mean_norm = base_norm.mean().item()
 
+        l2_normed = 0.0 if mean_norm < 1e-12 else mean_l2 / mean_norm
+
+        # -----------------------
+        # 2. Cosine distance
+        # -----------------------
+        cos_sim = F.cosine_similarity(y_orig, y_aug, dim=1)
+        cos_dist = (1 - cos_sim).mean().item()
+
+        # -----------------------
+        # 3. Jensen-Shannon
+        # -----------------------
         p = F.softmax(y_orig, dim=-1)
         q = F.softmax(y_aug, dim=-1)
         m = 0.5 * (p + q)
@@ -133,7 +144,12 @@ class InvarianceMetricCallback(L.Callback):
             + (q * (q.add(eps).log() - m.add(eps).log())).sum(dim=1)
         ).clamp(min=0).mean().item()
 
-        flip_rate = (y_orig.argmax(dim=1) != y_aug.argmax(dim=1)).float().mean().item()
+        # -----------------------
+        # 4. Flip rate
+        # -----------------------
+        pred_orig = y_orig.argmax(dim=1)
+        pred_aug = y_aug.argmax(dim=1)
+        flip_rate = (pred_orig != pred_aug).float().mean().item()
 
         return {
             "l2": l2_normed,
@@ -143,7 +159,7 @@ class InvarianceMetricCallback(L.Callback):
         }
 
     # ------------------------------------------------------------
-    # Orbit variance
+    # Orbit variance: E_x [ Var_g ( f(gx) ) ]
     # ------------------------------------------------------------
     @torch.no_grad()
     def _measure_orbit_variance(
@@ -160,23 +176,22 @@ class InvarianceMetricCallback(L.Callback):
 
         for _ in range(K):
             x_aug = transform_fn(x_raw)
-
-            # ✅ SORT AFTER TRANSFORM
-            x_aug_sorted = dm._restrict_and_sort_by_pt(
-                x_aug, dm.pt_idx, dm.nconstituents
-            )
-
-            x_t = self._to_model_input(x_aug_sorted, dm).to(device)
+            x_t = self._to_model_input(x_aug, dm).to(device)
 
             outputs = []
             for start in range(0, x_t.shape[0], 256):
                 outputs.append(pl_module(x_t[start:start+256]))
 
             y = torch.cat(outputs, dim=0)
-            preds.append(F.normalize(y, dim=1))
 
-        preds = torch.stack(preds, dim=0)
-        var_g = ((preds - preds.mean(dim=0, keepdim=True)) ** 2).mean(dim=0)
+            y = F.normalize(y, dim=1)
+
+            preds.append(y)
+
+        preds = torch.stack(preds, dim=0)  # (K, N, C)
+
+        mean_g = preds.mean(dim=0, keepdim=True)
+        var_g = ((preds - mean_g) ** 2).mean(dim=0)
 
         return var_g.mean().item()
 
@@ -184,30 +199,43 @@ class InvarianceMetricCallback(L.Callback):
     # Validation hook
     # ------------------------------------------------------------
     def on_validation_epoch_end(self, trainer, pl_module):
-        # ✅ Run ONLY on global rank 0
-        if trainer.global_rank != 0:
-            return
-
-        if self._x_val_raw is None:
+        if self._x_val_sorted is None:
             return
 
         pl_module.eval()
         dm = trainer.datamodule
-        x_raw = self._x_val_raw
+        x_raw = self._x_val_sorted
 
         results = {}
 
         # ---------------- SO(2)
         theta = self.rng.uniform(0.3, 2 * np.pi - 0.3)
-        c, s = np.cos(theta), np.sin(theta)
+        cos_t, sin_t = np.cos(theta), np.sin(theta)
 
-        R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
+        rot_so2 = np.array(
+            [[cos_t, -sin_t, 0],
+             [sin_t,  cos_t, 0],
+             [0,      0,     1]],
+            dtype=np.float32,
+        )
 
-        x_aug = apply_so2_single_rotation(x_raw, R, self._feature_names)
-        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug)
+        x_aug_so2 = apply_so2_single_rotation(
+            x_raw, rot_so2, self._feature_names
+        )
 
+        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_so2)
         for k, v in metrics.items():
             results[f"invariance/so2_{k}"] = v
+
+        def _so2_transform(x):
+            t = self.rng.uniform(0.3, 2 * np.pi - 0.3)
+            c, s = np.cos(t).astype(np.float32), np.sin(t).astype(np.float32)
+            R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
+            return apply_so2_single_rotation(x, R, self._feature_names)
+
+        results["invariance/so2_orbit_var"] = self._measure_orbit_variance(
+            pl_module, dm, x_raw, _so2_transform
+        )
 
         # ---------------- SO(3)
         angles = self.rng.uniform(0.3, 2 * np.pi - 0.3, size=3)
@@ -220,34 +248,65 @@ class InvarianceMetricCallback(L.Callback):
         ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
         rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
 
-        R = (rz @ ry @ rx).astype(np.float32)
+        rot_so3 = (rz @ ry @ rx).astype(np.float32)
 
-        x_aug = apply_so3_single_rotation(x_raw, R, self._feature_names)
-        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug)
+        x_aug_so3 = apply_so3_single_rotation(
+            x_raw, rot_so3, self._feature_names
+        )
 
+        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_so3)
         for k, v in metrics.items():
             results[f"invariance/so3_{k}"] = v
 
+        def _so3_transform(x):
+            a = self.rng.uniform(0.3, 2 * np.pi - 0.3, size=3)
+            _cz, _sz = np.cos(a[0]), np.sin(a[0])
+            _cy, _sy = np.cos(a[1]), np.sin(a[1])
+            _cx, _sx = np.cos(a[2]), np.sin(a[2])
+            _rz = np.array([[_cz, -_sz, 0], [_sz, _cz, 0], [0, 0, 1]])
+            _ry = np.array([[_cy, 0, _sy], [0, 1, 0], [-_sy, 0, _cy]])
+            _rx = np.array([[1, 0, 0], [0, _cx, -_sx], [0, _sx, _cx]])
+            R = (_rz @ _ry @ _rx).astype(np.float32)
+            return apply_so3_single_rotation(x, R, self._feature_names)
+
+        results["invariance/so3_orbit_var"] = self._measure_orbit_variance(
+            pl_module, dm, x_raw, _so3_transform
+        )
+
         # ---------------- Lorentz
-        boost = create_lorentz_boosts(1, self.lorentz_eta_max, self.rng)
-        x_aug = apply_boost_preserve_phi(x_raw, boost[0], self._feature_names)
+        boost = create_lorentz_boosts(
+            1, self.lorentz_eta_max, self.rng
+        )
 
-        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug)
+        x_aug_lor = apply_boost_preserve_phi(
+            x_raw, boost[0], self._feature_names
+        )
 
+        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_lor)
         for k, v in metrics.items():
             results[f"invariance/lorentz_{k}"] = v
 
+        def _lorentz_transform(x):
+            b = create_lorentz_boosts(1, self.lorentz_eta_max, self.rng)
+            return apply_boost_preserve_phi(x, b[0], self._feature_names)
+
+        results["invariance/lorentz_orbit_var"] = self._measure_orbit_variance(
+            pl_module, dm, x_raw, _lorentz_transform
+        )
+
         # ---------------- Logging
-        for k, v in results.items():
+        for name, value in results.items():
             pl_module.log(
-                k,
-                v,
-                on_epoch=True,
+                name,
+                value,
                 prog_bar=False,
-                sync_dist=False,  # ✅ IMPORTANT: disable sync
+                on_epoch=True,
+                sync_dist=True,
             )
 
-        log.info(" | ".join([f"{k}: {v:.4f}" for k, v in results.items()]))
+        log.info(
+            " | ".join([f"{k}: {v:.4f}" for k, v in results.items()])
+        )
 
     # Compute mean of each invariance metric after we are done
     def on_test_epoch_end(self, trainer, pl_module):
