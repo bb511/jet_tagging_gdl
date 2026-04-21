@@ -2,16 +2,21 @@
 """Build a compact summary table from MLflow fold runs.
 
 The script expects MLflow runs logged by this repo where each fold run has:
-- `params/tags` containing `fold_<idx>`
-- `params/model/_target_`
-- `params/data/augmentation_scheme`
-- `params/data/nconstituents`
-- `metrics/test/acc`
-- `metrics/invariance/{so2,so3,lorentz}_flip`
-- optional `metrics/model/flops`
+- `params/fold_idx` containing the fold index (0-based)
+- `params/model._target_`
+- `params/data.augmentation_scheme`
+- `params/data.nconstituents`
+- `metrics/test.acc`
+- `metrics/invariance.so2_flip` etc.
+- optional `metrics/model.flops`
+
+MLflow flattens nested keys with dots on disk:
+    logged key  "model/_target_"   → file  params/model._target_
+    logged key  "test/acc"         → file  metrics/test.acc
+    logged key  "invariance/so2_flip" → file metrics/invariance.so2_flip
 
 For each `(model, nconstituents, augmentation_scheme, fold_idx)` it keeps the
-latest run (by `meta.yaml:end_time`) and then aggregates across folds.
+latest run (by meta.yaml end_time) and then aggregates across folds.
 """
 
 from __future__ import annotations
@@ -24,8 +29,6 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-
-from pdflatex import PDFLaTeX
 
 
 INVARIANCE_KEYS = (
@@ -51,12 +54,6 @@ class FoldRecord:
     flops: float
 
     @property
-    def selected_flip_key(self) -> str:
-        if self.augmentation_scheme in {"so2", "so3", "lorentz"}:
-            return f"invariance/{self.augmentation_scheme}_flip"
-        return "invariance/mean_flip"
-
-    @property
     def selected_flip_value(self) -> float:
         if self.augmentation_scheme == "so2":
             return self.so2_flip
@@ -71,8 +68,8 @@ def safe_float(raw: Optional[str]) -> float:
     if raw is None:
         return float("nan")
     try:
-        return float(raw)
-    except ValueError:
+        return float(raw.strip())
+    except (ValueError, AttributeError):
         return float("nan")
 
 
@@ -83,7 +80,10 @@ def read_text(path: Path) -> Optional[str]:
 
 
 def read_metric_last(metric_path: Path) -> float:
-    """Read the final logged value from an MLflow metric file."""
+    """Read the final logged value from an MLflow metric file.
+
+    MLflow metric files have lines:  <timestamp> <value> <step>
+    """
     if not metric_path.exists():
         return float("nan")
     last_line = None
@@ -100,23 +100,67 @@ def read_metric_last(metric_path: Path) -> float:
     return safe_float(parts[1])
 
 
+def read_param(run_dir: Path, logged_key: str) -> Optional[str]:
+    slash_path = run_dir / "params" / logged_key   # ← slash first
+    if slash_path.exists():
+        return read_text(slash_path)
+    dot_path = run_dir / "params" / logged_key.replace("/", ".")
+    if dot_path.exists():
+        return read_text(dot_path)
+    return None
+
+
+def read_metric(run_dir: Path, logged_key: str) -> float:
+    """Read an MLflow metric, handling both dot-flattened and slash-nested paths.
+
+    MLflow flattens "test/acc" → metrics/test.acc
+    """
+    # Try dot-flattened path first
+    dot_path = run_dir / "metrics" / logged_key.replace("/", ".")
+    if dot_path.exists():
+        return read_metric_last(dot_path)
+    # Fallback: slash-nested path
+    slash_path = run_dir / "metrics" / logged_key
+    if slash_path.exists():
+        return read_metric_last(slash_path)
+    return float("nan")
+
+
+def read_tag(run_dir: Path, tag_name: str) -> Optional[str]:
+    """Read an MLflow tag from run_dir/tags/<tag_name>."""
+    return read_text(run_dir / "tags" / tag_name)
+
+
 def parse_end_time(meta_path: Path) -> int:
     raw = read_text(meta_path)
     if raw is None:
         return -1
     for line in raw.splitlines():
+        line = line.strip()
         if line.startswith("end_time:"):
-            return int(line.split(":", 1)[1].strip())
+            val = line.split(":", 1)[1].strip()
+            try:
+                return int(val)
+            except ValueError:
+                return -1
     return -1
 
 
-def parse_fold_idx(tags_raw: Optional[str]) -> Optional[int]:
-    if not tags_raw:
+def parse_fold_idx_from_str(raw: Optional[str]) -> Optional[int]:
+    """Extract fold index from a string like 'fold 3/5' or 'fold_3' or just '3'."""
+    if raw is None:
         return None
-    match = re.search(r"fold_(\d+)", tags_raw)
-    if not match:
-        return None
-    return int(match.group(1))
+    raw = raw.strip()
+    # Try plain integer first
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    # Try "fold N/M" or "fold_N"
+    match = re.search(r"fold[_\s]+(\d+)", raw, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def model_family_from_target(target: str) -> str:
@@ -153,37 +197,71 @@ def fmt_pm(mean_val: float, std_val: float) -> str:
 
 
 def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
-    records: List[FoldRecord] = []
-    for meta_path in mlflow_root.glob("*/*/meta.yaml"):
-        run_dir = meta_path.parent
-        run_id = run_dir.name
+    """Walk all MLflow run directories and collect FoldRecord objects.
 
-        tags_raw = read_text(run_dir / "params" / "tags")
-        fold_idx = parse_fold_idx(tags_raw)
-        if fold_idx is None:
+    A run is included if it has a readable fold_idx (logged as param or tag),
+    a model target, augmentation scheme, nconstituents, and a non-NaN test/acc.
+    """
+    records: List[FoldRecord] = []
+    skipped_no_fold = 0
+    skipped_no_acc = 0
+    skipped_no_meta = 0
+
+    # MLflow layout: mlruns/<experiment_id>/<run_id>/
+    for meta_path in sorted(mlflow_root.glob("*/*/meta.yaml")):
+        run_dir = meta_path.parent
+        run_id  = run_dir.name
+
+        # Skip the experiment-level meta.yaml (it sits one level up)
+        if not (run_dir / "params").exists() and not (run_dir / "metrics").exists():
+            skipped_no_meta += 1
             continue
 
-        model_target = read_text(run_dir / "params" / "model" / "_target_")
-        aug = read_text(run_dir / "params" / "data" / "augmentation_scheme")
-        nconst_raw = read_text(run_dir / "params" / "data" / "nconstituents")
+        # --- Fold index ---
+        # Try param first (logged via log_hyperparameters with fold_idx in object_dict)
+        fold_raw = read_param(run_dir, "fold_idx")
+        if fold_raw is None:
+            # Fallback: check tags (mlflow.runName often contains fold info)
+            fold_raw = read_tag(run_dir, "mlflow.runName")
+        fold_idx = parse_fold_idx_from_str(fold_raw)
+        if fold_idx is None:
+            skipped_no_fold += 1
+            continue
+
+        # --- Model / data params ---
+        model_target = read_param(run_dir, "model/_target_")
+        aug          = read_param(run_dir, "data/augmentation_scheme")
+        nconst_raw   = read_param(run_dir, "data/nconstituents")
+
         if model_target is None or aug is None or nconst_raw is None:
             continue
 
         nconst = int(safe_float(nconst_raw))
-        test_acc = read_metric_last(run_dir / "metrics" / "test" / "acc")
+
+        # --- Metrics ---
+        test_acc = read_metric(run_dir, "test/acc")
         if math.isnan(test_acc):
+            skipped_no_acc += 1
             continue
 
-        so2_flip = read_metric_last(run_dir / "metrics" / "invariance" / "so2_flip")
-        so3_flip = read_metric_last(run_dir / "metrics" / "invariance" / "so3_flip")
-        lorentz_flip = read_metric_last(run_dir / "metrics" / "invariance" / "lorentz_flip")
-        flops = read_metric_last(run_dir / "metrics" / "model" / "flops")
+        so2_flip     = read_metric(run_dir, "test/invariance/so2_flip")
+        so3_flip     = read_metric(run_dir, "test/invariance/so3_flip")
+        lorentz_flip = read_metric(run_dir, "test/invariance/lorentz_flip")
 
+        # Fallback: validation-time invariance metrics (without test/ prefix)
+        if math.isnan(so2_flip):
+            so2_flip = read_metric(run_dir, "invariance/so2_flip")
+        if math.isnan(so3_flip):
+            so3_flip = read_metric(run_dir, "invariance/so3_flip")
+        if math.isnan(lorentz_flip):
+            lorentz_flip = read_metric(run_dir, "invariance/lorentz_flip")
+
+        # FLOPs — try metric first, then param
+        flops = read_metric(run_dir, "model/flops")
         if math.isnan(flops):
-            # Prefer explicit total-FLOPs field when available.
-            flops = safe_float(read_text(run_dir / "params" / "model" / "flops_total"))
+            flops = safe_float(read_param(run_dir, "model/flops"))
         if math.isnan(flops):
-            flops = safe_float(read_text(run_dir / "params" / "model" / "flops"))
+            flops = safe_float(read_param(run_dir, "model/flops_total"))
 
         records.append(
             FoldRecord(
@@ -201,6 +279,13 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
                 flops=flops,
             )
         )
+
+    print(
+        f"[collect] Found {len(records)} valid fold records. "
+        f"Skipped: {skipped_no_fold} (no fold_idx), "
+        f"{skipped_no_acc} (no test/acc), "
+        f"{skipped_no_meta} (no params/metrics dir)."
+    )
     return records
 
 
@@ -220,172 +305,104 @@ def keep_latest_per_fold(records: List[FoldRecord]) -> List[FoldRecord]:
     return list(latest.values())
 
 
-def aggregate_simple_rows(records: List[FoldRecord], min_folds: int) -> List[Dict[str, object]]:
-    # Group by (model_family, model_target, nconstituents, augmentation_scheme)
+def aggregate_rows(records: List[FoldRecord], min_folds: int) -> List[Dict]:
     grouped: Dict[Tuple[str, str, int, str], List[FoldRecord]] = {}
     for rec in records:
-        key = (
-            rec.model_family,
-            rec.model_target,
-            rec.nconstituents,
-            rec.augmentation_scheme,
-        )
+        key = (rec.model_family, rec.model_target, rec.nconstituents, rec.augmentation_scheme)
         grouped.setdefault(key, []).append(rec)
 
-    rows: List[Dict[str, object]] = []
+    rows: List[Dict] = []
     for key, folds in grouped.items():
         if len(folds) < min_folds:
+            print(
+                f"[aggregate] Skipping {key} — only {len(folds)} folds "
+                f"(need {min_folds})"
+            )
             continue
-        test_vals = [r.test_acc for r in folds]
-        flops_vals = [r.flops for r in folds]
-        test_mean = safe_mean(test_vals)
-        test_std = safe_std(test_vals)
+
+        test_vals    = [r.test_acc    for r in folds]
+        so2_vals     = [r.so2_flip    for r in folds]
+        so3_vals     = [r.so3_flip    for r in folds]
+        lor_vals     = [r.lorentz_flip for r in folds]
+        flops_vals   = [r.flops       for r in folds]
+
+        test_mean  = safe_mean(test_vals)
+        test_std   = safe_std(test_vals)
         flops_mean = safe_mean(flops_vals)
-        # Invariance metrics
-        so2_vals = [r.so2_flip for r in folds]
-        so3_vals = [r.so3_flip for r in folds]
-        lorentz_vals = [r.lorentz_flip for r in folds]
-        row = {
-            "model": key[0],
-            "model_target": key[1],
-            "nconstituents": key[2],
+
+        rows.append({
+            "model":               key[0],
+            "model_target":        key[1],
+            "nconstituents":       key[2],
             "augmentation_scheme": key[3],
-            "folds_used": len(folds),
-            "test_acc_mean": round(test_mean * 100, 4), 
-            "test_acc_std": round(test_std * 100, 4),       
-            "so2_flip_mean": round(safe_mean(so2_vals), 6),
-            "so2_flip_std": round(safe_std(so2_vals), 6),
-            "so3_flip_mean": round(safe_mean(so3_vals), 6),
-            "so3_flip_std": round(safe_std(so3_vals), 6),
-            "lorentz_flip_mean": round(safe_mean(lorentz_vals), 6),
-            "lorentz_flip_std": round(safe_std(lorentz_vals), 6),
-            "flops_mean": round(flops_mean, 3) if not math.isnan(flops_mean) else float("nan"),
-        }
-        rows.append(row)
+            "folds_used":          len(folds),
+            "test_acc_mean":       round(test_mean * 100, 4),
+            "test_acc_std":        round(test_std  * 100, 4),
+            "test_acc_pm":         fmt_pm(test_mean * 100, test_std * 100),
+            "so2_flip_mean":       round(safe_mean(so2_vals),  6),
+            "so2_flip_std":        round(safe_std(so2_vals),   6),
+            "so2_flip_pm":         fmt_pm(safe_mean(so2_vals), safe_std(so2_vals)),
+            "so3_flip_mean":       round(safe_mean(so3_vals),  6),
+            "so3_flip_std":        round(safe_std(so3_vals),   6),
+            "so3_flip_pm":         fmt_pm(safe_mean(so3_vals), safe_std(so3_vals)),
+            "lorentz_flip_mean":   round(safe_mean(lor_vals),  6),
+            "lorentz_flip_std":    round(safe_std(lor_vals),   6),
+            "lorentz_flip_pm":     fmt_pm(safe_mean(lor_vals), safe_std(lor_vals)),
+            "flops_mean":          round(flops_mean, 0) if not math.isnan(flops_mean) else float("nan"),
+            "fold_ids":            ",".join(str(r.fold_idx) for r in folds),
+            "run_ids":             ",".join(r.run_id for r in folds),
+        })
     return rows
 
 
-def load_flops_lookup_from_slurm(slurm_dir: Path) -> Dict[Tuple[str, int], float]:
-    """Build (model_family, nconstituents) -> FLOPs lookup from SLURM logs."""
-    if not slurm_dir.exists():
-        return {}
-
-    flops_by_key: Dict[Tuple[str, int], List[float]] = defaultdict(list)
-    nconst_re = re.compile(r"nconst(\d+)")
-    flops_re = re.compile(r"Total FLOPs:\s*([0-9.]+)\s*([KMG]?)")
-    unit_scale = {"": 1.0, "K": 1e3, "M": 1e6, "G": 1e9}
-
-    for out_file in slurm_dir.rglob("*.out"):
-        name = out_file.name
-        nconst_match = nconst_re.search(name)
-        if not nconst_match:
-            continue
-        nconst = int(nconst_match.group(1))
-
-        if name.startswith("deepsets_"):
-            model_family = "deepsets"
-        elif name.startswith("mlp_"):
-            model_family = "mlp"
-        elif name.startswith("transformer_"):
-            model_family = "transformer"
-        else:
-            continue
-
-        text = out_file.read_text(encoding="utf-8", errors="ignore")
-        for line in text.splitlines():
-            match = flops_re.search(line)
-            if not match:
-                continue
-            raw = float(match.group(1))
-            unit = match.group(2)
-            flops_by_key[(model_family, nconst)].append(raw * unit_scale[unit])
-
-    lookup: Dict[Tuple[str, int], float] = {}
-    for key, values in flops_by_key.items():
-        counts = Counter(values)
-        lookup[key] = counts.most_common(1)[0][0]
-    return lookup
+def debug_one_run(mlflow_root: Path) -> None:
+    """Print the layout of the first run found — helps diagnose path issues."""
+    for meta_path in sorted(mlflow_root.glob("*/*/meta.yaml"))[:1]:
+        run_dir = meta_path.parent
+        print(f"\n=== DEBUG: run_dir = {run_dir} ===")
+        for section in ("params", "metrics", "tags"):
+            section_dir = run_dir / section
+            if section_dir.exists():
+                files = sorted(section_dir.rglob("*"))
+                print(f"\n  {section}/")
+                for f in files[:30]:
+                    val = f.read_text(encoding="utf-8").strip()[:60] if f.is_file() else "<dir>"
+                    print(f"    {f.relative_to(section_dir)}  →  {val}")
+            else:
+                print(f"\n  {section}/  ← MISSING")
 
 
-def fill_missing_flops(
-    rows: List[Dict[str, object]], flops_lookup: Dict[Tuple[str, int], float]
-) -> None:
-    for row in rows:
-        key = (str(row["model"]), int(row["nconstituents"]))
-        if key in flops_lookup:
-            row["flops_mean"] = round(float(flops_lookup[key]), 3)
-
-
-def write_csv(rows: List[Dict[str, object]], output_path: Path) -> None:
+def write_csv(rows: List[Dict], output_path: Path) -> None:
+    if not rows:
+        print("[write_csv] No rows to write — table is empty.")
+        return
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "model",
-        "model_target",
-        "nconstituents",
-        "augmentation_scheme",
-        "folds_used",
-        "test_acc_mean",
-        "test_acc_std",
-        "test_acc_pm",
-        "selected_flip_key",
-        "selected_flip_mean",
-        "selected_flip_std",
-        "selected_flip_pm",
-        "so2_flip_mean",
-        "so3_flip_mean",
-        "lorentz_flip_mean",
-
-        "fold_ids",
-        "run_ids",
-    ]
+    fieldnames = list(rows[0].keys())
     with output_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+    print(f"[write_csv] Wrote {len(rows)} rows to {output_path}")
 
 
-def write_cross_csv(rows: List[Dict[str, object]], output_path: Path) -> None:
-    # Collect all fieldnames from all rows
-    fieldnames = set()
-    for row in rows:
-        fieldnames.update(row.keys())
-    fieldnames = sorted(fieldnames)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+def write_latex_table(rows: List[Dict], output_path: Path) -> None:
+    if not rows:
+        print("[write_latex] No rows — skipping LaTeX output.")
+        return
 
+    sorted_rows = sorted(rows, key=lambda x: (x["model"], x["nconstituents"]))
 
-def print_markdown(rows: List[Dict[str, object]]) -> None:
-    headers = [
-        "model",
-        "nconst",
-        "aug",
-        "folds",
-        "test acc (mean +/- std)",
-        "selected flip (mean +/- std)",
-        "FLOPs",
-    ]
-    print("| " + " | ".join(headers) + " |")
-    print("|" + "|".join(["---"] * len(headers)) + "|")
-    for r in rows:
-        print(
-            "| "
-            f"{r['model']} | "
-            f"{r['nconstituents']} | "
-            f"{r['augmentation_scheme']} | "
-            f"{r['folds_used']} | "
-            f"{r['test_acc_pm']} | "
-            f"{r['selected_flip_pm']} | "
-            f"{r['flops_mean']} |"
-        )
+    aug_map = {"none": "None", "lorentz": "Lorentz", "so2": "SO(2)", "so3": "SO(3)"}
 
-def write_latex_table(rows: List[Dict[str, object]], output_path: Path):
-    # Sort: Model (alphabetical), then N (small to large)
-    sorted_rows = sorted(rows, key=lambda x: (x['model'], x['nconstituents']))
+    def safe_fmt(val, digits):
+        try:
+            if math.isnan(float(val)):
+                return "N/A"
+            return f"{float(val):.{digits}f}"
+        except Exception:
+            return "N/A"
 
-    latex_lines = [
+    lines = [
         r"\documentclass[preview,border=1pt]{standalone}",
         r"\usepackage[utf8]{inputenc}",
         r"\usepackage{booktabs, siunitx, adjustbox, multirow}",
@@ -393,108 +410,72 @@ def write_latex_table(rows: List[Dict[str, object]], output_path: Path):
         r"\begin{document}",
         r"\setlength{\tabcolsep}{5pt}",
         r"\scriptsize",
-        # Acc: 2 digits.2 digits(2 digits uncertainty) | flip
-        # : 1 digit.3 digits(3 digits uncertainty)
         r"\begin{tabular}{ll c c S[table-format=2.2(2)] S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)]}",
         r"    \toprule",
-        r"    \textbf{Model} & \textbf{\# Const} & \textbf{Aug.} & \textbf{FLOPs} & {\textbf{Acc. (\%)}} & {\textbf{Lorentz $J_S$}} & {\textbf{SO(2) $J_S$}} & {\textbf{SO(3) $J_S$}} \\",
-        r"    \midrule"
+        r"    \textbf{Model} & \textbf{\# Const} & \textbf{Aug.} & \textbf{FLOPs} & "
+        r"{\textbf{Acc. (\%)}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & {\textbf{SO(3) flip}} \\",
+        r"    \midrule",
     ]
 
-    prev_model = None
-    prev_n = None
+    prev_model, prev_n = None, None
+    for r in sorted_rows:
+        model_raw     = r["model"]
+        model_display = "MLP" if model_raw == "mlp" else model_raw.capitalize()
+        n             = r["nconstituents"]
+        aug           = aug_map.get(str(r["augmentation_scheme"]).lower(), str(r["augmentation_scheme"]))
 
-    for i, r in enumerate(sorted_rows):
-        model_raw = r['model']
-        model_display = "MLP" if model_raw == 'mlp' else model_raw.capitalize()
-        n = r['nconstituents']
-        # Clean up augmentation names (e.g., so2 -> SO(2))
-        aug_map = {"none": "None", "lorentz": "Lorentz", "so2": "SO(2)", "so3": "SO(3)"}
-        aug = aug_map.get(r['augmentation_scheme'].lower(), r['augmentation_scheme'].capitalize())
-        
-        # 1. Handle Model Column (Grouped)
-        # Note: adjust the multiplier (12) if you have more/fewer experiments per model
-        model_str = f"\\multirow{{12}}{{*}}{{\\textbf{{{model_display}}}}}" if model_raw != prev_model else ""
-        
         if prev_model is not None and model_raw != prev_model:
-            latex_lines.append(r"    \specialrule{.1em}{.5em}{.5em}")
+            lines.append(r"    \specialrule{.1em}{.5em}{.5em}")
+        elif prev_n is not None and n != prev_n:
+            lines.append(r"    \cmidrule{2-8}")
 
-        # 2. Handle N Column (Grouped)
-        n_str = f"\\multirow{{4}}{{*}}{{{n}}}" if (n != prev_n or model_raw != prev_model) else ""
-        
-        if prev_n is not None and n != prev_n and model_raw == prev_model:
-            latex_lines.append(r"    \cmidrule{2-8}")
+        model_str = f"\\multirow{{12}}{{*}}{{\\textbf{{{model_display}}}}}" if model_raw != prev_model else ""
+        n_str     = f"\\multirow{{4}}{{*}}{{{n}}}"                         if (n != prev_n or model_raw != prev_model) else ""
 
-        # 3. Handle FLOPs (Grouped)
-        flops_val = r.get("flops_mean", 0)
-        flops_display = f"{int(flops_val/1000)}K" if not math.isnan(flops_val) else "N/A"
+        flops_val = r.get("flops_mean", float("nan"))
+        try:
+            flops_display = f"{int(float(flops_val)/1000)}K" if not math.isnan(float(flops_val)) else "N/A"
+        except Exception:
+            flops_display = "N/A"
         flops_str = f"\\multirow{{4}}{{*}}{{{flops_display}}}" if (n != prev_n or model_raw != prev_model) else ""
 
-        # Construct the row with uncertainty for ALL metrics
-        row = (
+        lines.append(
             f"    {model_str} & {n_str} & {aug} & {flops_str} & "
-            f"{r['test_acc_mean']:.2f} \\pm {r['test_acc_std']:.2f} & "
-            f"{r['lorentz_flip_mean']:.3f} \\pm {r['lorentz_flip_std']:.3f} & "
-            f"{r['so2_flip_mean']:.3f} \\pm {r['so2_flip_std']:.3f} & "
-            f"{r['so3_flip_mean']:.3f} \\pm {r['so3_flip_std']:.3f} \\\\"
+            f"{safe_fmt(r.get('test_acc_mean', float('nan')), 2)} \\pm "
+            f"{safe_fmt(r.get('test_acc_std',  float('nan')), 2)} & "
+            f"{safe_fmt(r.get('lorentz_flip_mean', float('nan')), 3)} \\pm "
+            f"{safe_fmt(r.get('lorentz_flip_std',  float('nan')), 3)} & "
+            f"{safe_fmt(r.get('so2_flip_mean', float('nan')), 3)} \\pm "
+            f"{safe_fmt(r.get('so2_flip_std',  float('nan')), 3)} & "
+            f"{safe_fmt(r.get('so3_flip_mean', float('nan')), 3)} \\pm "
+            f"{safe_fmt(r.get('so3_flip_std',  float('nan')), 3)} \\\\"
         )
-        latex_lines.append(row)
+        prev_model, prev_n = model_raw, n
 
-        prev_model = model_raw
-        prev_n = n
+    lines.extend([r"    \bottomrule", r"\end{tabular}", r"\end{document}"])
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"[write_latex] Wrote LaTeX table to {output_path}")
 
-    latex_lines.extend([
-        r"    \bottomrule",
-        r"\end{tabular}",
-        r"\end{document}"
-    ])
-
-    output_path.write_text("\n".join(latex_lines))
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--mlflow-dir",
-        type=Path,
-        default=Path("logs/mlflow/mlruns"),
-        help="Path to MLflow mlruns directory.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("results/summary_results_table_flip.csv"),
-        help="Output CSV path.",
-    )
-    parser.add_argument(
-        "--min-folds",
-        type=int,
-        default=5,
-        help="Keep only model/aug groups with at least this many folds.",
-    )
-    parser.add_argument(
-        "--slurm-dir",
-        type=Path,
-        default=Path("logs/slurm"),
-        help="Optional SLURM logs directory to fill missing FLOPs.",
-    )
+    parser.add_argument("--mlflow-dir",  type=Path, default=Path("logs/mlflow/mlruns"))
+    parser.add_argument("--output",      type=Path, default=Path("results/summary_results_table.csv"))
+    parser.add_argument("--min-folds",   type=int,  default=5)
+    parser.add_argument("--debug",       action="store_true",
+                        help="Print layout of first run and exit.")
     args = parser.parse_args()
 
-    all_records = collect_fold_records(args.mlflow_dir)
+    if args.debug:
+        debug_one_run(args.mlflow_dir)
+        return
+
+    all_records    = collect_fold_records(args.mlflow_dir)
     latest_records = keep_latest_per_fold(all_records)
-    rows = aggregate_simple_rows(latest_records, min_folds=args.min_folds)
-    fill_missing_flops(rows, load_flops_lookup_from_slurm(args.slurm_dir))
+    rows           = aggregate_rows(latest_records, min_folds=args.min_folds)
 
-    write_cross_csv(rows, args.output)
-    # print(f"Table written to {args.output}")
-    # Optionally, print a markdown summary for a few key fields
-    # print_markdown(rows)
-
-    # 2. Save the LaTeX version
-    latex_path = args.output.with_suffix(".tex")
-    write_latex_table(rows, latex_path)
-    
-    print(f"Wrote CSV to {args.output}")
-    print(f"Wrote LaTeX table to {latex_path}")
+    write_csv(rows, args.output)
+    write_latex_table(rows, args.output.with_suffix(".tex"))
 
 
 if __name__ == "__main__":

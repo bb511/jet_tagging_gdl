@@ -84,7 +84,7 @@ def _run_one_fold(
 
     object_dict = {
         "cfg": cfg, "datamodule": datamodule, "model": model,
-        "callbacks": callbacks, "logger": logger, "trainer": trainer,
+        "callbacks": callbacks, "logger": logger, "trainer": trainer, "fold_idx":fold_label,
     }
     if logger:
         log_hyperparameters(object_dict)
