@@ -22,6 +22,7 @@ from src.utils.augmentation import (
     apply_so3_single_rotation,
     create_lorentz_boosts,
     create_so3_rot_matrices,
+    feature_index,
 )
 
 
@@ -185,25 +186,12 @@ def apply_random_lorentz(
     rng = _as_numpy_rng(generator)
     x_np = _to_numpy_batch(x)
 
-    required = {
-        "j1_px",
-        "j1_py",
-        "j1_pz",
-        "j1_e",
-        "j1_pt",
-        "j1_eta",
-        "j1_phi",
-        "j1_etarel",
-        "j1_phirel",
-        "j1_deltaR",
-        "j1_ptrel",
-    }
-    missing = [name for name in required if name not in names]
-    if missing:
-        print(
-            "Lorentz augmentation requested but missing required "
-            f"features: {missing}. Returning unaugmented data."
-        )
+    if None in (
+        feature_index(names, "j1_px", "px"),
+        feature_index(names, "j1_py", "py"),
+        feature_index(names, "j1_pz", "pz"),
+    ):
+        print("Lorentz augmentation: missing required px/py/pz features. Returning unaugmented data.")
         empty = torch.empty((0, 4, 4), device=x.device, dtype=x.dtype)
         return x.clone(), empty
 

@@ -13,6 +13,7 @@ seed: 12345
 data:
   nconstituents: 16
   method: symm_loss
+  augmentation_scheme: so3
   batch_size: 256
 
 model:

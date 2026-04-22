@@ -157,12 +157,12 @@ class MLPClassifier(LightningModule):
     # ------------------------------------------------------------------
     def setup(self, stage: str) -> None:
         if hasattr(self.trainer, "datamodule") and self.trainer.datamodule is not None:
-            self.feature_names = self.trainer.datamodule.feature_names
-            if self.method == "symm_loss" and self.feature_names is None:
+            dm = self.trainer.datamodule
+            self.feature_names = list(dm.features)
+            if self.method == "symm_loss" and not self.feature_names:
                 raise RuntimeError(
-                    "datamodule.feature_names is None after setup(). "
-                    "Ensure HLS4MLDataModule.setup() populates feature_names "
-                    "from norm_params.npz before model.setup() is called."
+                    "datamodule.features is empty after setup(). "
+                    "Ensure HLS4MLDataModule is configured with a features list."
                 )
 
     # ------------------------------------------------------------------

@@ -25,7 +25,7 @@ import argparse
 import csv
 import math
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -44,6 +44,7 @@ class FoldRecord:
     model_target: str
     nconstituents: int
     augmentation_scheme: str
+    method: str
     fold_idx: int
     run_id: str
     end_time: int
@@ -147,10 +148,13 @@ def parse_end_time(meta_path: Path) -> int:
 
 
 def parse_fold_idx_from_str(raw: Optional[str]) -> Optional[int]:
-    """Extract fold index from a string like 'fold 3/5' or 'fold_3' or just '3'."""
+    """Extract fold index from a string like 'fold 3/5', 'fold_3', '3', or 'main'."""
     if raw is None:
         return None
     raw = raw.strip()
+    # "main" is the label used when n_folds=1 (single run, no K-fold)
+    if raw.lower() == "main":
+        return 0
     # Try plain integer first
     try:
         return int(raw)
@@ -232,11 +236,13 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
         model_target = read_param(run_dir, "model/_target_")
         aug          = read_param(run_dir, "data/augmentation_scheme")
         nconst_raw   = read_param(run_dir, "data/nconstituents")
+        method_raw   = read_param(run_dir, "data/method")
 
         if model_target is None or aug is None or nconst_raw is None:
             continue
 
         nconst = int(safe_float(nconst_raw))
+        method = method_raw.strip().lower() if method_raw else "augmentation"
 
         # --- Metrics ---
         test_acc = read_metric(run_dir, "test/acc")
@@ -256,12 +262,14 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
         if math.isnan(lorentz_flip):
             lorentz_flip = read_metric(run_dir, "invariance/lorentz_flip")
 
-        # FLOPs — try metric first, then param
+        # FLOPs — try metric first, then all param variants
         flops = read_metric(run_dir, "model/flops")
         if math.isnan(flops):
             flops = safe_float(read_param(run_dir, "model/flops"))
         if math.isnan(flops):
             flops = safe_float(read_param(run_dir, "model/flops_total"))
+        if math.isnan(flops):
+            flops = safe_float(read_param(run_dir, "model/flops_mult_adds"))
 
         records.append(
             FoldRecord(
@@ -269,6 +277,7 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
                 model_target=model_target,
                 nconstituents=nconst,
                 augmentation_scheme=aug.strip().lower(),
+                method=method,
                 fold_idx=fold_idx,
                 run_id=run_id,
                 end_time=parse_end_time(meta_path),
@@ -290,13 +299,14 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
 
 
 def keep_latest_per_fold(records: List[FoldRecord]) -> List[FoldRecord]:
-    latest: Dict[Tuple[str, str, int, str, int], FoldRecord] = {}
+    latest: Dict[Tuple[str, str, int, str, str, int], FoldRecord] = {}
     for rec in records:
         key = (
             rec.model_family,
             rec.model_target,
             rec.nconstituents,
             rec.augmentation_scheme,
+            rec.method,
             rec.fold_idx,
         )
         prev = latest.get(key)
@@ -306,9 +316,9 @@ def keep_latest_per_fold(records: List[FoldRecord]) -> List[FoldRecord]:
 
 
 def aggregate_rows(records: List[FoldRecord], min_folds: int) -> List[Dict]:
-    grouped: Dict[Tuple[str, str, int, str], List[FoldRecord]] = {}
+    grouped: Dict[Tuple[str, str, int, str, str], List[FoldRecord]] = {}
     for rec in records:
-        key = (rec.model_family, rec.model_target, rec.nconstituents, rec.augmentation_scheme)
+        key = (rec.model_family, rec.model_target, rec.nconstituents, rec.augmentation_scheme, rec.method)
         grouped.setdefault(key, []).append(rec)
 
     rows: List[Dict] = []
@@ -335,6 +345,7 @@ def aggregate_rows(records: List[FoldRecord], min_folds: int) -> List[Dict]:
             "model_target":        key[1],
             "nconstituents":       key[2],
             "augmentation_scheme": key[3],
+            "method":              key[4],
             "folds_used":          len(folds),
             "test_acc_mean":       round(test_mean * 100, 4),
             "test_acc_std":        round(test_std  * 100, 4),
@@ -385,14 +396,16 @@ def write_csv(rows: List[Dict], output_path: Path) -> None:
     print(f"[write_csv] Wrote {len(rows)} rows to {output_path}")
 
 
-def write_latex_table(rows: List[Dict], output_path: Path) -> None:
-    if not rows:
-        print("[write_latex] No rows — skipping LaTeX output.")
-        return
+def _latex_table_body(rows: List[Dict]) -> List[str]:
+    """Return the lines between (exclusive) \\toprule and \\bottomrule for one method."""
+    AUG_ORDER   = {"none": 0, "lorentz": 1, "so2": 2, "so3": 3}
+    AUG_DISPLAY = {"none": "None", "lorentz": "Lorentz", "so2": "SO(2)", "so3": "SO(3)"}
 
-    sorted_rows = sorted(rows, key=lambda x: (x["model"], x["nconstituents"]))
-
-    aug_map = {"none": "None", "lorentz": "Lorentz", "so2": "SO(2)", "so3": "SO(3)"}
+    sorted_rows = sorted(rows, key=lambda x: (
+        x["model"],
+        x["nconstituents"],
+        AUG_ORDER.get(str(x["augmentation_scheme"]).lower(), 99),
+    ))
 
     def safe_fmt(val, digits):
         try:
@@ -402,45 +415,44 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         except Exception:
             return "N/A"
 
-    lines = [
-        r"\documentclass[preview,border=1pt]{standalone}",
-        r"\usepackage[utf8]{inputenc}",
-        r"\usepackage{booktabs, siunitx, adjustbox, multirow}",
-        r"\sisetup{separate-uncertainty=true, bracket-numbers=false}",
-        r"\begin{document}",
-        r"\setlength{\tabcolsep}{5pt}",
-        r"\scriptsize",
-        r"\begin{tabular}{ll c c S[table-format=2.2(2)] S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)]}",
-        r"    \toprule",
-        r"    \textbf{Model} & \textbf{\# Const} & \textbf{Aug.} & \textbf{FLOPs} & "
-        r"{\textbf{Acc. (\%)}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & {\textbf{SO(3) flip}} \\",
-        r"    \midrule",
-    ]
+    model_span  = Counter(r["model"] for r in sorted_rows)
+    nconst_span = Counter((r["model"], r["nconstituents"]) for r in sorted_rows)
 
+    lines = []
     prev_model, prev_n = None, None
     for r in sorted_rows:
         model_raw     = r["model"]
         model_display = "MLP" if model_raw == "mlp" else model_raw.capitalize()
         n             = r["nconstituents"]
-        aug           = aug_map.get(str(r["augmentation_scheme"]).lower(), str(r["augmentation_scheme"]))
+        group         = str(r["augmentation_scheme"]).lower()
+        aug_display   = AUG_DISPLAY.get(group, group)
 
-        if prev_model is not None and model_raw != prev_model:
+        new_model = prev_model is not None and model_raw != prev_model
+        new_n     = prev_n is not None and n != prev_n
+
+        if new_model:
             lines.append(r"    \specialrule{.1em}{.5em}{.5em}")
-        elif prev_n is not None and n != prev_n:
+        elif new_n:
             lines.append(r"    \cmidrule{2-8}")
 
-        model_str = f"\\multirow{{12}}{{*}}{{\\textbf{{{model_display}}}}}" if model_raw != prev_model else ""
-        n_str     = f"\\multirow{{4}}{{*}}{{{n}}}"                         if (n != prev_n or model_raw != prev_model) else ""
+        n_rows_model  = model_span[model_raw]
+        n_rows_nconst = nconst_span[(model_raw, n)]
+
+        model_str = f"\\multirow{{{n_rows_model}}}{{*}}{{\\textbf{{{model_display}}}}}" \
+                    if model_raw != prev_model else ""
+        n_str     = f"\\multirow{{{n_rows_nconst}}}{{*}}{{{n}}}" \
+                    if (n != prev_n or model_raw != prev_model) else ""
 
         flops_val = r.get("flops_mean", float("nan"))
         try:
             flops_display = f"{int(float(flops_val)/1000)}K" if not math.isnan(float(flops_val)) else "N/A"
         except Exception:
             flops_display = "N/A"
-        flops_str = f"\\multirow{{4}}{{*}}{{{flops_display}}}" if (n != prev_n or model_raw != prev_model) else ""
+        flops_str = f"\\multirow{{{n_rows_nconst}}}{{*}}{{{flops_display}}}" \
+                    if (n != prev_n or model_raw != prev_model) else ""
 
         lines.append(
-            f"    {model_str} & {n_str} & {aug} & {flops_str} & "
+            f"    {model_str} & {n_str} & {aug_display} & {flops_str} & "
             f"{safe_fmt(r.get('test_acc_mean', float('nan')), 2)} \\pm "
             f"{safe_fmt(r.get('test_acc_std',  float('nan')), 2)} & "
             f"{safe_fmt(r.get('lorentz_flip_mean', float('nan')), 3)} \\pm "
@@ -452,9 +464,53 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         )
         prev_model, prev_n = model_raw, n
 
-    lines.extend([r"    \bottomrule", r"\end{tabular}", r"\end{document}"])
-    output_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"[write_latex] Wrote LaTeX table to {output_path}")
+    return lines
+
+
+def write_latex_table(rows: List[Dict], output_path: Path) -> None:
+    """Write one .tex file per method, each as a standalone LaTeX document."""
+    if not rows:
+        print("[write_latex] No rows — skipping LaTeX output.")
+        return
+
+    METHOD_DISPLAY = {"augmentation": "Augmentation", "symm_loss": "Symmetry Loss"}
+
+    # Group rows by method
+    by_method: Dict[str, List[Dict]] = {}
+    for r in rows:
+        by_method.setdefault(str(r.get("method", "augmentation")).lower(), []).append(r)
+
+    HEADER = [
+        r"\documentclass[preview,border=1pt]{standalone}",
+        r"\usepackage[utf8]{inputenc}",
+        r"\usepackage{booktabs, siunitx, adjustbox, multirow}",
+        r"\sisetup{separate-uncertainty=true, bracket-numbers=false}",
+        r"\begin{document}",
+        r"\setlength{\tabcolsep}{5pt}",
+        r"\scriptsize",
+    ]
+    COL_SPEC = r"\begin{tabular}{ll l c S[table-format=2.2(2)] S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)]}"
+    COL_HEAD = (
+        r"    \textbf{Model} & \textbf{\# Const} & \textbf{Group} & \textbf{FLOPs} & "
+        r"{\textbf{Acc. (\%)}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & {\textbf{SO(3) flip}} \\"
+    )
+
+    stem = output_path.with_suffix("")
+    for method, method_rows in sorted(by_method.items()):
+        method_path = Path(f"{stem}_{method}.tex")
+        method_label = METHOD_DISPLAY.get(method, method)
+        lines = HEADER + [
+            f"% Method: {method_label}",
+            COL_SPEC,
+            r"    \toprule",
+            COL_HEAD,
+            r"    \midrule",
+        ]
+        lines += _latex_table_body(method_rows)
+        lines += [r"    \bottomrule", r"\end{tabular}", r"\end{document}"]
+        method_path.parent.mkdir(parents=True, exist_ok=True)
+        method_path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"[write_latex] Wrote {len(method_rows)}-row table ({method_label}) to {method_path}")
 
 
 def main() -> None:

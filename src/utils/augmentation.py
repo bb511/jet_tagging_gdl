@@ -115,9 +115,9 @@ def apply_so2_single_rotation(
     pt_idx = feature_index(feature_names, "j1_pt", "pt")
     phi_idx = feature_index(feature_names, "j1_phi", "phi")
 
-    if None in (px_idx, py_idx, pz_idx, pt_idx, phi_idx):
+    if None in (px_idx, py_idx, pz_idx):
         print(
-            "SO(2) augmentation requested but required px/py/pz/pt/phi "
+            "SO(2) augmentation requested but required px/py/pz "
             "features were not found. Returning unaugmented data."
         )
         return x_data
@@ -162,19 +162,22 @@ def apply_so3_single_rotation(
     delta_r_idx = feature_index(feature_names, "j1_deltaR", "deltaR")
     ptrel_idx = feature_index(feature_names, "j1_ptrel", "ptrel")
 
-    if None in (
-        px_idx, py_idx, pz_idx, pt_idx, eta_idx, phi_idx,
-        etarel_idx, phirel_idx, delta_r_idx, ptrel_idx,
-    ):
+    if None in (px_idx, py_idx, pz_idx):
         print(
-            "SO(3) augmentation requested but required features were not "
-            "found. Returning unaugmented data."
+            "SO(3) augmentation requested but required px/py/pz "
+            "features were not found. Returning unaugmented data."
         )
         return x_data
 
-    x_new = x_data.copy()
-    pad_mask = x_data[:, :, pt_idx] > 0
+    n_feats = x_data.shape[2]
 
+    # Derive padding mask from pt column when present; otherwise use pt=sqrt(px²+py²).
+    if pt_idx is not None and pt_idx < n_feats:
+        pad_mask = x_data[:, :, pt_idx] > 0
+    else:
+        pad_mask = (x_data[:, :, px_idx] ** 2 + x_data[:, :, py_idx] ** 2) > 0
+
+    x_new = x_data.copy()
     vec = np.stack(
         [x_data[:, :, px_idx], x_data[:, :, py_idx], x_data[:, :, pz_idx]],
         axis=-1,
@@ -197,16 +200,14 @@ def apply_so3_single_rotation(
     delta_r = np.sqrt(eta_rel ** 2 + phi_rel ** 2)
     pt_rel = pt_r / np.where(jet_pt > 0, jet_pt, 1.0)
 
-    x_new[:, :, px_idx] = np.where(pad_mask, px_r, x_data[:, :, px_idx])
-    x_new[:, :, py_idx] = np.where(pad_mask, py_r, x_data[:, :, py_idx])
-    x_new[:, :, pz_idx] = np.where(pad_mask, pz_r, x_data[:, :, pz_idx])
-    x_new[:, :, pt_idx] = np.where(pad_mask, pt_r, x_data[:, :, pt_idx])
-    x_new[:, :, eta_idx] = np.where(pad_mask, eta_r, x_data[:, :, eta_idx])
-    x_new[:, :, phi_idx] = np.where(pad_mask, phi_r, x_data[:, :, phi_idx])
-    x_new[:, :, etarel_idx] = np.where(pad_mask, eta_rel, x_data[:, :, etarel_idx])
-    x_new[:, :, phirel_idx] = np.where(pad_mask, phi_rel, x_data[:, :, phirel_idx])
-    x_new[:, :, delta_r_idx] = np.where(pad_mask, delta_r, x_data[:, :, delta_r_idx])
-    x_new[:, :, ptrel_idx] = np.where(pad_mask, pt_rel, x_data[:, :, ptrel_idx])
+    for idx, arr in zip(
+        [px_idx, py_idx, pz_idx, pt_idx, eta_idx, phi_idx,
+         etarel_idx, phirel_idx, delta_r_idx, ptrel_idx],
+        [px_r, py_r, pz_r, pt_r, eta_r, phi_r,
+         eta_rel, phi_rel, delta_r, pt_rel],
+    ):
+        if idx is not None and 0 <= idx < n_feats:
+            x_new[:, :, idx] = np.where(pad_mask, arr, x_data[:, :, idx])
     return x_new
 
 
@@ -350,42 +351,60 @@ def apply_boost_preserve_phi(
     L: np.ndarray,
     feature_names: List[str],
 ) -> np.ndarray:
-    """Boost 4-vectors and apply a compensating SO(2) rotation to preserve jet φ."""
+    """Boost 4-vectors and apply a compensating SO(2) rotation to preserve jet φ.
+
+    When the energy feature is absent (partial feature sets used in symm_loss),
+    energy is approximated as |p| = sqrt(px²+py²+pz²), which is exact for
+    massless particles and a good approximation for LHC jet constituents.
+    """
     x_new = x_data.copy()
+    n_feats = x_data.shape[2]
 
-    def idx(name: str) -> int:
-        return feature_names.index(name)
+    px_idx     = feature_index(feature_names, "j1_px",     "px")
+    py_idx     = feature_index(feature_names, "j1_py",     "py")
+    pz_idx     = feature_index(feature_names, "j1_pz",     "pz")
+    e_idx      = feature_index(feature_names, "j1_e",      "e")
+    pt_idx     = feature_index(feature_names, "j1_pt",     "pt")
+    eta_idx    = feature_index(feature_names, "j1_eta",    "eta")
+    phi_idx    = feature_index(feature_names, "j1_phi",    "phi")
+    etarel_idx = feature_index(feature_names, "j1_etarel", "etarel")
+    phirel_idx = feature_index(feature_names, "j1_phirel", "phirel")
+    delta_r_idx = feature_index(feature_names, "j1_deltaR", "deltaR")
+    ptrel_idx   = feature_index(feature_names, "j1_ptrel",  "ptrel")
 
-    px_idx = idx("j1_px")
-    py_idx = idx("j1_py")
-    pz_idx = idx("j1_pz")
-    e_idx = idx("j1_e")
+    if None in (px_idx, py_idx, pz_idx):
+        print(
+            "Lorentz augmentation requested but required px/py/pz "
+            "features were not found. Returning unaugmented data."
+        )
+        return x_data
 
-    pt_idx = idx("j1_pt")
-    eta_idx = idx("j1_eta")
-    phi_idx = idx("j1_phi")
+    # Derive padding mask: prefer pt column; fall back to sqrt(px²+py²).
+    if pt_idx is not None and pt_idx < n_feats:
+        pad_mask = x_data[:, :, pt_idx] > 0
+    else:
+        pad_mask = (x_data[:, :, px_idx] ** 2 + x_data[:, :, py_idx] ** 2) > 0
 
-    etarel_idx = idx("j1_etarel")
-    phirel_idx = idx("j1_phirel")
-    delta_r_idx = idx("j1_deltaR")
-    ptrel_idx = idx("j1_ptrel")
-
-    pad_mask = x_data[:, :, pt_idx] > 0
+    # Build 4-vectors: use stored energy if available, otherwise approximate
+    # E ≈ |p| = sqrt(px²+py²+pz²), which is exact for massless particles.
+    if e_idx is not None and e_idx < n_feats:
+        e_in = x_data[:, :, e_idx]
+    else:
+        e_in = np.sqrt(
+            x_data[:, :, px_idx] ** 2
+            + x_data[:, :, py_idx] ** 2
+            + x_data[:, :, pz_idx] ** 2
+        )
 
     p4 = np.stack(
-        [
-            x_data[:, :, e_idx],
-            x_data[:, :, px_idx],
-            x_data[:, :, py_idx],
-            x_data[:, :, pz_idx],
-        ],
+        [e_in, x_data[:, :, px_idx], x_data[:, :, py_idx], x_data[:, :, pz_idx]],
         axis=-1,
     )
     p4 = p4 * pad_mask[:, :, None]
 
     p4b = np.einsum("ij,ncj->nci", L, p4, optimize=True)
 
-    e_b = p4b[:, :, 0]
+    e_b  = p4b[:, :, 0]
     px_b = p4b[:, :, 1]
     py_b = p4b[:, :, 2]
     pz_b = p4b[:, :, 3]
@@ -393,60 +412,54 @@ def apply_boost_preserve_phi(
     px = x_data[:, :, px_idx] * pad_mask
     py = x_data[:, :, py_idx] * pad_mask
 
-    jet_px_orig = px.sum(axis=1, keepdims=True)
-    jet_py_orig = py.sum(axis=1, keepdims=True)
+    jet_px_orig  = px.sum(axis=1, keepdims=True)
+    jet_py_orig  = py.sum(axis=1, keepdims=True)
     jet_phi_orig = np.arctan2(jet_py_orig, jet_px_orig)
 
-    jet_px = (px_b * pad_mask).sum(axis=1, keepdims=True)
-    jet_py = (py_b * pad_mask).sum(axis=1, keepdims=True)
-    jet_phi_boost = np.arctan2(jet_py, jet_px)
+    jet_px_b    = (px_b * pad_mask).sum(axis=1, keepdims=True)
+    jet_py_b    = (py_b * pad_mask).sum(axis=1, keepdims=True)
+    jet_phi_boost = np.arctan2(jet_py_b, jet_px_b)
 
     theta = jet_phi_orig - jet_phi_boost
     cos_t = np.cos(theta)
     sin_t = np.sin(theta)
 
-    px_r = cos_t * px_b - sin_t * py_b
-    py_r = sin_t * px_b + cos_t * py_b
-    pz_r = pz_b
-    e_r = e_b
+    px_r =  cos_t * px_b - sin_t * py_b
+    py_r =  sin_t * px_b + cos_t * py_b
+    pz_r =  pz_b
+    e_r  =  e_b
 
     px_r *= pad_mask
     py_r *= pad_mask
     pz_r *= pad_mask
-    e_r *= pad_mask
+    e_r  *= pad_mask
 
     energy_mask = (e_r > 0) & pad_mask
 
-    pt = compute_pt(px_r, py_r)
+    pt  = compute_pt(px_r, py_r)
     phi = compute_phi(px_r, py_r)
     eta = compute_eta(px_r, py_r, pz_r)
 
-    x_new[:, :, px_idx] = np.where(energy_mask, px_r, x_data[:, :, px_idx])
-    x_new[:, :, py_idx] = np.where(energy_mask, py_r, x_data[:, :, py_idx])
-    x_new[:, :, pz_idx] = np.where(energy_mask, pz_r, x_data[:, :, pz_idx])
-    x_new[:, :, e_idx] = np.where(energy_mask, e_r, x_data[:, :, e_idx])
-
-    x_new[:, :, pt_idx] = np.where(energy_mask, pt, x_data[:, :, pt_idx])
-    x_new[:, :, eta_idx] = np.where(energy_mask, eta, x_data[:, :, eta_idx])
-    x_new[:, :, phi_idx] = np.where(energy_mask, phi, x_data[:, :, phi_idx])
-
-    jet_px = (px_r * pad_mask).sum(axis=1, keepdims=True)
-    jet_py = (py_r * pad_mask).sum(axis=1, keepdims=True)
-    jet_pz = (pz_r * pad_mask).sum(axis=1, keepdims=True)
-
-    jet_pt = compute_pt(jet_px, jet_py)
+    jet_px  = (px_r * pad_mask).sum(axis=1, keepdims=True)
+    jet_py  = (py_r * pad_mask).sum(axis=1, keepdims=True)
+    jet_pz  = (pz_r * pad_mask).sum(axis=1, keepdims=True)
+    jet_pt  = compute_pt(jet_px, jet_py)
     jet_phi = compute_phi(jet_px, jet_py)
     jet_eta = compute_eta(jet_px, jet_py, jet_pz)
 
     eta_rel = eta - jet_eta
     phi_rel = wrap_phi(phi - jet_phi)
     delta_r = np.sqrt(eta_rel ** 2 + phi_rel ** 2)
-    pt_rel = pt / np.where(jet_pt > 0, jet_pt, 1.0)
+    pt_rel  = pt / np.where(jet_pt > 0, jet_pt, 1.0)
 
-    x_new[:, :, etarel_idx] = np.where(energy_mask, eta_rel, x_data[:, :, etarel_idx])
-    x_new[:, :, phirel_idx] = np.where(energy_mask, phi_rel, x_data[:, :, phirel_idx])
-    x_new[:, :, delta_r_idx] = np.where(energy_mask, delta_r, x_data[:, :, delta_r_idx])
-    x_new[:, :, ptrel_idx] = np.where(energy_mask, pt_rel, x_data[:, :, ptrel_idx])
+    for idx, arr in zip(
+        [px_idx, py_idx, pz_idx, e_idx, pt_idx, eta_idx, phi_idx,
+         etarel_idx, phirel_idx, delta_r_idx, ptrel_idx],
+        [px_r,   py_r,   pz_r,   e_r,   pt,     eta,     phi,
+         eta_rel, phi_rel, delta_r, pt_rel],
+    ):
+        if idx is not None and 0 <= idx < n_feats:
+            x_new[:, :, idx] = np.where(energy_mask, arr, x_data[:, :, idx])
 
     return x_new
 

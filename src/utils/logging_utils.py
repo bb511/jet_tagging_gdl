@@ -51,6 +51,14 @@ def log_hyperparameters(object_dict: Dict[str, Any]) -> None:
     hparams["tags"] = cfg.get("tags")
     hparams["ckpt_path"] = cfg.get("ckpt_path")
     hparams["seed"] = cfg.get("seed")
+    hparams["fold_idx"] = object_dict.get("fold_idx")
+
+    # Log runtime-computed FLOPs (not in Hydra config, stored in model.hparams)
+    if hasattr(model, "hparams"):
+        for key in ("flops", "flops_total", "flops_mult_adds"):
+            val = model.hparams.get(key)
+            if val is not None:
+                hparams[f"model/{key}"] = val
 
     # send hparams to all loggers
     for logger in trainer.loggers:

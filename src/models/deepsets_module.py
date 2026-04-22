@@ -162,16 +162,12 @@ class DeepSetsInvariant(LightningModule):
         logits = self.forward(x)
 
         if self.method == "symm_loss":
-            # Lorentz boosts require feature_names; SO2/SO3 do not
-            if self.group.lower() == "lorentz":
-                if self.feature_names is None:
-                    raise RuntimeError(
-                        "feature_names is None — Lorentz symm_loss requires feature_names. "
-                        "Ensure setup() has been called so the datamodule populates it."
-                    )
-                x_sym, _ = build_symmetric_batch(x, group=self.group, feature_names=self.feature_names)
-            else:
-                x_sym, _ = build_symmetric_batch(x, group=self.group)
+            if self.feature_names is None:
+                raise RuntimeError(
+                    "feature_names is None — symm_loss requires feature_names for all groups. "
+                    "Ensure setup() has been called so the datamodule populates it."
+                )
+            x_sym, _ = build_symmetric_batch(x, group=self.group, feature_names=self.feature_names)
 
             logits_sym = self.forward(x_sym)
             cls_loss   = cross_entropy(logits, y)
@@ -189,15 +185,15 @@ class DeepSetsInvariant(LightningModule):
     # ------------------------------------------------------------------
     def setup(self, stage: str) -> None:
         if hasattr(self.trainer, "datamodule") and self.trainer.datamodule is not None:
-            self.feature_names = self.trainer.datamodule.feature_names
-            if (
-                self.method == "symm_loss"
-                and self.group.lower() == "lorentz"
-                and self.feature_names is None
-            ):
+            dm = self.trainer.datamodule
+            # Use the *selected* feature names (matching tensor dimensions), not
+            # the raw full list from the H5 file which has j1_-prefixed names at
+            # indices that no longer correspond to the feature-selected tensor.
+            self.feature_names = list(dm.features)
+            if self.method == "symm_loss" and not self.feature_names:
                 raise RuntimeError(
-                    "datamodule.feature_names is None after setup(). "
-                    "Ensure HLS4MLDataModule.setup() populates feature_names from norm_params.npz."
+                    "datamodule.features is empty after setup(). "
+                    "Ensure HLS4MLDataModule is configured with a features list."
                 )
 
     # ------------------------------------------------------------------

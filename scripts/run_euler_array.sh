@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=200G
 #SBATCH --time=60:00:00
-#SBATCH --array=0-11
+#SBATCH --array=0-8
 #SBATCH --output=logs/slurm/null
 #SBATCH --error=logs/slurm/null
 
@@ -116,7 +116,7 @@ mkdir -p logs/slurm/${SLURM_ARRAY_JOB_ID}
 
 # Descriptive log file name: <model>_<experiment_basename>_<taskid>
 EXPERIMENT_BASENAME=$(basename "$EXPERIMENT")
-LOG_BASE="logs/slurm/${SLURM_ARRAY_JOB_ID}/${MODEL}_${METHOD}_${EXPERIMENT_BASENAME}_${SLURM_ARRAY_TASK_ID}"
+LOG_BASE="logs/slurm/${SLURM_ARRAY_JOB_ID}/${MODEL}_${EXPERIMENT_BASENAME}_${SLURM_ARRAY_TASK_ID}"
 exec > "${LOG_BASE}.out" 2> "${LOG_BASE}.err"
 # SLURM will handle stdout and stderr redirection
 
