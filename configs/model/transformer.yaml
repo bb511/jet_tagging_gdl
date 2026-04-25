@@ -29,4 +29,5 @@ scheduler:
   num_cycles: 0.5
   last_epoch: -1
 
-compile: false
+
+symm_loss_weight: 0.1

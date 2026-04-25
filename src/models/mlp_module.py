@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, Tuple
 
 import torch
@@ -39,6 +40,7 @@ class MLPClassifier(LightningModule):
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         compile: bool = False,
         group: str = None,
+        symm_loss_weight: float = 0.1,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -81,8 +83,9 @@ class MLPClassifier(LightningModule):
         self.test_loss    = MeanMetric()
         self.val_acc_best = MaxMetric()
 
-        # feature_names populated in setup() from the datamodule
+        # feature_names and norm_scales populated in setup() from the datamodule
         self.feature_names = None
+        self.norm_scales = None
 
         # ----------------------------------------------------------------
         # Compute FLOPs in __init__ — model is fully built, no trainer
@@ -137,12 +140,15 @@ class MLPClassifier(LightningModule):
                 )
             x_sym, _ = build_symmetric_batch(
                 x,
-                group="so2",
+                group=self.group,
                 feature_names=self.feature_names,
+                norm_scales=self.norm_scales,
             )
             logits_sym = self.forward(x_sym)
             cls_loss = cross_entropy(logits, y)
-            loss, _ = self.criterion(cls_loss, logits, logits_sym, weight=0.1)
+            loss, _ = self.criterion(
+                cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
+            )
 
         else:
             # augmentation / another_method — plain cross-entropy
@@ -164,6 +170,11 @@ class MLPClassifier(LightningModule):
                     "datamodule.features is empty after setup(). "
                     "Ensure HLS4MLDataModule is configured with a features list."
                 )
+            raw_params = getattr(dm, "norm_params", None)
+            self.norm_scales = (
+                {name: float(scale) for name, (_, scale) in raw_params.items()}
+                if raw_params else None
+            )
 
     # ------------------------------------------------------------------
     # Training
@@ -190,8 +201,9 @@ class MLPClassifier(LightningModule):
         train_loss = self.train_loss.compute()
         train_acc  = self.train_acc.compute()
         print(
-            f"Epoch {self.current_epoch} ended. "
-            f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}"
+            f"[Epoch {self.current_epoch:>3d}] "
+            f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
+            flush=True,
         )
 
     # ------------------------------------------------------------------
@@ -215,9 +227,8 @@ class MLPClassifier(LightningModule):
         val_loss = self.val_loss.compute()
 
         print(
-            f"Epoch {self.current_epoch} ended. "
-            f"Val Loss: {val_loss:.4f}, Val Acc: {acc:.4f}, "
-            f"Val Acc Best: {self.val_acc_best.compute():.4f}"
+            f"[Epoch {self.current_epoch:>3d}]   Val | loss: {val_loss:.4f}  acc: {acc:.4f}  best: {self.val_acc_best.compute():.4f}",
+            flush=True,
         )
 
     # ------------------------------------------------------------------

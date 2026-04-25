@@ -22,4 +22,5 @@ scheduler:
   factor: 0.1
   threshold: 1e-4
 
-compile: false
+
+symm_loss_weight: 0.1

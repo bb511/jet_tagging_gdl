@@ -1,11 +1,12 @@
-_target_: lightning.pytorch.callbacks.EarlyStopping
-monitor: val/acc
-min_delta: 0.0001  # matches ReduceLROnPlateau threshold; filters sub-threshold noise
-patience: 100      # > scheduler patience (80) so LR reduction fires before stopping
-verbose: true
-mode: max
-strict: true
-check_finite: true
-stopping_threshold: null
-divergence_threshold: null
-check_on_train_epoch_end: null
+early_stopping:
+  _target_: lightning.pytorch.callbacks.EarlyStopping
+  monitor: val/acc
+  min_delta: 0.0001  # matches ReduceLROnPlateau threshold; filters sub-threshold noise
+  patience: 100      # > scheduler patience (80) so LR reduction fires before stopping
+  verbose: true
+  mode: max
+  strict: true
+  check_finite: true
+  stopping_threshold: null
+  divergence_threshold: null
+  check_on_train_epoch_end: null

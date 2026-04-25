@@ -113,9 +113,12 @@ class PlottingCallback(Callback):
             labels = torch.cat(self._val_labels, dim=0).numpy()
             probs = torch.softmax(logits, dim=1).numpy()
             preds = np.argmax(probs, axis=1)
-            self._plot_roc_curves(labels, probs, save_dir, suffix="val", title_extra="Val Set")
-            self._plot_confusion_matrix(labels, preds, save_dir, suffix="val", title_extra="Val Set")
-            self._print_per_class_accuracy(labels, preds, split_name="val")
+            if np.isnan(probs).any():
+                print("PlottingCallback: Skipping ROC/confusion plots — predictions contain NaN (training diverged).")
+            else:
+                self._plot_roc_curves(labels, probs, save_dir, suffix="val", title_extra="Val Set")
+                self._plot_confusion_matrix(labels, preds, save_dir, suffix="val", title_extra="Val Set")
+                self._print_per_class_accuracy(labels, preds, split_name="val")
 
     def _plot_training_curves(self, save_dir: Path) -> None:
         if not self._epochs:

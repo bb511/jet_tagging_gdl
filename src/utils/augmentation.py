@@ -57,6 +57,16 @@ def feature_index(feature_names: List[str], *candidate_names: str) -> Optional[i
     return None
 
 
+def get_norm_scale(norm_scales: Optional[dict], name: str) -> float:
+    """Return the normalisation scale for *name*, or 1.0 if unavailable.
+
+    Tries the bare name first, then the ``j1_``-prefixed variant.
+    """
+    if norm_scales is None:
+        return 1.0
+    return float(norm_scales.get(name, norm_scales.get(f"j1_{name}", 1.0)))
+
+
 # ── Rotation matrix generators ──────────────────────────────────────
 
 
@@ -107,8 +117,13 @@ def apply_so2_single_rotation(
     x_data: np.ndarray,
     rotation_matrix: np.ndarray,
     feature_names: List[str],
+    norm_scales: Optional[dict] = None,
 ) -> np.ndarray:
-    """Apply one SO(2) rotation to all jets."""
+    """Apply one SO(2) rotation to all jets.
+
+    If *norm_scales* is provided the rotation is performed in physical space:
+    features are de-normalised before rotation and re-normalised afterwards.
+    """
     px_idx = feature_index(feature_names, "j1_px", "px")
     py_idx = feature_index(feature_names, "j1_py", "py")
     pz_idx = feature_index(feature_names, "j1_pz", "pz")
@@ -122,9 +137,16 @@ def apply_so2_single_rotation(
         )
         return x_data
 
+    s_px = get_norm_scale(norm_scales, "px")
+    s_py = get_norm_scale(norm_scales, "py")
+    s_pz = get_norm_scale(norm_scales, "pz")
+
     x_new = x_data.copy()
+    # De-normalise to physical space before rotation
     vec = np.stack(
-        [x_data[:, :, px_idx], x_data[:, :, py_idx], x_data[:, :, pz_idx]],
+        [x_data[:, :, px_idx] * s_px,
+         x_data[:, :, py_idx] * s_py,
+         x_data[:, :, pz_idx] * s_pz],
         axis=-1,
     )
     vec_rot = np.einsum("ij,ncj->nci", rotation_matrix, vec, optimize=True)
@@ -134,11 +156,15 @@ def apply_so2_single_rotation(
     pz_r = vec_rot[:, :, 2]
     pt_r, _, phi_r = px_py_pz_to_pt_eta_phi(px_r, py_r, pz_r)
 
-    # Only update features if their indices are valid and within bounds
+    # Re-normalise and write back only valid feature slots
     n_feats = x_new.shape[2]
-    for idx, arr in zip([px_idx, py_idx, pz_idx, pt_idx, phi_idx], [px_r, py_r, pz_r, pt_r, phi_r]):
+    for idx, arr, feat in zip(
+        [px_idx, py_idx, pz_idx, pt_idx, phi_idx],
+        [px_r, py_r, pz_r, pt_r, phi_r],
+        ["px", "py", "pz", "pt", "phi"],
+    ):
         if idx is not None and 0 <= idx < n_feats:
-            x_new[:, :, idx] = arr
+            x_new[:, :, idx] = arr / get_norm_scale(norm_scales, feat)
     return x_new
 
 
@@ -149,8 +175,13 @@ def apply_so3_single_rotation(
     x_data: np.ndarray,
     rotation_matrix: np.ndarray,
     feature_names: List[str],
+    norm_scales: Optional[dict] = None,
 ) -> np.ndarray:
-    """Apply one SO(3) rotation to all jets (padding-aware)."""
+    """Apply one SO(3) rotation to all jets (padding-aware).
+
+    If *norm_scales* is provided the rotation is performed in physical space:
+    features are de-normalised before rotation and re-normalised afterwards.
+    """
     px_idx = feature_index(feature_names, "j1_px", "px")
     py_idx = feature_index(feature_names, "j1_py", "py")
     pz_idx = feature_index(feature_names, "j1_pz", "pz")
@@ -169,19 +200,22 @@ def apply_so3_single_rotation(
         )
         return x_data
 
+    s_px = get_norm_scale(norm_scales, "px")
+    s_py = get_norm_scale(norm_scales, "py")
+    s_pz = get_norm_scale(norm_scales, "pz")
+
     n_feats = x_data.shape[2]
 
-    # Derive padding mask from pt column when present; otherwise use pt=sqrt(px²+py²).
-    if pt_idx is not None and pt_idx < n_feats:
-        pad_mask = x_data[:, :, pt_idx] > 0
-    else:
-        pad_mask = (x_data[:, :, px_idx] ** 2 + x_data[:, :, py_idx] ** 2) > 0
+    # De-normalise to physical space; scales are 1.0 when norm_scales is None.
+    px_phys = x_data[:, :, px_idx] * s_px
+    py_phys = x_data[:, :, py_idx] * s_py
+    pz_phys = x_data[:, :, pz_idx] * s_pz
+
+    # Padding mask from physical px²+py²; works for both raw and normalised input.
+    pad_mask = (px_phys ** 2 + py_phys ** 2) > 0
 
     x_new = x_data.copy()
-    vec = np.stack(
-        [x_data[:, :, px_idx], x_data[:, :, py_idx], x_data[:, :, pz_idx]],
-        axis=-1,
-    )
+    vec = np.stack([px_phys, py_phys, pz_phys], axis=-1)
     vec = vec * pad_mask[:, :, None]
     vec_rot = np.einsum("ij,ncj->nci", rotation_matrix, vec, optimize=True)
 
@@ -200,52 +234,79 @@ def apply_so3_single_rotation(
     delta_r = np.sqrt(eta_rel ** 2 + phi_rel ** 2)
     pt_rel = pt_r / np.where(jet_pt > 0, jet_pt, 1.0)
 
-    for idx, arr in zip(
+    # Re-normalise and write back; all scales are 1.0 when norm_scales is None.
+    for idx, arr, feat in zip(
         [px_idx, py_idx, pz_idx, pt_idx, eta_idx, phi_idx,
          etarel_idx, phirel_idx, delta_r_idx, ptrel_idx],
         [px_r, py_r, pz_r, pt_r, eta_r, phi_r,
          eta_rel, phi_rel, delta_r, pt_rel],
+        ["px", "py", "pz", "pt", "eta", "phi",
+         "etarel", "phirel", "deltaR", "ptrel"],
     ):
         if idx is not None and 0 <= idx < n_feats:
-            x_new[:, :, idx] = np.where(pad_mask, arr, x_data[:, :, idx])
+            x_new[:, :, idx] = np.where(
+                pad_mask,
+                arr / get_norm_scale(norm_scales, feat),
+                x_data[:, :, idx],
+            )
     return x_new
 
 
 # ── SO(3) physical acceptance filter ────────────────────────────────
 
 
-def _so3_jet_filter(
+def so3_jet_filter(
     x_aug: np.ndarray,
     feature_names: List[str],
     pt_max: float = 1600.0,
     eta_max: float = 3.0,
     etarel_max: float = 0.5,
     phirel_max: float = 0.5,
+    norm_scales: Optional[dict] = None,
 ) -> np.ndarray:
     """Return boolean mask of jets passing SO(3) detector-acceptance cuts.
 
     A jet passes if **every** non-padded constituent satisfies:
         pT ∈ [0, pt_max],  η ∈ [-eta_max, eta_max],
         ηrel ∈ [-etarel_max, etarel_max],  φrel ∈ [-phirel_max, phirel_max].
+
+    When *norm_scales* is provided the etarel/phirel thresholds are converted
+    to normalised space (their means are ~0, so dividing by scale is exact).
     """
-    pt_idx = feature_index(feature_names, "j1_pt", "pt")
-    eta_idx = feature_index(feature_names, "j1_eta", "eta")
+    px_idx     = feature_index(feature_names, "j1_px",     "px")
+    py_idx     = feature_index(feature_names, "j1_py",     "py")
+    pt_idx     = feature_index(feature_names, "j1_pt",     "pt")
+    eta_idx    = feature_index(feature_names, "j1_eta",    "eta")
     etarel_idx = feature_index(feature_names, "j1_etarel", "etarel")
     phirel_idx = feature_index(feature_names, "j1_phirel", "phirel")
 
-    pt = x_aug[:, :, pt_idx]
-    eta = x_aug[:, :, eta_idx]
-    etarel = x_aug[:, :, etarel_idx]
-    phirel = x_aug[:, :, phirel_idx]
+    n_feats = x_aug.shape[2]
 
-    active = pt > 0  # non-padded constituents
+    # Derive active (non-padded) mask: prefer pt column, fall back to px²+py².
+    if pt_idx is not None and pt_idx < n_feats:
+        active = x_aug[:, :, pt_idx] > 0
+    elif px_idx is not None and py_idx is not None:
+        active = (x_aug[:, :, px_idx] ** 2 + x_aug[:, :, py_idx] ** 2) > 0
+    else:
+        active = np.ones(x_aug.shape[:2], dtype=bool)
 
-    ok = (
-        (pt >= 0) & (pt <= pt_max)
-        & (eta >= -eta_max) & (eta <= eta_max)
-        & (etarel >= -etarel_max) & (etarel <= etarel_max)
-        & (phirel >= -phirel_max) & (phirel <= phirel_max)
-    )
+    # Convert thresholds to normalised space when scales are provided.
+    _etarel_max = etarel_max / get_norm_scale(norm_scales, "etarel")
+    _phirel_max = phirel_max / get_norm_scale(norm_scales, "phirel")
+
+    ok = np.ones(x_aug.shape[:2], dtype=bool)
+    if pt_idx is not None and pt_idx < n_feats:
+        pt = x_aug[:, :, pt_idx]
+        ok &= (pt >= 0) & (pt <= pt_max)
+    if eta_idx is not None and eta_idx < n_feats:
+        eta = x_aug[:, :, eta_idx]
+        ok &= (eta >= -eta_max) & (eta <= eta_max)
+    if etarel_idx is not None and etarel_idx < n_feats:
+        etarel = x_aug[:, :, etarel_idx]
+        ok &= (etarel >= -_etarel_max) & (etarel <= _etarel_max)
+    if phirel_idx is not None and phirel_idx < n_feats:
+        phirel = x_aug[:, :, phirel_idx]
+        ok &= (phirel >= -_phirel_max) & (phirel <= _phirel_max)
 
     # Padded constituents automatically pass
     constituent_ok = ~active | ok
@@ -277,7 +338,7 @@ def augment_with_rotations(
         x_aug = apply_fn(x_data, rotation_matrix, feature_names)
 
         if space == "so3":
-            mask = _so3_jet_filter(x_aug, feature_names)
+            mask = so3_jet_filter(x_aug, feature_names)
             n_total_aug += x_aug.shape[0]
             n_kept_aug += mask.sum()
             x_aug = x_aug[mask]
@@ -350,12 +411,16 @@ def apply_boost_preserve_phi(
     x_data: np.ndarray,
     L: np.ndarray,
     feature_names: List[str],
+    norm_scales: Optional[dict] = None,
 ) -> np.ndarray:
     """Boost 4-vectors and apply a compensating SO(2) rotation to preserve jet φ.
 
     When the energy feature is absent (partial feature sets used in symm_loss),
     energy is approximated as |p| = sqrt(px²+py²+pz²), which is exact for
     massless particles and a good approximation for LHC jet constituents.
+
+    If *norm_scales* is provided the boost is performed in physical space:
+    features are de-normalised before boosting and re-normalised afterwards.
     """
     x_new = x_data.copy()
     n_feats = x_data.shape[2]
@@ -379,27 +444,25 @@ def apply_boost_preserve_phi(
         )
         return x_data
 
-    # Derive padding mask: prefer pt column; fall back to sqrt(px²+py²).
-    if pt_idx is not None and pt_idx < n_feats:
-        pad_mask = x_data[:, :, pt_idx] > 0
-    else:
-        pad_mask = (x_data[:, :, px_idx] ** 2 + x_data[:, :, py_idx] ** 2) > 0
+    s_px = get_norm_scale(norm_scales, "px")
+    s_py = get_norm_scale(norm_scales, "py")
+    s_pz = get_norm_scale(norm_scales, "pz")
 
-    # Build 4-vectors: use stored energy if available, otherwise approximate
-    # E ≈ |p| = sqrt(px²+py²+pz²), which is exact for massless particles.
+    # De-normalise to physical space; scales are 1.0 when norm_scales is None.
+    px_phys = x_data[:, :, px_idx] * s_px
+    py_phys = x_data[:, :, py_idx] * s_py
+    pz_phys = x_data[:, :, pz_idx] * s_pz
+
+    # Padding mask from physical px²+py².
+    pad_mask = (px_phys ** 2 + py_phys ** 2) > 0
+
+    # Build 4-vectors in physical space.
     if e_idx is not None and e_idx < n_feats:
-        e_in = x_data[:, :, e_idx]
+        e_in = x_data[:, :, e_idx] * get_norm_scale(norm_scales, "e")
     else:
-        e_in = np.sqrt(
-            x_data[:, :, px_idx] ** 2
-            + x_data[:, :, py_idx] ** 2
-            + x_data[:, :, pz_idx] ** 2
-        )
+        e_in = np.sqrt(px_phys ** 2 + py_phys ** 2 + pz_phys ** 2)
 
-    p4 = np.stack(
-        [e_in, x_data[:, :, px_idx], x_data[:, :, py_idx], x_data[:, :, pz_idx]],
-        axis=-1,
-    )
+    p4 = np.stack([e_in, px_phys, py_phys, pz_phys], axis=-1)
     p4 = p4 * pad_mask[:, :, None]
 
     p4b = np.einsum("ij,ncj->nci", L, p4, optimize=True)
@@ -409,11 +472,8 @@ def apply_boost_preserve_phi(
     py_b = p4b[:, :, 2]
     pz_b = p4b[:, :, 3]
 
-    px = x_data[:, :, px_idx] * pad_mask
-    py = x_data[:, :, py_idx] * pad_mask
-
-    jet_px_orig  = px.sum(axis=1, keepdims=True)
-    jet_py_orig  = py.sum(axis=1, keepdims=True)
+    jet_px_orig  = (px_phys * pad_mask).sum(axis=1, keepdims=True)
+    jet_py_orig  = (py_phys * pad_mask).sum(axis=1, keepdims=True)
     jet_phi_orig = np.arctan2(jet_py_orig, jet_px_orig)
 
     jet_px_b    = (px_b * pad_mask).sum(axis=1, keepdims=True)
@@ -452,14 +512,21 @@ def apply_boost_preserve_phi(
     delta_r = np.sqrt(eta_rel ** 2 + phi_rel ** 2)
     pt_rel  = pt / np.where(jet_pt > 0, jet_pt, 1.0)
 
-    for idx, arr in zip(
+    # Re-normalise and write back; all scales are 1.0 when norm_scales is None.
+    for idx, arr, feat in zip(
         [px_idx, py_idx, pz_idx, e_idx, pt_idx, eta_idx, phi_idx,
          etarel_idx, phirel_idx, delta_r_idx, ptrel_idx],
         [px_r,   py_r,   pz_r,   e_r,   pt,     eta,     phi,
          eta_rel, phi_rel, delta_r, pt_rel],
+        ["px", "py", "pz", "e", "pt", "eta", "phi",
+         "etarel", "phirel", "deltaR", "ptrel"],
     ):
         if idx is not None and 0 <= idx < n_feats:
-            x_new[:, :, idx] = np.where(energy_mask, arr, x_data[:, :, idx])
+            x_new[:, :, idx] = np.where(
+                energy_mask,
+                arr / get_norm_scale(norm_scales, feat),
+                x_data[:, :, idx],
+            )
 
     return x_new
 

@@ -23,6 +23,7 @@ from src.utils.augmentation import (
     create_lorentz_boosts,
     create_so3_rot_matrices,
     feature_index,
+    so3_jet_filter,
 )
 
 
@@ -74,44 +75,35 @@ def apply_random_so2(
     py_index: int = 1,
     min_angle: float = 0.0,
     max_angle: float = 2.0 * math.pi,
-    per_sample: bool = True,
     generator: Optional[GeneratorLike] = None,
+    norm_scales: Optional[dict] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Apply random SO(2) rotations using the exact augmentation backend.
 
+    Each jet in the batch receives an independently sampled rotation angle.
     Transformation logic is delegated to
     ``src.utils.augmentation.apply_so2_single_rotation``.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
-    # Kept for API compatibility; exact transformation uses feature_names.
     _ = (px_index, py_index)
     names = _require_feature_names(feature_names)
     rng = _as_numpy_rng(generator)
     x_np = _to_numpy_batch(x)
 
     batch_size = x_np.shape[0]
-    if per_sample:
-        theta = rng.uniform(min_angle, max_angle, size=batch_size).astype(np.float32)
-        x_rot_np = np.empty_like(x_np)
-        for i, t in enumerate(theta):
-            c, s = np.cos(t), np.sin(t)
-            rot = np.array(
-                [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]],
-                dtype=np.float32,
-            )
-            x_rot_np[i : i + 1] = apply_so2_single_rotation(
-                x_np[i : i + 1], rot, names
-            )
-    else:
-        theta = np.array([rng.uniform(min_angle, max_angle)], dtype=np.float32)
-        c, s = np.cos(theta[0]), np.sin(theta[0])
+    theta = rng.uniform(min_angle, max_angle, size=batch_size).astype(np.float32)
+    x_rot_np = np.empty_like(x_np)
+    for i, t in enumerate(theta):
+        c, s = np.cos(t), np.sin(t)
         rot = np.array(
             [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]],
             dtype=np.float32,
         )
-        x_rot_np = apply_so2_single_rotation(x_np, rot, names)
+        x_rot_np[i : i + 1] = apply_so2_single_rotation(
+            x_np[i : i + 1], rot, names, norm_scales=norm_scales
+        )
 
     x_rot = _from_numpy_batch(x_rot_np, ref=x)
     theta_t = torch.from_numpy(theta).to(device=x.device, dtype=x.dtype)
@@ -124,34 +116,40 @@ def apply_random_so3(
     px_index: int = 0,
     py_index: int = 1,
     pz_index: int = 2,
-    per_sample: bool = True,
     generator: Optional[GeneratorLike] = None,
+    norm_scales: Optional[dict] = None,
+    apply_filter: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Apply random SO(3) rotations using the exact augmentation backend.
 
+    Each jet in the batch receives an independently sampled rotation matrix
+    drawn from the Haar measure on SO(3).
     Transformation logic is delegated to
     ``src.utils.augmentation.apply_so3_single_rotation``.
+
+    When *apply_filter* is True, jets rotated outside detector acceptance
+    (|ηrel| > 0.5, |φrel| > 0.5 in physical space) fall back to the original
+    sample, contributing zero to the symmetry loss for that jet.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
-    # Kept for API compatibility; exact transformation uses feature_names.
     _ = (px_index, py_index, pz_index)
     names = _require_feature_names(feature_names)
     rng = _as_numpy_rng(generator)
     x_np = _to_numpy_batch(x)
 
-    num_mats = x_np.shape[0] if per_sample else 1
-    rot_mats_np = create_so3_rot_matrices(num_mats, rng)
-
-    if per_sample:
-        x_rot_np = np.empty_like(x_np)
-        for i, rot in enumerate(rot_mats_np):
-            x_rot_np[i : i + 1] = apply_so3_single_rotation(
-                x_np[i : i + 1], rot, names
-            )
-    else:
-        x_rot_np = apply_so3_single_rotation(x_np, rot_mats_np[0], names)
+    rot_mats_np = create_so3_rot_matrices(x_np.shape[0], rng)
+    x_rot_np = np.empty_like(x_np)
+    for i, rot in enumerate(rot_mats_np):
+        x_rot_i = apply_so3_single_rotation(
+            x_np[i : i + 1], rot, names, norm_scales=norm_scales
+        )
+        if apply_filter:
+            ok = so3_jet_filter(x_rot_i, names, norm_scales=norm_scales)
+            if not ok[0]:
+                x_rot_i = x_np[i : i + 1]
+        x_rot_np[i : i + 1] = x_rot_i
 
     x_rot = _from_numpy_batch(x_rot_np, ref=x)
     rot_mats = torch.from_numpy(rot_mats_np).to(device=x.device, dtype=x.dtype)
@@ -166,13 +164,14 @@ def apply_random_lorentz(
     py_index: int = 1,
     pz_index: int = 2,
     eta_max: float = 2.0,
-    per_sample: bool = True,
     preserve_jet_phi: bool = False,
     require_positive_energy: bool = True,
     generator: Optional[GeneratorLike] = None,
+    norm_scales: Optional[dict] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Apply random Lorentz boosts using the exact augmentation backend.
 
+    Each jet in the batch receives an independently sampled boost.
     Transformation logic is delegated to
     ``src.utils.augmentation.apply_boost_preserve_phi`` and therefore expects
     the same required feature set used by ``apply_augmentation(..., 'lorentz')``.
@@ -180,7 +179,6 @@ def apply_random_lorentz(
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
-    # Kept for API compatibility; exact Lorentz backend ignores these knobs.
     _ = (e_index, px_index, py_index, pz_index, preserve_jet_phi, require_positive_energy)
     names = _require_feature_names(feature_names)
     rng = _as_numpy_rng(generator)
@@ -195,17 +193,12 @@ def apply_random_lorentz(
         empty = torch.empty((0, 4, 4), device=x.device, dtype=x.dtype)
         return x.clone(), empty
 
-    num_mats = x_np.shape[0] if per_sample else 1
-    boosts_np = create_lorentz_boosts(num_mats, eta_max, rng)
-
-    if per_sample:
-        x_rot_np = np.empty_like(x_np)
-        for i, l_mat in enumerate(boosts_np):
-            x_rot_np[i : i + 1] = apply_boost_preserve_phi(
-                x_np[i : i + 1], l_mat, names
-            )
-    else:
-        x_rot_np = apply_boost_preserve_phi(x_np, boosts_np[0], names)
+    boosts_np = create_lorentz_boosts(x_np.shape[0], eta_max, rng)
+    x_rot_np = np.empty_like(x_np)
+    for i, l_mat in enumerate(boosts_np):
+        x_rot_np[i : i + 1] = apply_boost_preserve_phi(
+            x_np[i : i + 1], l_mat, names, norm_scales=norm_scales
+        )
 
     x_rot = _from_numpy_batch(x_rot_np, ref=x)
     boosts = torch.from_numpy(boosts_np).to(device=x.device, dtype=x.dtype)
@@ -223,12 +216,15 @@ def build_symmetric_batch(
     min_angle: float = 0.0,
     max_angle: float = 2.0 * math.pi,
     eta_max: float = 2.0,
-    per_sample: bool = True,
     preserve_jet_phi: bool = False,
     require_positive_energy: bool = True,
     generator: Optional[GeneratorLike] = None,
+    norm_scales: Optional[dict] = None,
+    apply_filter: bool = True,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     """Create transformed partners ``T(x)`` for symmetry regularization.
+
+    Each jet receives an independently sampled transformation.
 
     Returns:
         ``(x_transformed, transform_meta)``, where ``transform_meta`` is:
@@ -245,8 +241,8 @@ def build_symmetric_batch(
             py_index=py_index,
             min_angle=min_angle,
             max_angle=max_angle,
-            per_sample=per_sample,
             generator=generator,
+            norm_scales=norm_scales,
         )
 
     if g == "so3":
@@ -256,8 +252,9 @@ def build_symmetric_batch(
             px_index=px_index,
             py_index=py_index,
             pz_index=pz_index,
-            per_sample=per_sample,
             generator=generator,
+            norm_scales=norm_scales,
+            apply_filter=apply_filter,
         )
 
     if g == "lorentz":
@@ -269,10 +266,10 @@ def build_symmetric_batch(
             py_index=py_index,
             pz_index=pz_index,
             eta_max=eta_max,
-            per_sample=per_sample,
             preserve_jet_phi=preserve_jet_phi,
             require_positive_energy=require_positive_energy,
             generator=generator,
+            norm_scales=norm_scales,
         )
 
     raise NotImplementedError(
@@ -304,9 +301,7 @@ def symmetry_distance(
     m = metric.lower()
 
     if m == "l2":
-        diff = (logits - logits_sym).norm(dim=1)
-        base = logits.norm(dim=1).clamp_min(eps)
-        return (diff / base).mean()
+        return (logits - logits_sym).norm(dim=1).mean()
 
     if m == "mse":
         return F.mse_loss(logits, logits_sym)
