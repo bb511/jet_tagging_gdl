@@ -81,6 +81,9 @@ class ResultsTableCallback(L.Callback):
             vals = [inv.get(k, float("nan")) for k in self.INVARIANCE_KEYS]
             return "invariance/mean_l2", self._safe_mean(vals)
 
+        if self.augmentation_scheme == "permute":
+            return "n/a", float("nan")
+
         if self.augmentation_scheme in {"so2", "so3", "lorentz"}:
             key = f"invariance/{self.augmentation_scheme}_l2"
             return key, inv.get(key, float("nan"))
@@ -168,12 +171,14 @@ class ResultsTableCallback(L.Callback):
 
         self._summary_written = True
 
+        inv_summary = "" if selected_key == "n/a" else f", {selected_key}={row['selected_l2_pm']}"
         log.info(
             f"[ResultsTableCallback] Written summary row -> {self.output_path}\n"
             f"  model={self.model_name}, aug={self.augmentation_scheme}, nconst={self.nconstituents}\n"
-            f"  test_acc={row['test_acc_pm']}, {selected_key}={row['selected_l2_pm']}, flops={row['flops_mean']}"
+            f"  test_acc={row['test_acc_pm']}{inv_summary}, flops={row['flops_mean']}"
         )
 
+        inv_line = "" if selected_key == "n/a" else f"{selected_key}:    {row['selected_l2_pm']}\n"
         print(
             f"\n{'='*60}\n"
             f"Results Table Updated: {self.output_path}\n"
@@ -181,7 +186,7 @@ class ResultsTableCallback(L.Callback):
             f"Augmentation:       {self.augmentation_scheme}\n"
             f"nconst:             {self.nconstituents}\n"
             f"Test acc:           {row['test_acc_pm']}\n"
-            f"{selected_key}:    {row['selected_l2_pm']}\n"
+            f"{inv_line}"
             f"FLOPs (mean):       {row['flops_mean']}\n"
             f"{'='*60}\n"
         )

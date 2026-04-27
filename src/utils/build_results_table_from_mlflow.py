@@ -398,8 +398,8 @@ def write_csv(rows: List[Dict], output_path: Path) -> None:
 
 def _latex_table_body(rows: List[Dict]) -> List[str]:
     """Return the lines between (exclusive) \\toprule and \\bottomrule for one method."""
-    AUG_ORDER   = {"none": 0, "lorentz": 1, "so2": 2, "so3": 3}
-    AUG_DISPLAY = {"none": "None", "lorentz": "Lorentz", "so2": "SO(2)", "so3": "SO(3)"}
+    AUG_ORDER   = {"none": 0, "lorentz": 1, "so2": 2, "so3": 3, "permute": 4}
+    AUG_DISPLAY = {"none": "None", "lorentz": "Lorentz", "so2": "SO(2)", "so3": "SO(3)", "permute": "Permutation"}
 
     sorted_rows = sorted(rows, key=lambda x: (
         x["model"],

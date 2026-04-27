@@ -548,6 +548,17 @@ def augment_with_lorentz_boosts(
 
     return np.concatenate(x_all, axis=0), np.concatenate(y_all, axis=0)
 
+# ── Permutation augmentation ────────────────────────────────────────
+
+
+def permute_constituents(
+    x_data: np.ndarray, rng: np.random.Generator
+) -> np.ndarray:
+    """Randomly permute constituent order within each jet."""
+    n_jets, n_const = x_data.shape[:2]
+    # Generate all permutations at once via argsort of random values
+    perms = np.argsort(rng.random((n_jets, n_const)), axis=1)
+    return x_data[np.arange(n_jets)[:, None], perms]
 
 # ── Public dispatcher ───────────────────────────────────────────────
 
@@ -617,3 +628,5 @@ def apply_augmentation(
         )
 
     raise ValueError(f"Unknown augmentation scheme: {scheme}")
+
+

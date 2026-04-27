@@ -1,0 +1,24 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=equivariance/hls4ml_nconst32_permutation
+
+defaults:
+  - override /data: hls4ml
+  - override /model: deepsets_32
+
+tags: ["hls4ml", "nconst-32", "permutation"]
+seed: 12345
+
+data:
+  nconstituents: 32
+  method: equivariance
+  augmentation_scheme: permute
+  batch_size: 256
+  n_folds: 1
+
+trainer:
+  max_epochs: 300
+
+callbacks:
+  invariance_metric: null

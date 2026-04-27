@@ -32,7 +32,7 @@ except Exception:
     ipy_display = None
 
 from src.utils.utils import plot_features_overlap_from_datasets
-from src.utils.augmentation import apply_augmentation
+from src.utils.augmentation import apply_augmentation, permute_constituents
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ POSITIVE_FEATURES = {
 }
 
 # Methods that use the baseline (non-augmented) pipeline
-_BASELINE_METHODS = {"symm_loss", "another_method"}
+_BASELINE_METHODS = {"symm_loss", "equivariance"}
 
 
 class HLS4MLDataModule(LightningDataModule):
@@ -103,24 +103,26 @@ class HLS4MLDataModule(LightningDataModule):
         if self.method not in {"augmentation"} | _BASELINE_METHODS:
             raise ValueError(
                 f"Unsupported method '{method}'. "
-                f"Expected one of: ['augmentation', 'symm_loss', 'another_method']."
+                f"Expected one of: ['augmentation', 'symm_loss', 'equivariance']."
             )
 
         # --- Validate & resolve augmentation scheme ---
         requested_scheme = augmentation_scheme.lower()
-        if requested_scheme not in {"none", "so2", "so3", "lorentz"}:
+        if requested_scheme not in {"none", "so2", "so3", "lorentz", "permute"}:
             raise ValueError(
                 f"Unsupported augmentation_scheme='{augmentation_scheme}'. "
-                "Expected one of: ['none', 'so2', 'so3', 'lorentz']."
+                "Expected one of: ['none', 'so2', 'so3', 'lorentz', 'permute']."
             )
 
         if self.method in _BASELINE_METHODS:
-            if requested_scheme != "none":
+            if requested_scheme not in {"none", "permute"}:
                 log.warning(
-                    f"method='{self.method}' forces augmentation_scheme='none' "
-                    f"(got '{requested_scheme}'). Overriding."
+                    f"method='{self.method}' does not support augmentation_scheme='{requested_scheme}'. "
+                    "Overriding to 'none'."
                 )
-            self.augmentation_scheme = "none"
+                self.augmentation_scheme = "none"
+            else:
+                self.augmentation_scheme = requested_scheme
         else:
             self.augmentation_scheme = requested_scheme
 
@@ -317,7 +319,7 @@ class HLS4MLDataModule(LightningDataModule):
         )
 
     # ------------------------------------------------------------------
-    # Pipeline B: symm_loss / another_method
+    # Pipeline B: symm_loss / equivariance (no augmentation)
     # ------------------------------------------------------------------
     def _pipeline_baseline(
         self, raw_data_dir, processed_data_dir, nconstituents, features
@@ -331,6 +333,10 @@ class HLS4MLDataModule(LightningDataModule):
         x_train_norm = self.apply_physics_norm(x_train_sorted, self.feature_names, norm_params)
         x_val_norm   = self.apply_physics_norm(x_val_sorted,  self.feature_names, norm_params)
         self.norm_params = norm_params
+
+        if self.augmentation_scheme == "permute":
+            x_train_norm = permute_constituents(x_train_norm, self._rng)
+            x_val_norm   = permute_constituents(x_val_norm,   self._rng)
 
         log.info(f"[{self.method}] train: {x_train_norm.shape}, val: {x_val_norm.shape}")
         self._save_processed_arrays(

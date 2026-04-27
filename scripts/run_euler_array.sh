@@ -2,8 +2,8 @@
 #SBATCH --job-name=model-sweep
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=200G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=20G
 #SBATCH --time=60:00:00
 #SBATCH --array=0-8
 #SBATCH --output=logs/slurm/null
@@ -17,10 +17,12 @@
 #   sbatch scripts/run_euler_array.sh transformer augmentation
 #   sbatch scripts/run_euler_array.sh deepsets symm_loss
 #   sbatch scripts/run_euler_array.sh mlp symm_loss
+#   sbatch scripts/run_euler_array.sh deepsets equivariance
 #
 # Task-id mapping:
-#   augmentation: task 0-3 -> nconst=8, task 4-7 -> nconst=16, task 8-11 -> nconst=32
-#   symm_loss:    task 0-2 -> nconst=8, task 3-5 -> nconst=16, task 6-8  -> nconst=32
+#   augmentation:  task 0-3  -> nconst=8, task 4-7  -> nconst=16, task 8-11 -> nconst=32
+#   symm_loss:     task 0-2  -> nconst=8, task 3-5  -> nconst=16, task 6-8  -> nconst=32
+#   equivariance:  task 0    -> nconst=8, task 1    -> nconst=16, task 2    -> nconst=32
 # ---------------------------------------------------------------
 
 set -euo pipefail
@@ -83,19 +85,27 @@ SYMM_LOSS_EXPERIMENTS=(
     symm_loss/hls4ml_symm_loss_nconst32_lorentz
 )
 
+EQUIVARIANCE_EXPERIMENTS=(
+    equivariance/hls4ml_nconst8_permutation
+    equivariance/hls4ml_nconst16_permutation
+    equivariance/hls4ml_nconst32_permutation
+)
+
 if [[ "$METHOD" == "augmentation" ]]; then
     EXPERIMENTS=("${AUGMENTATION_EXPERIMENTS[@]}")
 elif [[ "$METHOD" == "symm_loss" ]]; then
     EXPERIMENTS=("${SYMM_LOSS_EXPERIMENTS[@]}")
+elif [[ "$METHOD" == "equivariance" ]]; then
+    EXPERIMENTS=("${EQUIVARIANCE_EXPERIMENTS[@]}")
 else
-    echo "Unsupported method '$METHOD_RAW'. Use one of: augmentation, symm_loss"
+    echo "Unsupported method '$METHOD_RAW'. Use one of: augmentation, symm_loss, equivariance"
     exit 1
 fi
 
 # If the job array is larger than the chosen method's experiment set, skip extras.
 if (( SLURM_ARRAY_TASK_ID >= ${#EXPERIMENTS[@]} )); then
     echo "Task ${SLURM_ARRAY_TASK_ID} has no experiment for method '${METHOD}'. Skipping."
-    echo "Hint: nconst=32 is task 8-11 (augmentation) or 6-8 (symm_loss)."
+    echo "Hint: augmentation has 12 tasks (0-11), symm_loss has 9 (0-8), equivariance has 3 (0-2)."
     exit 0
 fi
 

@@ -34,10 +34,10 @@ class DeepSetsInvariant(LightningModule):
     Supported methods:
         - augmentation   : data pre-augmented on disk; standard CE loss
         - symm_loss      : unaugmented data + symmetry regularisation loss
-        - another_method : placeholder, uses standard CE loss
+        - equivariance : placeholder, uses standard CE loss
     """
 
-    SUPPORTED_METHODS = {"augmentation", "symm_loss", "another_method"}
+    SUPPORTED_METHODS = {"augmentation", "symm_loss", "equivariance"}
 
     def __init__(
         self,
@@ -183,7 +183,7 @@ class DeepSetsInvariant(LightningModule):
             )
 
         else:
-            # augmentation / another_method — plain cross-entropy
+            # augmentation / equivariance — plain cross-entropy
             loss = self.criterion(logits, y)
 
         preds = torch.argmax(logits, dim=1)
