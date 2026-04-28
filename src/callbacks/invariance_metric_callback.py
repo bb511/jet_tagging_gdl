@@ -25,6 +25,7 @@ from src.utils.augmentation import (
     apply_so3_single_rotation,
     apply_boost_preserve_phi,
     create_lorentz_boosts,
+    permute_constituents,
 )
 
 log = logging.getLogger(__name__)
@@ -293,6 +294,18 @@ class InvarianceMetricCallback(L.Callback):
         results["invariance/lorentz_orbit_var"] = self._measure_orbit_variance(
             pl_module, dm, x_raw, _lorentz_transform
         )
+
+        # ---------------- Permutation (equivariance method only)
+        if getattr(dm, "method", None) == "equivariance":
+            x_aug_perm = permute_constituents(x_raw, self.rng)
+            metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_perm)
+            for k, v in metrics.items():
+                results[f"invariance/permutation_{k}"] = v
+
+            results["invariance/permutation_orbit_var"] = self._measure_orbit_variance(
+                pl_module, dm, x_raw,
+                lambda x: permute_constituents(x, self.rng),
+            )
 
         # ---------------- Logging
         for name, value in results.items():

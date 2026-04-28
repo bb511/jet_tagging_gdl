@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=20G
 #SBATCH --time=60:00:00
-#SBATCH --array=0-8
+#SBATCH --array=0-2
 #SBATCH --output=logs/slurm/null
 #SBATCH --error=logs/slurm/null
 
@@ -14,15 +14,19 @@
 #
 # Usage:
 #   sbatch scripts/run_euler_array.sh deepsets augmentation
+#   sbatch scripts/run_euler_array.sh irc_deepsets augmentation
 #   sbatch scripts/run_euler_array.sh transformer augmentation
 #   sbatch scripts/run_euler_array.sh deepsets symm_loss
+#   sbatch scripts/run_euler_array.sh irc_deepsets symm_loss
 #   sbatch scripts/run_euler_array.sh mlp symm_loss
-#   sbatch scripts/run_euler_array.sh deepsets equivariance
+#   sbatch scripts/run_euler_array.sh deepsets equivariance       # permutation test
+#   sbatch scripts/run_euler_array.sh irc_deepsets equivariance   # no-augmentation baseline for invariant models
 #
 # Task-id mapping:
-#   augmentation:  task 0-3  -> nconst=8, task 4-7  -> nconst=16, task 8-11 -> nconst=32
-#   symm_loss:     task 0-2  -> nconst=8, task 3-5  -> nconst=16, task 6-8  -> nconst=32
-#   equivariance:  task 0    -> nconst=8, task 1    -> nconst=16, task 2    -> nconst=32
+#   augmentation:        task 0-3  -> nconst=8, task 4-7  -> nconst=16, task 8-11 -> nconst=32
+#   symm_loss:           task 0-2  -> nconst=8, task 3-5  -> nconst=16, task 6-8  -> nconst=32
+#   equivariance (deepsets):       task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
+#   equivariance (invariant models): task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
 # ---------------------------------------------------------------
 
 set -euo pipefail
@@ -44,8 +48,8 @@ resolve_model_flag() {
         return
     fi
 
-    # For models with per-nconst configs (mlp, etc.), extract nconst from experiment name
-    if [[ "$model" == "mlp" ]]; then
+    # For models with per-nconst configs (mlp, irc_deepsets, etc.), extract nconst from experiment name
+    if [[ "$model" == "mlp" || "$model" == "irc_deepsets" ]]; then
         local nconst
         nconst=$(echo "$experiment" | grep -oP 'nconst\K[0-9]+')
         if [[ -n "$nconst" ]]; then
@@ -59,36 +63,44 @@ resolve_model_flag() {
 
 # --- Experiment sets ---
 AUGMENTATION_EXPERIMENTS=(
-    augmentation/hls4ml_nconst8_aug_none
-    augmentation/hls4ml_nconst8_aug_so2
-    augmentation/hls4ml_nconst8_aug_so3
-    augmentation/hls4ml_nconst8_aug_lorentz
-    augmentation/hls4ml_nconst16_aug_none
-    augmentation/hls4ml_nconst16_aug_so2
-    augmentation/hls4ml_nconst16_aug_so3
-    augmentation/hls4ml_nconst16_aug_lorentz
-    augmentation/hls4ml_nconst32_aug_none
-    augmentation/hls4ml_nconst32_aug_so2
-    augmentation/hls4ml_nconst32_aug_so3
-    augmentation/hls4ml_nconst32_aug_lorentz
+    # augmentation/hls4ml_nconst8_aug_none
+    # augmentation/hls4ml_nconst8_aug_so2
+    # augmentation/hls4ml_nconst8_aug_so3
+    # augmentation/hls4ml_nconst8_aug_lorentz
+    # augmentation/hls4ml_nconst16_aug_none
+    # augmentation/hls4ml_nconst16_aug_so2
+    # augmentation/hls4ml_nconst16_aug_so3
+    # augmentation/hls4ml_nconst16_aug_lorentz
+    # augmentation/hls4ml_nconst32_aug_none
+    # augmentation/hls4ml_nconst32_aug_so2
+    # augmentation/hls4ml_nconst32_aug_so3
+    # augmentation/hls4ml_nconst32_aug_lorentz
 )
 
-SYMM_LOSS_EXPERIMENTS=(
-    symm_loss/hls4ml_symm_loss_nconst8_so2
-    symm_loss/hls4ml_symm_loss_nconst8_so3
-    symm_loss/hls4ml_symm_loss_nconst8_lorentz
-    symm_loss/hls4ml_symm_loss_nconst16_so2
-    symm_loss/hls4ml_symm_loss_nconst16_so3
-    symm_loss/hls4ml_symm_loss_nconst16_lorentz
-    symm_loss/hls4ml_symm_loss_nconst32_so2
-    symm_loss/hls4ml_symm_loss_nconst32_so3
-    symm_loss/hls4ml_symm_loss_nconst32_lorentz
-)
+# SYMM_LOSS_EXPERIMENTS=(
+#     symm_loss/hls4ml_symm_loss_nconst8_so2
+#     symm_loss/hls4ml_symm_loss_nconst8_so3
+#     symm_loss/hls4ml_symm_loss_nconst8_lorentz
+#     symm_loss/hls4ml_symm_loss_nconst16_so2
+#     symm_loss/hls4ml_symm_loss_nconst16_so3
+#     symm_loss/hls4ml_symm_loss_nconst16_lorentz
+#     symm_loss/hls4ml_symm_loss_nconst32_so2
+#     symm_loss/hls4ml_symm_loss_nconst32_so3
+#     symm_loss/hls4ml_symm_loss_nconst32_lorentz
+# )
 
-EQUIVARIANCE_EXPERIMENTS=(
-    equivariance/hls4ml_nconst8_permutation
-    equivariance/hls4ml_nconst16_permutation
-    equivariance/hls4ml_nconst32_permutation
+# EQUIVARIANCE_EXPERIMENTS=(
+#     equivariance/hls4ml_nconst8_permutation
+#     equivariance/hls4ml_nconst16_permutation
+#     equivariance/hls4ml_nconst32_permutation
+# )
+
+# Baseline for inherently invariant/equivariant models: no augmentation, no symm_loss.
+# Model is always provided via CLI (resolve_model_flag), not hardcoded in the experiment YAML.
+EQUIVARIANCE_NONE_EXPERIMENTS=(
+    equivariance/hls4ml_nconst8_none
+    equivariance/hls4ml_nconst16_none
+    equivariance/hls4ml_nconst32_none
 )
 
 if [[ "$METHOD" == "augmentation" ]]; then
@@ -96,7 +108,11 @@ if [[ "$METHOD" == "augmentation" ]]; then
 elif [[ "$METHOD" == "symm_loss" ]]; then
     EXPERIMENTS=("${SYMM_LOSS_EXPERIMENTS[@]}")
 elif [[ "$METHOD" == "equivariance" ]]; then
-    EXPERIMENTS=("${EQUIVARIANCE_EXPERIMENTS[@]}")
+    if [[ "$MODEL" == "deepsets" ]]; then
+        EXPERIMENTS=("${EQUIVARIANCE_EXPERIMENTS[@]}")
+    else
+        EXPERIMENTS=("${EQUIVARIANCE_NONE_EXPERIMENTS[@]}")
+    fi
 else
     echo "Unsupported method '$METHOD_RAW'. Use one of: augmentation, symm_loss, equivariance"
     exit 1

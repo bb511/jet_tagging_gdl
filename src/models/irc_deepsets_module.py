@@ -39,7 +39,7 @@ class DeepSetsInvariantIRC(LightningModule):
     Supported methods: augmentation, symm_loss, another_method  (same as DeepSetsInvariant).
     """
 
-    SUPPORTED_METHODS = {"augmentation", "symm_loss", "another_method"}
+    SUPPORTED_METHODS = {"augmentation", "symm_loss", "equivariance"}
 
     # phi always receives 2 features: (eta, phi)
     PHI_INPUT_DIM = 2
@@ -68,6 +68,12 @@ class DeepSetsInvariantIRC(LightningModule):
             raise ValueError(
                 f"Unsupported method '{method}'. Expected one of: {self.SUPPORTED_METHODS}."
             )
+        if aggregation != "sum":
+            raise ValueError(
+                f"IRC-safe DeepSets requires aggregation='sum'; got '{aggregation}'. "
+                "mean/max break IRC safety even with pt-fraction weighting."
+            )
+
         self.method       = method
         self.group        = group
         self.activ_name   = activation
@@ -114,6 +120,14 @@ class DeepSetsInvariantIRC(LightningModule):
         self.feature_names = None
         self.norm_scales   = None
 
+        # Column indices resolved in setup() from feature_names.
+        # Defaults here are only used by torchinfo_summary in __init__.
+        self._pt_col  = 0
+        self._px_col  = None
+        self._py_col  = None
+        self._eta_col = 1
+        self._phi_col = 2
+
         stats = torchinfo_summary(self, input_data=self.example_input_array, verbose=0)
         mult_adds = float(stats.total_mult_adds)
         total_flops = 2.0 * mult_adds
@@ -127,19 +141,25 @@ class DeepSetsInvariantIRC(LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(torch.float32)
 
-        # pt fraction: (B, N)
-        pt = x[:, :, 0]
+        # pt (or reconstructed from px/py): (B, N)
+        if self._pt_col is not None:
+            pt = x[:, :, self._pt_col]
+        else:
+            pt = torch.sqrt(x[:, :, self._px_col] ** 2 + x[:, :, self._py_col] ** 2)
+
         pt_sum = pt.sum(dim=1, keepdim=True).clamp(min=1e-8)
         pt_frac = (pt / pt_sum).unsqueeze(-1)   # (B, N, 1)
 
-        eta_phi = x[:, :, 1:3]                  # (B, N, 2)
+        eta_phi = torch.stack(
+            [x[:, :, self._eta_col], x[:, :, self._phi_col]], dim=-1
+        )                                        # (B, N, 2)
         phi_out = self.phi(eta_phi)              # (B, N, phi_layers[-1])
 
         # IRC-safe weighting
         weighted = pt_frac * phi_out             # (B, N, phi_layers[-1])
 
         if self.mask_enabled:
-            mask = (pt.abs() > 0).float().unsqueeze(-1)
+            mask = (pt > 1e-6).float().unsqueeze(-1)
             weighted = weighted * mask
 
         if self.aggregation == "sum":
@@ -204,6 +224,35 @@ class DeepSetsInvariantIRC(LightningModule):
             self.norm_scales = (
                 {name: float(scale) for name, (_, scale) in raw_params.items()}
                 if raw_params else None
+            )
+            self._resolve_col_indices(self.feature_names)
+
+    def _resolve_col_indices(self, names: list) -> None:
+        def _find(candidates):
+            for n in candidates:
+                if n in names:
+                    return names.index(n)
+            return None
+
+        pt_col = _find(["ptrel", "j1_ptrel", "pt", "j1_pt"])
+        if pt_col is not None:
+            self._pt_col  = pt_col
+            self._px_col  = None
+            self._py_col  = None
+        else:
+            self._pt_col = None
+            self._px_col = _find(["px", "j1_px"])
+            self._py_col = _find(["py", "j1_py"])
+            if self._px_col is None or self._py_col is None:
+                raise RuntimeError(
+                    f"IRC DeepSets: no pt/ptrel or (px, py) columns found in {names}."
+                )
+
+        self._eta_col = _find(["etarel", "j1_etarel", "eta", "j1_eta"])
+        self._phi_col = _find(["phirel", "j1_phirel", "phi", "j1_phi"])
+        if self._eta_col is None or self._phi_col is None:
+            raise RuntimeError(
+                f"IRC DeepSets: no eta/etarel or phi/phirel columns found in {names}."
             )
 
     # ------------------------------------------------------------------

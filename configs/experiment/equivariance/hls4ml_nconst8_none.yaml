@@ -1,0 +1,21 @@
+# @package _global_
+
+# Baseline experiment for inherently invariant/equivariant models (no augmentation, no symm_loss).
+# Model is not set here — always provide it from the CLI:
+#   python src/train.py model=irc_deepsets_8 experiment=equivariance/hls4ml_nconst8_none
+
+defaults:
+  - override /data: hls4ml
+
+tags: ["hls4ml", "nconst-8", "equivariant-baseline"]
+seed: 12345
+
+data:
+  nconstituents: 8
+  method: equivariance
+  augmentation_scheme: none
+  batch_size: 256
+  n_folds: 1
+
+trainer:
+  max_epochs: 300
