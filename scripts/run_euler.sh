@@ -14,6 +14,8 @@
 # Usage:
 #   sbatch scripts/run_euler.sh transformer augmentation/hls4ml_nconst16_aug_so2
 #   sbatch scripts/run_euler.sh irc_deepsets_32 augmentation/hls4ml_nconst32_aug_so2
+#   sbatch scripts/run_euler.sh nano_pelican equivariance/hls4ml_nconst8_none
+#   sbatch scripts/run_euler.sh nano_pelican equivariance/hls4ml_nconst32_none
 #   sbatch scripts/run_euler.sh                          # uses defaults
 # ---------------------------------------------------------------
 

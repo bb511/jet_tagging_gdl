@@ -1,0 +1,39 @@
+_target_: src.models.nano_pelican_module.PELICANNanoModule
+
+# Architecture
+n_hidden: 32
+output_dim: 5
+nbr_feats: 5
+nconstituents: ${data.nconstituents}
+average_nobj: ${data.nconstituents}   # scales equivariant ops to expected jet size
+activation: leakyrelu
+config: "s"
+config_out: "s"
+activate_agg: false
+activate_lin: true
+activate_agg_out: true
+activate_lin_out: false
+factorize: false
+masked: true
+dropout: true
+drop_rate: 0.05
+drop_rate_out: 0.05
+batchnorm: null
+
+# Training
+method: ${data.method}
+symm_loss_weight: 0.1
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 1e-7
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: "max"
+  patience: 80
+  factor: 0.1
+  threshold: 1e-4

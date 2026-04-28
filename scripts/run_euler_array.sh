@@ -21,12 +21,14 @@
 #   sbatch scripts/run_euler_array.sh mlp symm_loss
 #   sbatch scripts/run_euler_array.sh deepsets equivariance       # permutation test
 #   sbatch scripts/run_euler_array.sh irc_deepsets equivariance   # no-augmentation baseline for invariant models
+#   sbatch scripts/run_euler_array.sh nano_pelican equivariance   # Lorentz+perm invariant baseline
 #
 # Task-id mapping:
 #   augmentation:        task 0-3  -> nconst=8, task 4-7  -> nconst=16, task 8-11 -> nconst=32
 #   symm_loss:           task 0-2  -> nconst=8, task 3-5  -> nconst=16, task 6-8  -> nconst=32
-#   equivariance (deepsets):       task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
+#   equivariance (deepsets):         task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
 #   equivariance (invariant models): task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
+#   (nano_pelican uses a single config; nconst is set by the experiment YAML)
 # ---------------------------------------------------------------
 
 set -euo pipefail
