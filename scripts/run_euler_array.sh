@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=20G
 #SBATCH --time=60:00:00
-#SBATCH --array=0-2
+#SBATCH --array=0-5
 #SBATCH --output=logs/slurm/null
 #SBATCH --error=logs/slurm/null
 
@@ -91,11 +91,11 @@ AUGMENTATION_EXPERIMENTS=(
 #     symm_loss/hls4ml_symm_loss_nconst32_lorentz
 # )
 
-# EQUIVARIANCE_EXPERIMENTS=(
-#     equivariance/hls4ml_nconst8_permutation
-#     equivariance/hls4ml_nconst16_permutation
-#     equivariance/hls4ml_nconst32_permutation
-# )
+EQUIVARIANCE_EXPERIMENTS=(
+    equivariance/hls4ml_nconst8_permutation
+    equivariance/hls4ml_nconst16_permutation
+    equivariance/hls4ml_nconst32_permutation
+)
 
 # Baseline for inherently invariant/equivariant models: no augmentation, no symm_loss.
 # Model is always provided via CLI (resolve_model_flag), not hardcoded in the experiment YAML.
@@ -112,8 +112,6 @@ elif [[ "$METHOD" == "symm_loss" ]]; then
 elif [[ "$METHOD" == "equivariance" ]]; then
     if [[ "$MODEL" == "deepsets" ]]; then
         EXPERIMENTS=("${EQUIVARIANCE_EXPERIMENTS[@]}")
-    else
-        EXPERIMENTS=("${EQUIVARIANCE_NONE_EXPERIMENTS[@]}")
     fi
 else
     echo "Unsupported method '$METHOD_RAW'. Use one of: augmentation, symm_loss, equivariance"
