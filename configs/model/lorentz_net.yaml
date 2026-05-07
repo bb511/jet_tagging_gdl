@@ -1,0 +1,29 @@
+_target_: src.models.lorentz_net_module.LorentzNetModule
+
+# Architecture
+n_scalar: 5                          # = nbr_feats; all features used as per-particle scalars
+n_hidden: 72                         # hidden dimension (original paper default)
+output_dim: 5                        # 5-class jet tagging
+n_layers: 6                          # number of LGEB layers (original paper default)
+c_weight: 1.0e-3                     # coordinate-update weight
+dropout: 0.0
+nconstituents: ${data.nconstituents}
+
+# Training
+method: ${data.method}
+group: so2
+symm_loss_weight: 0.1
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 1.0e-7
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: "max"
+  patience: 80
+  factor: 0.1
+  threshold: 1.0e-4
