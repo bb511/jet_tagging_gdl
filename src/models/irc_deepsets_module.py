@@ -53,7 +53,7 @@ class DeepSetsInvariantIRC(LightningModule):
         method: str,
         aggregation: str,
         dropout: float,
-        output_dim: int,
+        output_dim: int, 
         mask: bool,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None,

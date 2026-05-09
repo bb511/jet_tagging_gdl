@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=20G
 #SBATCH --time=120:00:00
-#SBATCH --array=0-8
+#SBATCH --array=0-0
 #SBATCH --output=logs/slurm/null
 #SBATCH --error=logs/slurm/null
 
@@ -67,32 +67,32 @@ resolve_model_flag() {
 }
 
 # --- Experiment sets ---
-# AUGMENTATION_EXPERIMENTS=(
-#     augmentation/hls4ml_nconst8_aug_none
-#     augmentation/hls4ml_nconst8_aug_so2
-#     augmentation/hls4ml_nconst8_aug_so3
-#     augmentation/hls4ml_nconst8_aug_lorentz
-#     augmentation/hls4ml_nconst16_aug_none
-#     augmentation/hls4ml_nconst16_aug_so2
-#     augmentation/hls4ml_nconst16_aug_so3
-#     augmentation/hls4ml_nconst16_aug_lorentz
-#     augmentation/hls4ml_nconst32_aug_none
-#     augmentation/hls4ml_nconst32_aug_so2
-#     augmentation/hls4ml_nconst32_aug_so3
-#     augmentation/hls4ml_nconst32_aug_lorentz
-# )
-
-SYMM_LOSS_EXPERIMENTS=(
-    symm_loss/hls4ml_symm_loss_nconst8_so2
-    symm_loss/hls4ml_symm_loss_nconst8_so3
-    symm_loss/hls4ml_symm_loss_nconst8_lorentz
-    symm_loss/hls4ml_symm_loss_nconst16_so2
-    symm_loss/hls4ml_symm_loss_nconst16_so3
-    symm_loss/hls4ml_symm_loss_nconst16_lorentz
-    symm_loss/hls4ml_symm_loss_nconst32_so2
-    symm_loss/hls4ml_symm_loss_nconst32_so3
-    symm_loss/hls4ml_symm_loss_nconst32_lorentz
+AUGMENTATION_EXPERIMENTS=(
+    # augmentation/hls4ml_nconst8_aug_none
+    # augmentation/hls4ml_nconst8_aug_so2
+    # augmentation/hls4ml_nconst8_aug_so3
+    # augmentation/hls4ml_nconst8_aug_lorentz
+    # augmentation/hls4ml_nconst16_aug_none
+    # augmentation/hls4ml_nconst16_aug_so2
+    # augmentation/hls4ml_nconst16_aug_so3
+    # augmentation/hls4ml_nconst16_aug_lorentz
+    # augmentation/hls4ml_nconst32_aug_none
+    # augmentation/hls4ml_nconst32_aug_so2
+    augmentation/hls4ml_nconst32_aug_so3
+    # augmentation/hls4ml_nconst32_aug_lorentz
 )
+
+# SYMM_LOSS_EXPERIMENTS=(
+#     symm_loss/hls4ml_symm_loss_nconst8_so2
+#     symm_loss/hls4ml_symm_loss_nconst8_so3
+#     symm_loss/hls4ml_symm_loss_nconst8_lorentz
+#     symm_loss/hls4ml_symm_loss_nconst16_so2
+#     symm_loss/hls4ml_symm_loss_nconst16_so3
+#     symm_loss/hls4ml_symm_loss_nconst16_lorentz
+#     symm_loss/hls4ml_symm_loss_nconst32_so2
+#     symm_loss/hls4ml_symm_loss_nconst32_so3
+#     symm_loss/hls4ml_symm_loss_nconst32_lorentz
+# )
 
 # EQUIVARIANCE_EXPERIMENTS=(
 #     equivariance/hls4ml_nconst8_permutation

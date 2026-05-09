@@ -70,12 +70,11 @@ def get_norm_scale(norm_scales: Optional[dict], name: str) -> float:
 # ── Rotation matrix generators ──────────────────────────────────────
 
 
-def create_so2_rot_matrices(nbr_rot: int) -> np.ndarray:
-    """Create *nbr_rot* evenly-spaced SO(2) rotation matrices (3×3)."""
+def create_so2_rot_matrices(nbr_rot: int, rng: np.random.Generator) -> np.ndarray:
+    """Create *nbr_rot* random SO(2) rotation matrices (3×3)."""
     if nbr_rot <= 0:
         return np.empty((0, 3, 3), dtype=np.float32)
-
-    thetas = np.linspace(0.0, 2.0 * np.pi, nbr_rot, endpoint=False)
+    thetas = rng.uniform(0.0, 2.0 * np.pi, nbr_rot)
     rot_mats = np.zeros((nbr_rot, 3, 3), dtype=np.float32)
     rot_mats[:, 0, 0] = np.cos(thetas)
     rot_mats[:, 0, 1] = -np.sin(thetas)
@@ -596,7 +595,7 @@ def apply_augmentation(
         return x_train, y_train
 
     if scheme == "so2":
-        rot_mats = create_so2_rot_matrices(rotation_nbr_rot)
+        rot_mats = create_so2_rot_matrices(rotation_nbr_rot, rng)
         return augment_with_rotations(
             x_train, y_train, rot_mats, "so2",
             rotation_shuffle, rng, feature_names,

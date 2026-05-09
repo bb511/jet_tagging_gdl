@@ -6,7 +6,6 @@ from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 from torchinfo import summary as torchinfo_summary
-from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 from torch.nn.functional import cross_entropy
 
 
@@ -198,7 +197,7 @@ class LorentzNetModule(LightningModule):
     equivariance methods, matching the interface of the other modules.
     """
 
-    SUPPORTED_METHODS = {"augmentation", "symm_loss", "equivariance"}
+    SUPPORTED_METHODS = {"equivariance"}
 
     def __init__(
         self,
@@ -236,7 +235,7 @@ class LorentzNetModule(LightningModule):
             dropout=dropout,
         )
 
-        self.criterion = combine_with_symmetry_loss if method == "symm_loss" else nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss()
 
         self.train_acc    = Accuracy(task="multiclass", num_classes=output_dim)
         self.val_acc      = Accuracy(task="multiclass", num_classes=output_dim)
@@ -332,25 +331,7 @@ class LorentzNetModule(LightningModule):
             y = torch.argmax(y, dim=1)
 
         logits = self.forward(x)
-
-        if self.method == "symm_loss":
-            if self.feature_names is None:
-                raise RuntimeError(
-                    "feature_names is None — symm_loss requires feature_names. "
-                    "Ensure setup() has been called."
-                )
-            x_sym, _ = build_symmetric_batch(
-                x, group=self.group,
-                feature_names=self.feature_names,
-                norm_scales=self.norm_scales,
-            )
-            logits_sym = self.forward(x_sym)
-            cls_loss   = cross_entropy(logits, y)
-            loss, _    = self.criterion(
-                cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
-            )
-        else:
-            loss = self.criterion(logits, y)
+        loss = self.criterion(logits, y)
 
         return loss, torch.argmax(logits, dim=1), y
 
