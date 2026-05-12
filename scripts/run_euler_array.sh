@@ -78,21 +78,21 @@ AUGMENTATION_EXPERIMENTS=(
     # augmentation/hls4ml_nconst16_aug_lorentz
     # augmentation/hls4ml_nconst32_aug_none
     # augmentation/hls4ml_nconst32_aug_so2
-    augmentation/hls4ml_nconst32_aug_so3
-    # augmentation/hls4ml_nconst32_aug_lorentz
+    # augmentation/hls4ml_nconst32_aug_so3
+    augmentation/hls4ml_nconst32_aug_lorentz
 )
 
-# SYMM_LOSS_EXPERIMENTS=(
-#     symm_loss/hls4ml_symm_loss_nconst8_so2
-#     symm_loss/hls4ml_symm_loss_nconst8_so3
-#     symm_loss/hls4ml_symm_loss_nconst8_lorentz
-#     symm_loss/hls4ml_symm_loss_nconst16_so2
-#     symm_loss/hls4ml_symm_loss_nconst16_so3
-#     symm_loss/hls4ml_symm_loss_nconst16_lorentz
-#     symm_loss/hls4ml_symm_loss_nconst32_so2
-#     symm_loss/hls4ml_symm_loss_nconst32_so3
-#     symm_loss/hls4ml_symm_loss_nconst32_lorentz
-# )
+SYMM_LOSS_EXPERIMENTS=(
+    # symm_loss/hls4ml_symm_loss_nconst8_so2
+    # symm_loss/hls4ml_symm_loss_nconst8_so3
+    # symm_loss/hls4ml_symm_loss_nconst8_lorentz
+    # symm_loss/hls4ml_symm_loss_nconst16_so2
+    # symm_loss/hls4ml_symm_loss_nconst16_so3
+    # symm_loss/hls4ml_symm_loss_nconst16_lorentz
+    # symm_loss/hls4ml_symm_loss_nconst32_so2
+    # symm_loss/hls4ml_symm_loss_nconst32_so3
+    # symm_loss/hls4ml_symm_loss_nconst32_lorentz
+)
 
 # EQUIVARIANCE_EXPERIMENTS=(
 #     equivariance/hls4ml_nconst8_permutation
@@ -102,11 +102,11 @@ AUGMENTATION_EXPERIMENTS=(
 
 # Baseline for inherently invariant/equivariant models: no augmentation, no symm_loss.
 # Model is always provided via CLI (resolve_model_flag), not hardcoded in the experiment YAML.
-EQUIVARIANCE_NONE_EXPERIMENTS=(
-    equivariance/hls4ml_nconst8_none
-    equivariance/hls4ml_nconst16_none
-    equivariance/hls4ml_nconst32_none
-)
+# EQUIVARIANCE_NONE_EXPERIMENTS=(
+#     equivariance/hls4ml_nconst8_none
+#     equivariance/hls4ml_nconst16_none
+#     equivariance/hls4ml_nconst32_none
+# )
 
 if [[ "$METHOD" == "augmentation" ]]; then
     EXPERIMENTS=("${AUGMENTATION_EXPERIMENTS[@]}")
@@ -166,9 +166,24 @@ echo "Experiment:   $EXPERIMENT"
 echo "Nconst:       $NCONST"
 echo "============================================"
 
-# For transformer, override data.nconstituents if NCONST is set
+MANIFEST_PATH="${HYDRA_RUN_DIR}/checkpoint_manifest.json"
+
+# --- Phase 1: Train (fit-only, emits manifest) ---
+echo "--- Phase 1: Training ---"
 if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" "${EXTRA_ARGS[@]}"
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}" 
 else
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" "${EXTRA_ARGS[@]}"
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}" 
 fi
+
+# --- Phase 2: Eval (manifest-driven, test-only) ---
+# echo "--- Phase 2: Evaluation ---"
+srun python src/eval.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu hydra.run.dir="$HYDRA_RUN_DIR" checkpoint_manifest_path="$MANIFEST_PATH" "${EXTRA_ARGS[@]}" 
+
+# --- Phase 3: Aggregate MLflow results ---
+# echo "--- Phase 3: Aggregating results ---"
+# python src/utils/build_results_table_from_mlflow.py \
+#     --mlflow-dir logs/mlflow/mlruns \
+#     --output "results/summary_results_table.csv" \
+#     --min-folds 6 \
+#     --method "$METHOD"

@@ -52,6 +52,8 @@ def log_hyperparameters(object_dict: Dict[str, Any]) -> None:
     hparams["ckpt_path"] = cfg.get("ckpt_path")
     hparams["seed"] = cfg.get("seed")
     hparams["fold_idx"] = object_dict.get("fold_idx")
+    # run_stage distinguishes train-only vs eval-only passes in separated mode
+    hparams["run_stage"] = object_dict.get("run_stage", cfg.get("run_stage"))
 
     # Log runtime-computed FLOPs (not in Hydra config, stored in model.hparams)
     if hasattr(model, "hparams"):

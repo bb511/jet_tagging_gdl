@@ -16,8 +16,9 @@ data:
   augmentation_scheme: lorentz
   lorentz_nbr_rot: 8
   lorentz_eta_max: 2.0
+  online_augmentation: true
   batch_size: 256
   n_folds: 1
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200

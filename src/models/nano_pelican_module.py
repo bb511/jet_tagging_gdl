@@ -14,7 +14,7 @@ from torch.nn.functional import cross_entropy
 
 from ..utils.lorentz_metric import dot4
 from ..utils.perm_equiv_models import Net2to2, Eq2to0, MessageNet
-
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 # ---------------------------------------------------------------------------
 # PELICANNano — bare nn.Module (Lorentz + permutation invariant)
@@ -359,6 +359,9 @@ class PELICANNanoModule(LightningModule):
             f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
             flush=True,
         )
+
+        garbage_collection_cuda()
+
 
     # ------------------------------------------------------------------
     # Validation

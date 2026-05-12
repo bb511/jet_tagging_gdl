@@ -14,8 +14,10 @@ data:
   nconstituents: 8
   method: augmentation
   augmentation_scheme: none
+  online_augmentation: true
   batch_size: 256
   n_folds: 1
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200
+

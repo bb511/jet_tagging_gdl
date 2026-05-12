@@ -205,24 +205,28 @@ class InvarianceMetricCallback(L.Callback):
 
         pl_module.eval()
         dm = trainer.datamodule
-        x_raw = self._x_val_sorted
+        x_raw = self._x_val_sorted  # numpy (N, C, F_raw)
+
+        # augmentation.py is now torch-only; this helper converts numpy→torch,
+        # applies fn, and converts the result back to numpy for _to_model_input.
+        def aug(fn, x_np, *args):
+            x_t = torch.from_numpy(x_np).float()
+            return fn(x_t, *args).numpy()
 
         results = {}
 
         # ---------------- SO(2)
         theta = self.rng.uniform(0.3, 2 * np.pi - 0.3)
-        cos_t, sin_t = np.cos(theta), np.sin(theta)
+        cos_t, sin_t = float(np.cos(theta)), float(np.sin(theta))
 
-        rot_so2 = np.array(
-            [[cos_t, -sin_t, 0],
-             [sin_t,  cos_t, 0],
-             [0,      0,     1]],
-            dtype=np.float32,
+        rot_so2 = torch.tensor(
+            [[cos_t, -sin_t, 0.0],
+             [sin_t,  cos_t, 0.0],
+             [0.0,    0.0,   1.0]],
+            dtype=torch.float32,
         )
 
-        x_aug_so2 = apply_so2_single_rotation(
-            x_raw, rot_so2, self._feature_names
-        )
+        x_aug_so2 = aug(apply_so2_single_rotation, x_raw, rot_so2, self._feature_names)
 
         metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_so2)
         for k, v in metrics.items():
@@ -230,9 +234,9 @@ class InvarianceMetricCallback(L.Callback):
 
         def _so2_transform(x):
             t = self.rng.uniform(0.3, 2 * np.pi - 0.3)
-            c, s = np.cos(t).astype(np.float32), np.sin(t).astype(np.float32)
-            R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
-            return apply_so2_single_rotation(x, R, self._feature_names)
+            c, s = float(np.cos(t)), float(np.sin(t))
+            R = torch.tensor([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float32)
+            return aug(apply_so2_single_rotation, x, R, self._feature_names)
 
         results["invariance/so2_orbit_var"] = self._measure_orbit_variance(
             pl_module, dm, x_raw, _so2_transform
@@ -249,11 +253,9 @@ class InvarianceMetricCallback(L.Callback):
         ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
         rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
 
-        rot_so3 = (rz @ ry @ rx).astype(np.float32)
+        rot_so3 = torch.from_numpy((rz @ ry @ rx).astype(np.float32))
 
-        x_aug_so3 = apply_so3_single_rotation(
-            x_raw, rot_so3, self._feature_names
-        )
+        x_aug_so3 = aug(apply_so3_single_rotation, x_raw, rot_so3, self._feature_names)
 
         metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_so3)
         for k, v in metrics.items():
@@ -267,21 +269,17 @@ class InvarianceMetricCallback(L.Callback):
             _rz = np.array([[_cz, -_sz, 0], [_sz, _cz, 0], [0, 0, 1]])
             _ry = np.array([[_cy, 0, _sy], [0, 1, 0], [-_sy, 0, _cy]])
             _rx = np.array([[1, 0, 0], [0, _cx, -_sx], [0, _sx, _cx]])
-            R = (_rz @ _ry @ _rx).astype(np.float32)
-            return apply_so3_single_rotation(x, R, self._feature_names)
+            R = torch.from_numpy((_rz @ _ry @ _rx).astype(np.float32))
+            return aug(apply_so3_single_rotation, x, R, self._feature_names)
 
         results["invariance/so3_orbit_var"] = self._measure_orbit_variance(
             pl_module, dm, x_raw, _so3_transform
         )
 
         # ---------------- Lorentz
-        boost = create_lorentz_boosts(
-            1, self.lorentz_eta_max, self.rng
-        )
+        boost = create_lorentz_boosts(1, self.lorentz_eta_max, self.rng)
 
-        x_aug_lor = apply_boost_preserve_phi(
-            x_raw, boost[0], self._feature_names
-        )
+        x_aug_lor = aug(apply_boost_preserve_phi, x_raw, boost[0], self._feature_names)
 
         metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_lor)
         for k, v in metrics.items():
@@ -289,7 +287,7 @@ class InvarianceMetricCallback(L.Callback):
 
         def _lorentz_transform(x):
             b = create_lorentz_boosts(1, self.lorentz_eta_max, self.rng)
-            return apply_boost_preserve_phi(x, b[0], self._feature_names)
+            return aug(apply_boost_preserve_phi, x, b[0], self._feature_names)
 
         results["invariance/lorentz_orbit_var"] = self._measure_orbit_variance(
             pl_module, dm, x_raw, _lorentz_transform
@@ -297,14 +295,14 @@ class InvarianceMetricCallback(L.Callback):
 
         # ---------------- Permutation (equivariance method only)
         if getattr(dm, "method", None) == "equivariance":
-            x_aug_perm = permute_constituents(x_raw, self.rng)
+            x_aug_perm = aug(permute_constituents, x_raw, self.rng)
             metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_perm)
             for k, v in metrics.items():
                 results[f"invariance/permutation_{k}"] = v
 
             results["invariance/permutation_orbit_var"] = self._measure_orbit_variance(
                 pl_module, dm, x_raw,
-                lambda x: permute_constituents(x, self.rng),
+                lambda x: aug(permute_constituents, x, self.rng),
             )
 
         # ---------------- Logging

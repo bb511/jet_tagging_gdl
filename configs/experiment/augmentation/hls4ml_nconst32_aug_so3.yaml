@@ -14,9 +14,10 @@ data:
   nconstituents: 32
   method: augmentation
   augmentation_scheme: so3
+  online_augmentation: true
   rotation_nbr_rot: 8
   batch_size: 256
   n_folds: 1
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200

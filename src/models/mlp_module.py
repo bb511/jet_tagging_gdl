@@ -11,6 +11,7 @@ import torch.nn as nn
 
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 from src.models.mlp import MLP
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 
 class MLPClassifier(LightningModule):
@@ -205,6 +206,8 @@ class MLPClassifier(LightningModule):
             f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
             flush=True,
         )
+
+        garbage_collection_cuda()
 
     # ------------------------------------------------------------------
     # Validation

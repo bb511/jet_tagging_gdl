@@ -34,6 +34,13 @@ except Exception:
 from src.utils.utils import plot_features_overlap_from_datasets
 from src.utils.augmentation import apply_augmentation, permute_constituents
 
+import matplotlib.pyplot as plt
+from pathlib import Path as _Path
+from src.utils.symmetry_loss import (
+    apply_random_so2, apply_random_so3, apply_random_lorentz,
+)
+
+
 log = logging.getLogger(__name__)
 
 CENTERED_FEATURES = {
@@ -87,6 +94,7 @@ class HLS4MLDataModule(LightningDataModule):
         rotation_shuffle: bool = True,
         lorentz_nbr_rot: int = 8,
         lorentz_eta_max: float = 2.0,
+        online_augmentation: bool = False,
         n_folds: int = 1,
         kfold_seed: int = 42,
     ) -> None:
@@ -97,6 +105,8 @@ class HLS4MLDataModule(LightningDataModule):
         self.pin_memory    = pin_memory
         self.nconstituents = nconstituents
         self.features      = features if features is not None else ["px", "py", "pz", "etarel", "phirel"]
+
+        self.online_augmentation = online_augmentation
 
         # --- Validate method ---
         self.method = method.lower()
@@ -155,6 +165,14 @@ class HLS4MLDataModule(LightningDataModule):
             self.augmentation_scheme,
             nconst_tag,
         )
+
+        if self.online_augmentation:
+            # No offline rotation copies; store normalised-only arrays under
+            # augmentation/none/ to avoid colliding with offline processed files.
+            self.processed_data_dir = os.path.join(
+                self.data_path, "processed", self.method, "none", nconst_tag
+            )
+
         # Backward-compatibility layout used in older runs:
         #   <data_dir>/processed/<augmentation_scheme>/<nconst_tag>/
         self.legacy_processed_data_dir = os.path.join(
@@ -281,10 +299,17 @@ class HLS4MLDataModule(LightningDataModule):
 
         # Step 3: Method-specific pipeline
         if self.method == "augmentation":
-            self._pipeline_augmentation(
-                self.raw_data_dir, self.processed_data_dir,
-                self.nconstituents, self.features,
-            )
+            if self.online_augmentation:
+                self._pipeline_online_augmentation(
+                    self.raw_data_dir, self.processed_data_dir,
+                    self.nconstituents, self.features
+                )
+            else:
+                self._pipeline_augmentation(
+                    self.raw_data_dir, self.processed_data_dir,
+                    self.nconstituents, self.features,
+                )
+        
         elif self.method in _BASELINE_METHODS:
             self._pipeline_baseline(
                 self.raw_data_dir, self.processed_data_dir,
@@ -315,6 +340,21 @@ class HLS4MLDataModule(LightningDataModule):
         log.info(f"[augmentation] train: {x_train_aug.shape}, val: {x_val_norm.shape}")
         self._save_processed_arrays(
             processed_data_dir, x_train_aug, y_train_aug,
+            x_val_norm, self.y_val_raw, norm_params,
+        )
+
+    def _pipeline_online_augmentation(self, raw_data_dir, processed_data_dir, nconstituents, features) -> None:
+        log.info("[augmentation] Starting online augmentation pipeline.")
+        # For online augmentation, we still need to prepare and save the baseline processed arrays
+        x_train_sorted = self._restrict_and_sort_by_pt(self.x_train_raw, self.pt_idx, nconstituents)
+        x_val_sorted   = self._restrict_and_sort_by_pt(self.x_val_raw,   self.pt_idx, nconstituents)
+        norm_params  = self.fit_physics_norm(x_train_sorted, self.feature_names)
+        x_train_norm = self.apply_physics_norm(x_train_sorted, self.feature_names, norm_params)
+        x_val_norm   = self.apply_physics_norm(x_val_sorted,  self.feature_names, norm_params)
+        self.norm_params = norm_params
+        log.info(f"[augmentation] Baseline train: {x_train_norm.shape}, val: {x_val_norm.shape}")
+        self._save_processed_arrays(
+            processed_data_dir, x_train_norm, self.y_train_raw,
             x_val_norm, self.y_val_raw, norm_params,
         )
 
@@ -479,6 +519,156 @@ class HLS4MLDataModule(LightningDataModule):
             else:
                 raise ValueError(f"Unknown normalisation kind '{kind}' for feature '{name}'.")
         return x_norm
+
+
+    # ------------------------------------------------------------------
+    # Online Augmentation Trial
+    # ------------------------------------------------------------------
+    def _make_online_aug_collate(self):
+        from src.utils.symmetry_loss import (
+            apply_random_so2, apply_random_so3, apply_random_lorentz
+        )
+        scheme = self.augmentation_scheme
+        all_names = self.feature_names or []
+        eta_max   = self.lorentz_eta_max
+
+        # Canonical stored name for each selected feature (matches tensor column order)
+        active_names = []
+        for feat in self.features:
+            if feat in all_names:
+                active_names.append(feat)
+            elif f"j1_{feat}" in all_names:
+                active_names.append(f"j1_{feat}")
+            else:
+                active_names.append(feat)
+
+        norm_scales = (
+            {n: s for n, (_, s) in self.norm_params.items()}
+            if self.norm_params is not None else None
+        )
+
+        def collate_fn(batch):
+            x = torch.stack([b[0] for b in batch])
+            y = torch.stack([b[1] for b in batch])
+            rng = np.random.default_rng() 
+            if scheme == "so2":
+                x, _ = apply_random_so2(x, feature_names=active_names,
+                                        generator=rng, norm_scales=norm_scales)
+            elif scheme == "so3":
+                x, _ = apply_random_so3(x, feature_names=active_names,
+                                        generator=rng, norm_scales=norm_scales,
+                                        apply_filter=True)
+            elif scheme == "lorentz":
+                x, _ = apply_random_lorentz(x, feature_names=active_names,
+                                            eta_max=eta_max, generator=rng,
+                                            norm_scales=norm_scales)
+            return x, y
+        return collate_fn
+
+    def _plot_online_aug_diagnostic(
+        self,
+        save_dir: str,
+        n_batches: int = 20,
+        class_idx: int = 0,
+        num_cols: int = 3,
+        bins: int = 60,
+    ) -> None:
+
+        # Load the FULL feature array from disk (all features, before selection)
+        # so we can also plot pt, eta, phi, etc. that aren't in self.features.
+        processed_dir = _Path(self.processed_data_dir)
+        x_full = np.load(processed_dir / "x_train.npy", allow_pickle=False)
+        y_full = np.load(processed_dir / "y_train.npy", allow_pickle=False)
+
+        npz            = np.load(processed_dir / "norm_params.npz", allow_pickle=False)
+        full_feat_names = list(npz["feature_names"])
+        norm_scales     = (
+            {n: s for n, (_, s) in self.norm_params.items()}
+            if self.norm_params is not None else None
+        )
+
+        # Sample a fixed number of jets for the diagnostic
+        n_samples = min(n_batches * self.batch_size, len(x_full))
+        rng_np    = np.random.default_rng()
+        idx       = rng_np.choice(len(x_full), n_samples, replace=False)
+        x_sample  = x_full[idx]
+        y_sample  = y_full[idx]
+
+        # Apply augmentation on the full feature set
+        x_tensor = torch.from_numpy(x_sample).float()
+        scheme   = self.augmentation_scheme
+        if scheme == "so2":
+            x_aug_t, _ = apply_random_so2(
+                x_tensor, feature_names=full_feat_names,
+                generator=rng_np, norm_scales=norm_scales,
+            )
+        elif scheme == "so3":
+            x_aug_t, _ = apply_random_so3(
+                x_tensor, feature_names=full_feat_names,
+                generator=rng_np, norm_scales=norm_scales, apply_filter=True,
+            )
+        elif scheme == "lorentz":
+            x_aug_t, _ = apply_random_lorentz(
+                x_tensor, feature_names=full_feat_names,
+                eta_max=self.lorentz_eta_max, generator=rng_np, norm_scales=norm_scales,
+            )
+        else:
+            log.warning(f"[online aug plot] scheme '{scheme}' not plottable; skipping.")
+            return
+
+        x_orig = x_sample
+        x_aug  = x_aug_t.numpy()
+
+        # Filter to one class
+        class_ids = np.argmax(y_sample, axis=1) if y_sample.ndim > 1 else y_sample.astype(int)
+        mask   = class_ids == class_idx
+        x_orig = x_orig[mask]
+        x_aug  = x_aug[mask]
+
+        print(
+            f"Plotting online aug overlap "
+            f"(class={class_idx}, aug={scheme}, samples={int(mask.sum())})..."
+        )
+
+        num_features = x_orig.shape[2]
+        feat_names   = full_feat_names[:num_features]
+        num_rows     = int(np.ceil(num_features / num_cols))
+        fig, axes    = plt.subplots(num_rows, num_cols, figsize=(6 * num_cols, 5 * num_rows))
+        axes         = np.atleast_1d(axes).flatten()
+
+        for f_idx in range(num_features):
+            ax = axes[f_idx]
+            ax.hist(
+                x_orig[:, :, f_idx].reshape(-1),
+                bins=bins, density=True, histtype="step",
+                linewidth=2.5, label="Original", color="black",
+            )
+            ax.hist(
+                x_aug[:, :, f_idx].reshape(-1),
+                bins=bins, density=True, histtype="step",
+                linewidth=2.5, label="Augmented", color="red",
+            )
+            ax.set_xlabel(feat_names[f_idx])
+            ax.set_ylabel("Probability Density")
+            ax.set_yscale("log")
+            ax.legend()
+
+        for i in range(num_features, len(axes)):
+            fig.delaxes(axes[i])
+
+        nconst_tag = f"nconst_{self.nconstituents}" if self.nconstituents else "full"
+        fig.suptitle(
+            f"Class: {class_idx} | Split: train | Aug: {scheme} (online)",
+            fontsize=16,
+        )
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+        out_dir  = _Path(save_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"overlap_{scheme}_online_{nconst_tag}_class_{class_idx}_train.png"
+        fig.savefig(out_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Saved histogram figure to: {out_path.resolve()}")
 
     def _save_processed_arrays(
         self, processed_data_dir, x_train, y_train, x_val, y_val, norm_params=None
@@ -664,32 +854,42 @@ class HLS4MLDataModule(LightningDataModule):
             and self.augmentation_scheme != "none"
             and self.feature_names is not None
         ):
-            try:
-                plot_features_overlap_from_datasets(
-                    datasets_dir=self.data_path,
-                    feature_names=self.feature_names,
-                    class_idx=0,
-                    augmentation_scheme=self.augmentation_scheme,
-                    method=self.method,
-                    nconstituents=self.nconstituents,
-                    split="train",
-                    save_dir=os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                        "logs", "plots",
-                    ),
-                )
-            except FileNotFoundError:
-                log.warning("Skipping overlap plot — baseline 'none' processed files not found.")
+            save_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "logs", "plots",
+            )
+            if self.online_augmentation:
+                self._plot_online_aug_diagnostic(save_dir=save_dir, n_batches=20)
+            else:
+                try:
+                    plot_features_overlap_from_datasets(
+                        datasets_dir=self.data_path,
+                        feature_names=self.feature_names,
+                        class_idx=0,
+                        augmentation_scheme=self.augmentation_scheme,
+                        method=self.method,
+                        nconstituents=self.nconstituents,
+                        split="train",
+                        save_dir=save_dir,
+                    )
+                except FileNotFoundError:
+                    log.warning("Skipping overlap plot — baseline 'none' processed files not found.")
             self._overlap_plot_done = True
 
     # ------------------------------------------------------------------
     # DataLoaders
     # ------------------------------------------------------------------
     def train_dataloader(self) -> DataLoader:
+        collate = (
+            self._make_online_aug_collate()
+            if self.online_augmentation and self.augmentation_scheme not in {"none", "permute"}
+            else None
+        )
         if self.method == "augmentation":
             return DataLoader(
                 dataset=self.data_train, batch_size=self.batch_size,
                 num_workers=self.num_workers, pin_memory=self.pin_memory, shuffle=True,
+                collate_fn=collate,
             )
         elif self.method in _BASELINE_METHODS:
             return DataLoader(

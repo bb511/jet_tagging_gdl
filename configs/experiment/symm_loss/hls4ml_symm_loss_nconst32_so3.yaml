@@ -20,4 +20,4 @@ model:
   group: so3
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200

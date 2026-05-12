@@ -1,3 +1,4 @@
+import time
 from typing import Any, Dict, Tuple
 
 import torch
@@ -6,8 +7,10 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 from torchinfo import summary as torchinfo_summary
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
+from src.utils.symmetry_loss import get_and_reset_timings
 from torch.nn.functional import cross_entropy
 import torch.nn as nn
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 
 def _get_act(name: str) -> nn.Module:
@@ -161,7 +164,9 @@ class DeepSetsInvariant(LightningModule):
         if y.ndim > 1 and y.shape[1] > 1:
             y = torch.argmax(y, dim=1)
 
+        t_fwd0 = time.perf_counter()
         logits = self.forward(x)
+        t_fwd1 = time.perf_counter()
 
         if self.method == "symm_loss":
             if self.feature_names is None:
@@ -169,22 +174,35 @@ class DeepSetsInvariant(LightningModule):
                     "feature_names is None — symm_loss requires feature_names for all groups. "
                     "Ensure setup() has been called so the datamodule populates it."
                 )
+            t_tr0 = time.perf_counter()
             x_sym, _ = build_symmetric_batch(
                 x,
                 group=self.group,
                 feature_names=self.feature_names,
                 norm_scales=self.norm_scales,
             )
+            t_tr1 = time.perf_counter()
 
+            t_fwd2 = time.perf_counter()
             logits_sym = self.forward(x_sym)
+            t_fwd3 = time.perf_counter()
+
             cls_loss   = cross_entropy(logits, y)
             loss, _    = self.criterion(
                 cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
             )
 
+            if hasattr(self, "_timing_steps"):
+                self._transform_time_acc += (t_tr1 - t_tr0) * 1000
+                self._forward_time_acc   += (t_fwd1 - t_fwd0 + t_fwd3 - t_fwd2) * 1000
+                self._timing_steps       += 1
+
         else:
             # augmentation / equivariance — plain cross-entropy
             loss = self.criterion(logits, y)
+            if hasattr(self, "_timing_steps"):
+                self._forward_time_acc += (t_fwd1 - t_fwd0) * 1000
+                self._timing_steps     += 1
 
         preds = torch.argmax(logits, dim=1)
         return loss, preds, y
@@ -218,6 +236,9 @@ class DeepSetsInvariant(LightningModule):
         self.val_loss.reset()
         self.val_acc.reset()
         self.val_acc_best.reset()
+        self._transform_time_acc: float = 0.0
+        self._forward_time_acc:   float = 0.0
+        self._timing_steps:       int   = 0
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -237,7 +258,38 @@ class DeepSetsInvariant(LightningModule):
             f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
             flush=True,
         )
+        if hasattr(self, "_timing_steps") and self._timing_steps > 0:
+            avg_transform_ms = self._transform_time_acc / self._timing_steps
+            avg_forward_ms   = self._forward_time_acc   / self._timing_steps
+            self.log("perf/transform_ms", avg_transform_ms, on_step=False, on_epoch=True)
+            self.log("perf/forward_ms",   avg_forward_ms,   on_step=False, on_epoch=True)
+            print(
+                f"[Epoch {self.current_epoch:>3d}] "
+                f"Timing | transform_ms: {avg_transform_ms:.1f}  forward_ms: {avg_forward_ms:.1f}",
+                flush=True,
+            )
+            self._transform_time_acc = 0.0
+            self._forward_time_acc   = 0.0
+            self._timing_steps       = 0
 
+        if self.method == "symm_loss":
+            t = get_and_reset_timings()
+            n = max(self._timing_steps, 1)  # steps already reset above; use epoch step count
+            # t values are cumulative over the epoch — report per-step averages
+            steps = max(self.trainer.num_training_batches, 1)
+            self.log("perf/to_cpu_ms",  t["to_cpu_ms"]  / steps, on_step=False, on_epoch=True)
+            self.log("perf/loop_ms",    t["loop_ms"]    / steps, on_step=False, on_epoch=True)
+            self.log("perf/to_gpu_ms",  t["to_gpu_ms"]  / steps, on_step=False, on_epoch=True)
+            print(
+                f"[Epoch {self.current_epoch:>3d}] "
+                f"Transform breakdown | to_cpu_ms: {t['to_cpu_ms']/steps:.2f}  "
+                f"loop_ms: {t['loop_ms']/steps:.2f}  "
+                f"to_gpu_ms: {t['to_gpu_ms']/steps:.2f}",
+                flush=True,
+            )
+
+        # Clear cuda memory after each epoch
+        garbage_collection_cuda()
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
@@ -292,3 +344,5 @@ class DeepSetsInvariant(LightningModule):
                 },
             }
         return {"optimizer": optimizer}
+    
+# Light

@@ -20,5 +20,5 @@ model:
   group: lorentz
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200
 

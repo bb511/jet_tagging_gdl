@@ -53,6 +53,8 @@ class FoldRecord:
     so3_flip: float
     lorentz_flip: float
     flops: float
+    # None means legacy (single combined run); "train" or "eval" in separated mode
+    run_stage: Optional[str] = None
 
     @property
     def selected_flip_value(self) -> float:
@@ -244,9 +246,14 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
         nconst = int(safe_float(nconst_raw))
         method = method_raw.strip().lower() if method_raw else "augmentation"
 
+        # --- Run stage (None for legacy runs without this param) ---
+        run_stage = read_param(run_dir, "run_stage")
+
         # --- Metrics ---
         test_acc = read_metric(run_dir, "test/acc")
-        if math.isnan(test_acc):
+        # Train-stage runs in separated mode have no test/acc — that is expected.
+        # Only skip if there is no test/acc AND this is NOT a pure train-stage run.
+        if math.isnan(test_acc) and run_stage != "train":
             skipped_no_acc += 1
             continue
 
@@ -286,6 +293,7 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
                 so3_flip=so3_flip,
                 lorentz_flip=lorentz_flip,
                 flops=flops,
+                run_stage=run_stage,
             )
         )
 
@@ -313,6 +321,64 @@ def keep_latest_per_fold(records: List[FoldRecord]) -> List[FoldRecord]:
         if prev is None or rec.end_time > prev.end_time:
             latest[key] = rec
     return list(latest.values())
+
+
+def join_train_eval_records(records: List[FoldRecord]) -> List[FoldRecord]:
+    """Merge separated-mode train and eval records into unified FoldRecords.
+
+    In separated mode training emits run_stage=train (invariance + FLOPs, no
+    test_acc) and eval emits run_stage=eval (test_acc, no invariance).  This
+    function joins them by (model_family, model_target, nconstituents,
+    augmentation_scheme, method, fold_idx) so downstream aggregation sees one
+    complete record per fold.  Legacy records (run_stage=None) pass through
+    unchanged.
+    """
+    train_records = [r for r in records if r.run_stage == "train"]
+    eval_records  = [r for r in records if r.run_stage == "eval"]
+    legacy        = [r for r in records if r.run_stage is None]
+
+    if not train_records or not eval_records:
+        # Nothing to join — return as-is (handles legacy-only or partial runs)
+        return records
+
+    FoldKey = Tuple[str, str, int, str, str, int]
+
+    def _key(r: FoldRecord) -> FoldKey:
+        return (r.model_family, r.model_target, r.nconstituents,
+                r.augmentation_scheme, r.method, r.fold_idx)
+
+    train_by_key: Dict[FoldKey, FoldRecord] = {_key(r): r for r in train_records}
+
+    merged: List[FoldRecord] = []
+    for eval_rec in eval_records:
+        k = _key(eval_rec)
+        train_rec = train_by_key.get(k)
+        if train_rec:
+            merged.append(FoldRecord(
+                model_family=eval_rec.model_family,
+                model_target=eval_rec.model_target,
+                nconstituents=eval_rec.nconstituents,
+                augmentation_scheme=eval_rec.augmentation_scheme,
+                method=eval_rec.method,
+                fold_idx=eval_rec.fold_idx,
+                run_id=eval_rec.run_id,
+                end_time=eval_rec.end_time,
+                test_acc=eval_rec.test_acc,
+                so2_flip=train_rec.so2_flip,
+                so3_flip=train_rec.so3_flip,
+                lorentz_flip=train_rec.lorentz_flip,
+                flops=train_rec.flops,
+                run_stage=None,  # merged; no longer stage-specific
+            ))
+        else:
+            print(f"[join] No matching train record for eval fold {k} — keeping eval-only.")
+            merged.append(eval_rec)
+
+    unmatched_train = [r for r in train_records if _key(r) not in {_key(e) for e in eval_records}]
+    if unmatched_train:
+        print(f"[join] {len(unmatched_train)} train record(s) had no matching eval fold — dropped.")
+
+    return legacy + merged
 
 
 def aggregate_rows(records: List[FoldRecord], min_folds: int) -> List[Dict]:
@@ -518,6 +584,9 @@ def main() -> None:
     parser.add_argument("--mlflow-dir",  type=Path, default=Path("logs/mlflow/mlruns"))
     parser.add_argument("--output",      type=Path, default=Path("results/summary_results_table.csv"))
     parser.add_argument("--min-folds",   type=int,  default=5)
+    parser.add_argument("--method",      type=str,  default=None,
+                        help="Only write results for this method (e.g. 'augmentation', "
+                             "'symm_loss', 'equivariance'). Writes all methods when omitted.")
     parser.add_argument("--debug",       action="store_true",
                         help="Print layout of first run and exit.")
     args = parser.parse_args()
@@ -527,8 +596,14 @@ def main() -> None:
         return
 
     all_records    = collect_fold_records(args.mlflow_dir)
-    latest_records = keep_latest_per_fold(all_records)
+    joined_records = join_train_eval_records(all_records)
+    latest_records = keep_latest_per_fold(joined_records)
     rows           = aggregate_rows(latest_records, min_folds=args.min_folds)
+
+    if args.method is not None:
+        method_filter = args.method.strip().lower()
+        rows = [r for r in rows if str(r.get("method", "")).lower() == method_filter]
+        print(f"[filter] Keeping only method='{method_filter}' — {len(rows)} rows remaining.")
 
     write_csv(rows, args.output)
     write_latex_table(rows, args.output.with_suffix(".tex"))

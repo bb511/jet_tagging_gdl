@@ -1,41 +1,42 @@
 """Augmentation utilities for jet classification data.
 
 Provides SO(2), SO(3) rotation and Lorentz-boost augmentation schemes
-applied to particle-level 4-vectors.  All functions are pure (no class
-state) and operate on numpy arrays.  The Lorentz boost includes a
-frame-restoration step that preserves the jet azimuthal angle.
+applied to particle-level 4-vectors.  All functions operate on torch
+tensors and keep all computation on the input device (GPU or CPU).
 """
 
+import math
 from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 
 
-# ── Numeric helpers ─────────────────────────────────────────────────
+# ── Numeric helpers (torch) ──────────────────────────────────────────
 
 
-def compute_pt(px: np.ndarray, py: np.ndarray) -> np.ndarray:
-    return np.sqrt(px ** 2 + py ** 2)
+def compute_pt(px: torch.Tensor, py: torch.Tensor) -> torch.Tensor:
+    return torch.sqrt(px ** 2 + py ** 2)
 
 
-def compute_phi(px: np.ndarray, py: np.ndarray) -> np.ndarray:
-    return np.arctan2(py, px)
+def compute_phi(px: torch.Tensor, py: torch.Tensor) -> torch.Tensor:
+    return torch.atan2(py, px)
 
 
 def compute_eta(
-    px: np.ndarray, py: np.ndarray, pz: np.ndarray, eps: float = 1e-8
-) -> np.ndarray:
-    p = np.sqrt(px ** 2 + py ** 2 + pz ** 2)
-    return 0.5 * np.log((p + pz + eps) / (p - pz + eps))
+    px: torch.Tensor, py: torch.Tensor, pz: torch.Tensor, eps: float = 1e-8
+) -> torch.Tensor:
+    p = torch.sqrt(px ** 2 + py ** 2 + pz ** 2)
+    return 0.5 * torch.log((p + pz + eps) / (p - pz + eps))
 
 
-def wrap_phi(dphi: np.ndarray) -> np.ndarray:
-    return (dphi + np.pi) % (2 * np.pi) - np.pi
+def wrap_phi(dphi: torch.Tensor) -> torch.Tensor:
+    return (dphi + math.pi) % (2 * math.pi) - math.pi
 
 
 def px_py_pz_to_pt_eta_phi(
-    px: np.ndarray, py: np.ndarray, pz: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    px: torch.Tensor, py: torch.Tensor, pz: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return compute_pt(px, py), compute_eta(px, py, pz), compute_phi(px, py)
 
 
@@ -58,109 +59,105 @@ def feature_index(feature_names: List[str], *candidate_names: str) -> Optional[i
 
 
 def get_norm_scale(norm_scales: Optional[dict], name: str) -> float:
-    """Return the normalisation scale for *name*, or 1.0 if unavailable.
-
-    Tries the bare name first, then the ``j1_``-prefixed variant.
-    """
+    """Return the normalisation scale for *name*, or 1.0 if unavailable."""
     if norm_scales is None:
         return 1.0
     return float(norm_scales.get(name, norm_scales.get(f"j1_{name}", 1.0)))
 
 
-# ── Rotation matrix generators ──────────────────────────────────────
+# ── Rotation matrix generators (vectorized, torch) ──────────────────
 
 
-def create_so2_rot_matrices(nbr_rot: int, rng: np.random.Generator) -> np.ndarray:
-    """Create *nbr_rot* random SO(2) rotation matrices (3×3)."""
+def create_so2_rot_matrices(
+    nbr_rot: int,
+    rng: np.random.Generator,
+    device: torch.device = torch.device("cpu"),
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Create *nbr_rot* random SO(2) rotation matrices (3×3) on *device*."""
     if nbr_rot <= 0:
-        return np.empty((0, 3, 3), dtype=np.float32)
-    thetas = rng.uniform(0.0, 2.0 * np.pi, nbr_rot)
-    rot_mats = np.zeros((nbr_rot, 3, 3), dtype=np.float32)
-    rot_mats[:, 0, 0] = np.cos(thetas)
-    rot_mats[:, 0, 1] = -np.sin(thetas)
-    rot_mats[:, 1, 0] = np.sin(thetas)
-    rot_mats[:, 1, 1] = np.cos(thetas)
-    rot_mats[:, 2, 2] = 1.0
-    return rot_mats
+        return torch.empty((0, 3, 3), dtype=dtype, device=device)
+    thetas = torch.as_tensor(
+        rng.uniform(0.0, 2.0 * math.pi, nbr_rot), dtype=dtype, device=device
+    )
+    mats = torch.zeros(nbr_rot, 3, 3, dtype=dtype, device=device)
+    mats[:, 0, 0] = torch.cos(thetas)
+    mats[:, 0, 1] = -torch.sin(thetas)
+    mats[:, 1, 0] = torch.sin(thetas)
+    mats[:, 1, 1] = torch.cos(thetas)
+    mats[:, 2, 2] = 1.0
+    return mats
 
 
 def create_so3_rot_matrices(
-    num_rotations: int, rng: np.random.Generator
-) -> np.ndarray:
-    """Create *num_rotations* random SO(3) rotation matrices (3×3).
-
-    Uses QR decomposition of random Gaussian matrices to produce
-    uniformly distributed rotation matrices (Haar measure on SO(3)).
-    """
+    num_rotations: int,
+    rng: np.random.Generator,
+    device: torch.device = torch.device("cpu"),
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Create *num_rotations* Haar-random SO(3) matrices via batched QR on *device*."""
     if num_rotations <= 0:
-        return np.empty((0, 3, 3), dtype=np.float32)
-
-    matrices = np.empty((num_rotations, 3, 3), dtype=np.float32)
-    for i in range(num_rotations):
-        M = rng.standard_normal((3, 3))
-        Q, R = np.linalg.qr(M)
-        # Ensure unique QR by fixing sign of diagonal of R
-        Q = Q @ np.diag(np.sign(np.diag(R)))
-        # Ensure proper rotation (det = +1, not reflection)
-        if np.linalg.det(Q) < 0:
-            Q[:, 0] *= -1
-        matrices[i] = Q.astype(np.float32)
-
-    return matrices
+        return torch.empty((0, 3, 3), dtype=dtype, device=device)
+    M = torch.randn(num_rotations, 3, 3, device=device, dtype=torch.float32)
+    Q, R = torch.linalg.qr(M)
+    # Fix sign convention (match numpy: column *= sign of diagonal of R)
+    signs = torch.sign(torch.diagonal(R, dim1=-2, dim2=-1))  # (B, 3)
+    Q = Q * signs.unsqueeze(1)
+    # Ensure det = +1 (not a reflection)
+    neg = torch.linalg.det(Q) < 0
+    if neg.any():
+        Q[neg, :, 0] *= -1
+    return Q.to(dtype)
 
 
 # ── SO(2) augmentation ─────────────────────────────────────────────
 
 
 def apply_so2_single_rotation(
-    x_data: np.ndarray,
-    rotation_matrix: np.ndarray,
+    x_data: torch.Tensor,
+    rotation_matrix: torch.Tensor,
     feature_names: List[str],
     norm_scales: Optional[dict] = None,
-) -> np.ndarray:
-    """Apply one SO(2) rotation to all jets.
+) -> torch.Tensor:
+    """Apply one SO(2) rotation matrix to all jets in *x_data*.
 
-    If *norm_scales* is provided the rotation is performed in physical space:
-    features are de-normalised before rotation and re-normalised afterwards.
+    All computation stays on the device of *x_data*.
     """
-    px_idx = feature_index(feature_names, "j1_px", "px")
-    py_idx = feature_index(feature_names, "j1_py", "py")
-    pz_idx = feature_index(feature_names, "j1_pz", "pz")
-    pt_idx = feature_index(feature_names, "j1_pt", "pt")
+    px_idx  = feature_index(feature_names, "j1_px",  "px")
+    py_idx  = feature_index(feature_names, "j1_py",  "py")
+    pz_idx  = feature_index(feature_names, "j1_pz",  "pz")
+    pt_idx  = feature_index(feature_names, "j1_pt",  "pt")
     phi_idx = feature_index(feature_names, "j1_phi", "phi")
 
     if None in (px_idx, py_idx, pz_idx):
-        print(
-            "SO(2) augmentation requested but required px/py/pz "
-            "features were not found. Returning unaugmented data."
-        )
+        print("SO(2) augmentation: missing px/py/pz features. Returning unaugmented data.")
         return x_data
 
     s_px = get_norm_scale(norm_scales, "px")
     s_py = get_norm_scale(norm_scales, "py")
     s_pz = get_norm_scale(norm_scales, "pz")
 
-    x_new = x_data.copy()
-    # De-normalise to physical space before rotation
-    vec = np.stack(
+    rot = rotation_matrix.to(device=x_data.device, dtype=x_data.dtype)
+    vec = torch.stack(
         [x_data[:, :, px_idx] * s_px,
          x_data[:, :, py_idx] * s_py,
          x_data[:, :, pz_idx] * s_pz],
-        axis=-1,
+        dim=-1,
     )
-    vec_rot = np.einsum("ij,ncj->nci", rotation_matrix, vec, optimize=True)
+    vec_rot = torch.einsum("ij,ncj->nci", rot, vec)
 
     px_r = vec_rot[:, :, 0]
     py_r = vec_rot[:, :, 1]
     pz_r = vec_rot[:, :, 2]
-    pt_r, _, phi_r = px_py_pz_to_pt_eta_phi(px_r, py_r, pz_r)
+    pt_r  = compute_pt(px_r, py_r)
+    phi_r = compute_phi(px_r, py_r)
 
-    # Re-normalise and write back only valid feature slots
+    x_new = x_data.clone()
     n_feats = x_new.shape[2]
     for idx, arr, feat in zip(
         [px_idx, py_idx, pz_idx, pt_idx, phi_idx],
-        [px_r, py_r, pz_r, pt_r, phi_r],
-        ["px", "py", "pz", "pt", "phi"],
+        [px_r,   py_r,   pz_r,   pt_r,   phi_r],
+        ["px",   "py",   "pz",   "pt",   "phi"],
     ):
         if idx is not None and 0 <= idx < n_feats:
             x_new[:, :, idx] = arr / get_norm_scale(norm_scales, feat)
@@ -171,69 +168,60 @@ def apply_so2_single_rotation(
 
 
 def apply_so3_single_rotation(
-    x_data: np.ndarray,
-    rotation_matrix: np.ndarray,
+    x_data: torch.Tensor,
+    rotation_matrix: torch.Tensor,
     feature_names: List[str],
     norm_scales: Optional[dict] = None,
-) -> np.ndarray:
-    """Apply one SO(3) rotation to all jets (padding-aware).
+) -> torch.Tensor:
+    """Apply one SO(3) rotation matrix to all jets in *x_data* (padding-aware).
 
-    If *norm_scales* is provided the rotation is performed in physical space:
-    features are de-normalised before rotation and re-normalised afterwards.
+    All computation stays on the device of *x_data*.
     """
-    px_idx = feature_index(feature_names, "j1_px", "px")
-    py_idx = feature_index(feature_names, "j1_py", "py")
-    pz_idx = feature_index(feature_names, "j1_pz", "pz")
-    pt_idx = feature_index(feature_names, "j1_pt", "pt")
-    eta_idx = feature_index(feature_names, "j1_eta", "eta")
-    phi_idx = feature_index(feature_names, "j1_phi", "phi")
-    etarel_idx = feature_index(feature_names, "j1_etarel", "etarel")
-    phirel_idx = feature_index(feature_names, "j1_phirel", "phirel")
+    px_idx      = feature_index(feature_names, "j1_px",     "px")
+    py_idx      = feature_index(feature_names, "j1_py",     "py")
+    pz_idx      = feature_index(feature_names, "j1_pz",     "pz")
+    pt_idx      = feature_index(feature_names, "j1_pt",     "pt")
+    eta_idx     = feature_index(feature_names, "j1_eta",    "eta")
+    phi_idx     = feature_index(feature_names, "j1_phi",    "phi")
+    etarel_idx  = feature_index(feature_names, "j1_etarel", "etarel")
+    phirel_idx  = feature_index(feature_names, "j1_phirel", "phirel")
     delta_r_idx = feature_index(feature_names, "j1_deltaR", "deltaR")
-    ptrel_idx = feature_index(feature_names, "j1_ptrel", "ptrel")
+    ptrel_idx   = feature_index(feature_names, "j1_ptrel",  "ptrel")
 
     if None in (px_idx, py_idx, pz_idx):
-        print(
-            "SO(3) augmentation requested but required px/py/pz "
-            "features were not found. Returning unaugmented data."
-        )
+        print("SO(3) augmentation: missing px/py/pz features. Returning unaugmented data.")
         return x_data
 
     s_px = get_norm_scale(norm_scales, "px")
     s_py = get_norm_scale(norm_scales, "py")
     s_pz = get_norm_scale(norm_scales, "pz")
-
     n_feats = x_data.shape[2]
 
-    # De-normalise to physical space; scales are 1.0 when norm_scales is None.
     px_phys = x_data[:, :, px_idx] * s_px
     py_phys = x_data[:, :, py_idx] * s_py
     pz_phys = x_data[:, :, pz_idx] * s_pz
+    pad_mask = (px_phys ** 2 + py_phys ** 2) > 0  # (N, C)
 
-    # Padding mask from physical px²+py²; works for both raw and normalised input.
-    pad_mask = (px_phys ** 2 + py_phys ** 2) > 0
-
-    x_new = x_data.copy()
-    vec = np.stack([px_phys, py_phys, pz_phys], axis=-1)
-    vec = vec * pad_mask[:, :, None]
-    vec_rot = np.einsum("ij,ncj->nci", rotation_matrix, vec, optimize=True)
+    rot = rotation_matrix.to(device=x_data.device, dtype=x_data.dtype)
+    vec = torch.stack([px_phys, py_phys, pz_phys], dim=-1) * pad_mask.unsqueeze(-1)
+    vec_rot = torch.einsum("ij,ncj->nci", rot, vec)
 
     px_r = vec_rot[:, :, 0]
     py_r = vec_rot[:, :, 1]
     pz_r = vec_rot[:, :, 2]
 
     pt_r, eta_r, phi_r = px_py_pz_to_pt_eta_phi(px_r, py_r, pz_r)
-    jet_px = (px_r * pad_mask).sum(axis=1, keepdims=True)
-    jet_py = (py_r * pad_mask).sum(axis=1, keepdims=True)
-    jet_pz = (pz_r * pad_mask).sum(axis=1, keepdims=True)
+    jet_px = (px_r * pad_mask).sum(dim=1, keepdim=True)
+    jet_py = (py_r * pad_mask).sum(dim=1, keepdim=True)
+    jet_pz = (pz_r * pad_mask).sum(dim=1, keepdim=True)
     jet_pt, jet_eta, jet_phi = px_py_pz_to_pt_eta_phi(jet_px, jet_py, jet_pz)
 
     eta_rel = eta_r - jet_eta
     phi_rel = wrap_phi(phi_r - jet_phi)
-    delta_r = np.sqrt(eta_rel ** 2 + phi_rel ** 2)
-    pt_rel = pt_r / np.where(jet_pt > 0, jet_pt, 1.0)
+    delta_r = torch.sqrt(eta_rel ** 2 + phi_rel ** 2)
+    pt_rel  = pt_r / jet_pt.clamp(min=1e-8)
 
-    # Re-normalise and write back; all scales are 1.0 when norm_scales is None.
+    x_new = x_data.clone()
     for idx, arr, feat in zip(
         [px_idx, py_idx, pz_idx, pt_idx, eta_idx, phi_idx,
          etarel_idx, phirel_idx, delta_r_idx, ptrel_idx],
@@ -243,7 +231,7 @@ def apply_so3_single_rotation(
          "etarel", "phirel", "deltaR", "ptrel"],
     ):
         if idx is not None and 0 <= idx < n_feats:
-            x_new[:, :, idx] = np.where(
+            x_new[:, :, idx] = torch.where(
                 pad_mask,
                 arr / get_norm_scale(norm_scales, feat),
                 x_data[:, :, idx],
@@ -255,23 +243,15 @@ def apply_so3_single_rotation(
 
 
 def so3_jet_filter(
-    x_aug: np.ndarray,
+    x_aug: torch.Tensor,
     feature_names: List[str],
     pt_max: float = 1600.0,
     eta_max: float = 3.0,
     etarel_max: float = 0.5,
     phirel_max: float = 0.5,
     norm_scales: Optional[dict] = None,
-) -> np.ndarray:
-    """Return boolean mask of jets passing SO(3) detector-acceptance cuts.
-
-    A jet passes if **every** non-padded constituent satisfies:
-        pT ∈ [0, pt_max],  η ∈ [-eta_max, eta_max],
-        ηrel ∈ [-etarel_max, etarel_max],  φrel ∈ [-phirel_max, phirel_max].
-
-    When *norm_scales* is provided the etarel/phirel thresholds are converted
-    to normalised space (their means are ~0, so dividing by scale is exact).
-    """
+) -> torch.Tensor:
+    """Return boolean mask (N,) of jets passing SO(3) detector-acceptance cuts."""
     px_idx     = feature_index(feature_names, "j1_px",     "px")
     py_idx     = feature_index(feature_names, "j1_py",     "py")
     pt_idx     = feature_index(feature_names, "j1_pt",     "pt")
@@ -281,19 +261,17 @@ def so3_jet_filter(
 
     n_feats = x_aug.shape[2]
 
-    # Derive active (non-padded) mask: prefer pt column, fall back to px²+py².
     if pt_idx is not None and pt_idx < n_feats:
         active = x_aug[:, :, pt_idx] > 0
     elif px_idx is not None and py_idx is not None:
         active = (x_aug[:, :, px_idx] ** 2 + x_aug[:, :, py_idx] ** 2) > 0
     else:
-        active = np.ones(x_aug.shape[:2], dtype=bool)
+        active = torch.ones(x_aug.shape[:2], dtype=torch.bool, device=x_aug.device)
 
-    # Convert thresholds to normalised space when scales are provided.
     _etarel_max = etarel_max / get_norm_scale(norm_scales, "etarel")
     _phirel_max = phirel_max / get_norm_scale(norm_scales, "phirel")
 
-    ok = np.ones(x_aug.shape[:2], dtype=bool)
+    ok = torch.ones(x_aug.shape[:2], dtype=torch.bool, device=x_aug.device)
     if pt_idx is not None and pt_idx < n_feats:
         pt = x_aug[:, :, pt_idx]
         ok &= (pt >= 0) & (pt <= pt_max)
@@ -307,23 +285,23 @@ def so3_jet_filter(
         phirel = x_aug[:, :, phirel_idx]
         ok &= (phirel >= -_phirel_max) & (phirel <= _phirel_max)
 
-    # Padded constituents automatically pass
     constituent_ok = ~active | ok
-    return constituent_ok.all(axis=1)  # shape (N,)
+    return constituent_ok.all(dim=1)
 
 
 # ── Shared rotation augmentation loop ──────────────────────────────
 
 
 def augment_with_rotations(
-    x_data: np.ndarray,
-    y_data: np.ndarray,
-    rotation_mats: np.ndarray,
+    x_data: torch.Tensor,
+    y_data: torch.Tensor,
+    rotation_mats: torch.Tensor,
     space: str,
     shuffle: bool,
     rng: np.random.Generator,
     feature_names: List[str],
-) -> Tuple[np.ndarray, np.ndarray]:
+    norm_scales: Optional[dict] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Apply multiple rotation matrices and concatenate with originals."""
     x_all = [x_data]
     y_all = [y_data]
@@ -331,15 +309,15 @@ def augment_with_rotations(
     apply_fn = apply_so2_single_rotation if space == "so2" else apply_so3_single_rotation
 
     n_total_aug = 0
-    n_kept_aug = 0
+    n_kept_aug  = 0
 
     for rotation_matrix in rotation_mats:
-        x_aug = apply_fn(x_data, rotation_matrix, feature_names)
+        x_aug = apply_fn(x_data, rotation_matrix, feature_names, norm_scales)
 
         if space == "so3":
-            mask = so3_jet_filter(x_aug, feature_names)
+            mask = so3_jet_filter(x_aug, feature_names, norm_scales=norm_scales)
             n_total_aug += x_aug.shape[0]
-            n_kept_aug += mask.sum()
+            n_kept_aug  += int(mask.sum())
             x_aug = x_aug[mask]
             y_aug = y_data[mask]
         else:
@@ -354,164 +332,143 @@ def augment_with_rotations(
             f"({100 * n_kept_aug / max(n_total_aug, 1):.1f}%)"
         )
 
-    x_out = np.concatenate(x_all, axis=0)
-    y_out = np.concatenate(y_all, axis=0)
+    x_out = torch.cat(x_all, dim=0)
+    y_out = torch.cat(y_all, dim=0)
     if shuffle:
-        indices = rng.permutation(x_out.shape[0])
+        indices = torch.randperm(x_out.shape[0], device=x_out.device)
         x_out = x_out[indices]
         y_out = y_out[indices]
     return x_out, y_out
 
 
-# ── Lorentz boost generation ───────────────────────────────────────
+# ── Lorentz boost generation (vectorized, torch) ────────────────────
 
 
 def create_lorentz_boosts(
     nbr_rot: int,
     eta_max: float,
     rng: np.random.Generator,
-) -> np.ndarray:
-    """Generate random pure Lorentz boosts acting on (E, px, py, pz)."""
+    device: torch.device = torch.device("cpu"),
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Generate *nbr_rot* random Lorentz boost matrices (4×4) on *device*.
+
+    Fully vectorized — no Python loop over individual boosts.
+    """
     if nbr_rot <= 0:
-        return np.empty((0, 4, 4), dtype=np.float32)
+        return torch.empty((0, 4, 4), dtype=dtype, device=device)
 
-    mats = np.zeros((nbr_rot, 4, 4), dtype=np.float32)
+    direction = torch.randn(nbr_rot, 3, dtype=torch.float32, device=device)
+    direction = direction / direction.norm(dim=1, keepdim=True).clamp(min=1e-8)
 
-    for i in range(nbr_rot):
-        direction = rng.normal(size=3)
-        direction /= np.linalg.norm(direction)
+    eta  = torch.as_tensor(
+        rng.uniform(-eta_max, eta_max, nbr_rot), dtype=torch.float32, device=device
+    )
+    beta  = torch.tanh(eta).unsqueeze(1) * direction      # (B, 3)
+    beta2 = (beta ** 2).sum(dim=1)                        # (B,)
+    gamma = 1.0 / torch.sqrt((1.0 - beta2).clamp(min=1e-8))
+    gb    = (gamma - 1.0) / beta2.clamp(min=1e-12)
 
-        eta = rng.uniform(-eta_max, eta_max)
-        beta = np.tanh(eta) * direction
-        bx, by, bz = beta
-        beta2 = bx * bx + by * by + bz * bz
+    L = torch.eye(4, dtype=torch.float32, device=device).unsqueeze(0).expand(nbr_rot, -1, -1).clone()
+    L[:, 0, 0]  = gamma
+    L[:, 0, 1:] = -gamma.unsqueeze(1) * beta
+    L[:, 1:, 0] = -gamma.unsqueeze(1) * beta
+    L[:, 1:, 1:] += gb.view(nbr_rot, 1, 1) * torch.bmm(beta.unsqueeze(2), beta.unsqueeze(1))
 
-        if beta2 < 1e-12:
-            mats[i] = np.eye(4, dtype=np.float32)
-            continue
+    near_zero = beta2 < 1e-12
+    if near_zero.any():
+        L[near_zero] = torch.eye(4, dtype=torch.float32, device=device)
 
-        gamma = 1.0 / np.sqrt(1.0 - beta2)
-        gb = (gamma - 1.0) / beta2
-
-        L = np.eye(4, dtype=np.float32)
-        L[0, 0] = gamma
-        L[0, 1:] = -gamma * beta
-        L[1:, 0] = -gamma * beta
-        L[1:, 1:] += gb * np.outer(beta, beta)
-        mats[i] = L
-
-    return mats
+    return L.to(dtype)
 
 
 # ── Lorentz boost application (with frame restoration) ──────────────
 
 
 def apply_boost_preserve_phi(
-    x_data: np.ndarray,
-    L: np.ndarray,
+    x_data: torch.Tensor,
+    L: torch.Tensor,
     feature_names: List[str],
     norm_scales: Optional[dict] = None,
-) -> np.ndarray:
+) -> torch.Tensor:
     """Boost 4-vectors and apply a compensating SO(2) rotation to preserve jet φ.
 
-    When the energy feature is absent (partial feature sets used in symm_loss),
-    energy is approximated as |p| = sqrt(px²+py²+pz²), which is exact for
-    massless particles and a good approximation for LHC jet constituents.
-
-    If *norm_scales* is provided the boost is performed in physical space:
-    features are de-normalised before boosting and re-normalised afterwards.
+    All computation stays on the device of *x_data*.
+    Energy approximated as |p| when the energy feature is absent.
     """
-    x_new = x_data.copy()
-    n_feats = x_data.shape[2]
-
-    px_idx     = feature_index(feature_names, "j1_px",     "px")
-    py_idx     = feature_index(feature_names, "j1_py",     "py")
-    pz_idx     = feature_index(feature_names, "j1_pz",     "pz")
-    e_idx      = feature_index(feature_names, "j1_e",      "e")
-    pt_idx     = feature_index(feature_names, "j1_pt",     "pt")
-    eta_idx    = feature_index(feature_names, "j1_eta",    "eta")
-    phi_idx    = feature_index(feature_names, "j1_phi",    "phi")
-    etarel_idx = feature_index(feature_names, "j1_etarel", "etarel")
-    phirel_idx = feature_index(feature_names, "j1_phirel", "phirel")
+    px_idx      = feature_index(feature_names, "j1_px",     "px")
+    py_idx      = feature_index(feature_names, "j1_py",     "py")
+    pz_idx      = feature_index(feature_names, "j1_pz",     "pz")
+    e_idx       = feature_index(feature_names, "j1_e",      "e")
+    pt_idx      = feature_index(feature_names, "j1_pt",     "pt")
+    eta_idx     = feature_index(feature_names, "j1_eta",    "eta")
+    phi_idx     = feature_index(feature_names, "j1_phi",    "phi")
+    etarel_idx  = feature_index(feature_names, "j1_etarel", "etarel")
+    phirel_idx  = feature_index(feature_names, "j1_phirel", "phirel")
     delta_r_idx = feature_index(feature_names, "j1_deltaR", "deltaR")
     ptrel_idx   = feature_index(feature_names, "j1_ptrel",  "ptrel")
 
     if None in (px_idx, py_idx, pz_idx):
-        print(
-            "Lorentz augmentation requested but required px/py/pz "
-            "features were not found. Returning unaugmented data."
-        )
+        print("Lorentz augmentation: missing px/py/pz features. Returning unaugmented data.")
         return x_data
 
+    n_feats = x_data.shape[2]
     s_px = get_norm_scale(norm_scales, "px")
     s_py = get_norm_scale(norm_scales, "py")
     s_pz = get_norm_scale(norm_scales, "pz")
 
-    # De-normalise to physical space; scales are 1.0 when norm_scales is None.
     px_phys = x_data[:, :, px_idx] * s_px
     py_phys = x_data[:, :, py_idx] * s_py
     pz_phys = x_data[:, :, pz_idx] * s_pz
-
-    # Padding mask from physical px²+py².
     pad_mask = (px_phys ** 2 + py_phys ** 2) > 0
 
-    # Build 4-vectors in physical space.
     if e_idx is not None and e_idx < n_feats:
         e_in = x_data[:, :, e_idx] * get_norm_scale(norm_scales, "e")
     else:
-        e_in = np.sqrt(px_phys ** 2 + py_phys ** 2 + pz_phys ** 2)
+        e_in = torch.sqrt(px_phys ** 2 + py_phys ** 2 + pz_phys ** 2)
 
-    p4 = np.stack([e_in, px_phys, py_phys, pz_phys], axis=-1)
-    p4 = p4 * pad_mask[:, :, None]
+    p4  = torch.stack([e_in, px_phys, py_phys, pz_phys], dim=-1) * pad_mask.unsqueeze(-1)
+    boost = L.to(device=x_data.device, dtype=x_data.dtype)
+    p4b = torch.einsum("ij,ncj->nci", boost, p4)
 
-    p4b = np.einsum("ij,ncj->nci", L, p4, optimize=True)
+    e_b  = p4b[:, :, 0]; px_b = p4b[:, :, 1]
+    py_b = p4b[:, :, 2]; pz_b = p4b[:, :, 3]
 
-    e_b  = p4b[:, :, 0]
-    px_b = p4b[:, :, 1]
-    py_b = p4b[:, :, 2]
-    pz_b = p4b[:, :, 3]
-
-    jet_px_orig  = (px_phys * pad_mask).sum(axis=1, keepdims=True)
-    jet_py_orig  = (py_phys * pad_mask).sum(axis=1, keepdims=True)
-    jet_phi_orig = np.arctan2(jet_py_orig, jet_px_orig)
-
-    jet_px_b    = (px_b * pad_mask).sum(axis=1, keepdims=True)
-    jet_py_b    = (py_b * pad_mask).sum(axis=1, keepdims=True)
-    jet_phi_boost = np.arctan2(jet_py_b, jet_px_b)
+    jet_phi_orig  = torch.atan2(
+        (py_phys * pad_mask).sum(dim=1, keepdim=True),
+        (px_phys * pad_mask).sum(dim=1, keepdim=True),
+    )
+    jet_phi_boost = torch.atan2(
+        (py_b * pad_mask).sum(dim=1, keepdim=True),
+        (px_b * pad_mask).sum(dim=1, keepdim=True),
+    )
 
     theta = jet_phi_orig - jet_phi_boost
-    cos_t = np.cos(theta)
-    sin_t = np.sin(theta)
+    cos_t = torch.cos(theta); sin_t = torch.sin(theta)
 
-    px_r =  cos_t * px_b - sin_t * py_b
-    py_r =  sin_t * px_b + cos_t * py_b
-    pz_r =  pz_b
-    e_r  =  e_b
-
-    px_r *= pad_mask
-    py_r *= pad_mask
-    pz_r *= pad_mask
-    e_r  *= pad_mask
-
+    px_r = (cos_t * px_b - sin_t * py_b) * pad_mask
+    py_r = (sin_t * px_b + cos_t * py_b) * pad_mask
+    pz_r = pz_b * pad_mask
+    e_r  = e_b  * pad_mask
     energy_mask = (e_r > 0) & pad_mask
 
     pt  = compute_pt(px_r, py_r)
     phi = compute_phi(px_r, py_r)
     eta = compute_eta(px_r, py_r, pz_r)
 
-    jet_px  = (px_r * pad_mask).sum(axis=1, keepdims=True)
-    jet_py  = (py_r * pad_mask).sum(axis=1, keepdims=True)
-    jet_pz  = (pz_r * pad_mask).sum(axis=1, keepdims=True)
+    jet_px  = (px_r * pad_mask).sum(dim=1, keepdim=True)
+    jet_py  = (py_r * pad_mask).sum(dim=1, keepdim=True)
+    jet_pz  = (pz_r * pad_mask).sum(dim=1, keepdim=True)
     jet_pt  = compute_pt(jet_px, jet_py)
     jet_phi = compute_phi(jet_px, jet_py)
     jet_eta = compute_eta(jet_px, jet_py, jet_pz)
 
     eta_rel = eta - jet_eta
     phi_rel = wrap_phi(phi - jet_phi)
-    delta_r = np.sqrt(eta_rel ** 2 + phi_rel ** 2)
-    pt_rel  = pt / np.where(jet_pt > 0, jet_pt, 1.0)
+    delta_r = torch.sqrt(eta_rel ** 2 + phi_rel ** 2)
+    pt_rel  = pt / jet_pt.clamp(min=1e-8)
 
-    # Re-normalise and write back; all scales are 1.0 when norm_scales is None.
+    x_new = x_data.clone()
     for idx, arr, feat in zip(
         [px_idx, py_idx, pz_idx, e_idx, pt_idx, eta_idx, phi_idx,
          etarel_idx, phirel_idx, delta_r_idx, ptrel_idx],
@@ -521,91 +478,82 @@ def apply_boost_preserve_phi(
          "etarel", "phirel", "deltaR", "ptrel"],
     ):
         if idx is not None and 0 <= idx < n_feats:
-            x_new[:, :, idx] = np.where(
+            x_new[:, :, idx] = torch.where(
                 energy_mask,
                 arr / get_norm_scale(norm_scales, feat),
                 x_data[:, :, idx],
             )
-
     return x_new
 
 
 def augment_with_lorentz_boosts(
-    x_data: np.ndarray,
-    y_data: np.ndarray,
-    lorentz_mats: np.ndarray,
+    x_data: torch.Tensor,
+    y_data: torch.Tensor,
+    lorentz_mats: torch.Tensor,
     feature_names: List[str],
-) -> Tuple[np.ndarray, np.ndarray]:
+    norm_scales: Optional[dict] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Apply multiple Lorentz boosts and concatenate with originals."""
     x_all = [x_data]
     y_all = [y_data]
-
     for L in lorentz_mats:
-        x_aug = apply_boost_preserve_phi(x_data, L, feature_names)
-        x_all.append(x_aug)
+        x_all.append(apply_boost_preserve_phi(x_data, L, feature_names, norm_scales))
         y_all.append(y_data)
+    return torch.cat(x_all, dim=0), torch.cat(y_all, dim=0)
 
-    return np.concatenate(x_all, axis=0), np.concatenate(y_all, axis=0)
 
 # ── Permutation augmentation ────────────────────────────────────────
 
 
 def permute_constituents(
-    x_data: np.ndarray, rng: np.random.Generator
-) -> np.ndarray:
+    x_data: torch.Tensor, rng: np.random.Generator
+) -> torch.Tensor:
     """Randomly permute constituent order within each jet."""
     n_jets, n_const = x_data.shape[:2]
-    # Generate all permutations at once via argsort of random values
-    perms = np.argsort(rng.random((n_jets, n_const)), axis=1)
-    return x_data[np.arange(n_jets)[:, None], perms]
+    rand_vals = torch.as_tensor(
+        rng.random((n_jets, n_const)), dtype=torch.float32, device=x_data.device
+    )
+    perms = torch.argsort(rand_vals, dim=1)
+    return x_data[torch.arange(n_jets, device=x_data.device)[:, None], perms]
+
 
 # ── Public dispatcher ───────────────────────────────────────────────
 
 
 def apply_augmentation(
     scheme: str,
-    x_train: np.ndarray,
-    y_train: np.ndarray,
+    x_train: torch.Tensor,
+    y_train: torch.Tensor,
     feature_names: List[str],
     rng: np.random.Generator,
     rotation_nbr_rot: int = 8,
     rotation_shuffle: bool = True,
     lorentz_nbr_rot: int = 8,
     lorentz_eta_max: float = 2.0,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Apply the requested augmentation scheme to training data.
-
-    Args:
-        scheme: One of ``"none"``, ``"so2"``, ``"so3"``, ``"lorentz"``.
-        x_train: ``(N, nconst, nfeats)`` particle features.
-        y_train: ``(N, nclasses)`` one-hot labels.
-        feature_names: Column names matching the last axis of *x_train*.
-        rng: Numpy random generator for reproducibility.
-        rotation_nbr_rot: Number of rotation copies (SO2/SO3).
-        rotation_shuffle: Whether to shuffle after rotation augmentation.
-        lorentz_nbr_rot: Number of Lorentz boost copies.
-        lorentz_eta_max: Maximum rapidity for Lorentz boosts.
-
-    Returns:
-        Tuple of augmented ``(x_train, y_train)`` arrays.
-    """
+    norm_scales: Optional[dict] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Apply the requested augmentation scheme to training data."""
     scheme = scheme.lower()
 
     if scheme == "none":
         return x_train, y_train
 
     if scheme == "so2":
-        rot_mats = create_so2_rot_matrices(rotation_nbr_rot, rng)
+        rot_mats = create_so2_rot_matrices(
+            rotation_nbr_rot, rng, device=x_train.device, dtype=x_train.dtype
+        )
         return augment_with_rotations(
             x_train, y_train, rot_mats, "so2",
-            rotation_shuffle, rng, feature_names,
+            rotation_shuffle, rng, feature_names, norm_scales,
         )
 
     if scheme == "so3":
-        rot_mats = create_so3_rot_matrices(rotation_nbr_rot, rng)
+        rot_mats = create_so3_rot_matrices(
+            rotation_nbr_rot, rng, device=x_train.device, dtype=x_train.dtype
+        )
         return augment_with_rotations(
             x_train, y_train, rot_mats, "so3",
-            rotation_shuffle, rng, feature_names,
+            rotation_shuffle, rng, feature_names, norm_scales,
         )
 
     if scheme == "lorentz":
@@ -615,17 +563,14 @@ def apply_augmentation(
         }
         missing = [name for name in required if name not in feature_names]
         if missing:
-            print(
-                f"Lorentz augmentation requested but missing required "
-                f"features: {missing}. Returning unaugmented data."
-            )
+            print(f"Lorentz augmentation: missing features {missing}. Returning unaugmented data.")
             return x_train, y_train
-
-        lorentz_mats = create_lorentz_boosts(lorentz_nbr_rot, lorentz_eta_max, rng)
+        lorentz_mats = create_lorentz_boosts(
+            lorentz_nbr_rot, lorentz_eta_max, rng,
+            device=x_train.device, dtype=x_train.dtype,
+        )
         return augment_with_lorentz_boosts(
-            x_train, y_train, lorentz_mats, feature_names,
+            x_train, y_train, lorentz_mats, feature_names, norm_scales,
         )
 
     raise ValueError(f"Unknown augmentation scheme: {scheme}")
-
-

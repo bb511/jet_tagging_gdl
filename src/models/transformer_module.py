@@ -8,6 +8,7 @@ from torchinfo import summary as torchinfo_summary
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 from torch.nn.functional import cross_entropy
 import torch.nn as nn
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 
 class Transformer(LightningModule):
@@ -211,6 +212,8 @@ class Transformer(LightningModule):
             f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
             flush=True,
         )
+    
+        garbage_collection_cuda()
 
     # ------------------------------------------------------------------
     # Validation

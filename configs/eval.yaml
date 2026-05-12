@@ -1,0 +1,56 @@
+# @package _global_
+
+# specify here default configuration
+# order of defaults determines the order in which configs override each other
+defaults:
+  - _self_
+  - data: hls4ml
+  - model: deepsets_32
+  - callbacks: default
+  - logger: mlflow
+  - trainer: mps
+  - paths: default
+  - extras: default
+
+  # experiment configs allow for version control of specific hyperparameters
+  # e.g. best hyperparameters for given model and datamodule
+  - experiment: null
+
+  # config for hyperparameter optimization
+  - hparams_search: null
+
+  # optional local config for machine/user specific settings
+  # it's optional since it doesn't need to exist and is excluded from version control
+  - optional local: default
+
+  # debugging config (enable through command line, e.g. `python train.py debug=default)
+  - debug: null
+
+task_name: "eval"
+
+# tags to help you identify your experiments
+# you can overwrite this in experiment configs
+# overwrite from command line with `python train.py tags="[first_tag, second_tag]"`
+tags: ["dev"]
+
+# set False to skip model training
+train: False
+
+# evaluate on test set, using best model weights achieved during training
+# lightning chooses best weights based on the metric specified in checkpoint callback
+test: True
+
+# Single-checkpoint mode (legacy): provide one checkpoint path.
+# In manifest mode, leave null and set checkpoint_manifest_path instead.
+ckpt_path: null
+
+# Manifest mode: path to checkpoint_manifest.json written by train.py in
+# separate_train_eval_mode. When set, eval iterates all folds listed in the
+# manifest. ckpt_path is ignored.
+checkpoint_manifest_path: null
+
+# seed for random number generators in pytorch, numpy and python.random
+seed: null
+
+# Stage label logged to MLflow as run_stage param (overridden at runtime).
+run_stage: "eval"

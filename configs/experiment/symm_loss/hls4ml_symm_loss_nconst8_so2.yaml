@@ -20,5 +20,5 @@ model:
   group: so2
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200
 

@@ -15,8 +15,9 @@ data:
   method: augmentation
   augmentation_scheme: so3
   rotation_nbr_rot: 8
+  online_augmentation: true
   batch_size: 256
   n_folds: 1
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200

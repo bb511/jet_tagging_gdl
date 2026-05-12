@@ -18,7 +18,7 @@ data:
   n_folds: 1
 
 trainer:
-  max_epochs: 300
+  max_epochs: 200
 
 callbacks:
   invariance_metric: null

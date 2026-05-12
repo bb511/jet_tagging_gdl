@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -90,19 +91,58 @@ def test_train_resume(tmp_path: Path, cfg_train: DictConfig) -> None:
     HydraConfig().set_config(cfg_train)
     metric_dict_1, _ = train(cfg_train)
 
-    files = os.listdir(tmp_path / "checkpoints")
+    # Checkpoints are now written to checkpoints/main/ (per-run subdirectory)
+    files = os.listdir(tmp_path / "checkpoints" / "main")
     assert "last.ckpt" in files
     assert "epoch_000.ckpt" in files
 
     with open_dict(cfg_train):
-        cfg_train.ckpt_path = str(tmp_path / "checkpoints" / "last.ckpt")
+        cfg_train.ckpt_path = str(tmp_path / "checkpoints" / "main" / "last.ckpt")
         cfg_train.trainer.max_epochs = 2
 
     metric_dict_2, _ = train(cfg_train)
 
-    files = os.listdir(tmp_path / "checkpoints")
+    files = os.listdir(tmp_path / "checkpoints" / "main")
     assert "epoch_001.ckpt" in files
     assert "epoch_002.ckpt" not in files
 
     assert metric_dict_1["train/acc"] < metric_dict_2["train/acc"]
     assert metric_dict_1["val/acc"] < metric_dict_2["val/acc"]
+
+
+@pytest.mark.slow
+def test_train_manifest_created(tmp_path: Path, cfg_train: DictConfig) -> None:
+    """Training always writes checkpoint_manifest.json to output_dir."""
+    with open_dict(cfg_train):
+        cfg_train.trainer.max_epochs = 1
+
+    HydraConfig().set_config(cfg_train)
+    train(cfg_train)
+
+    manifest_path = tmp_path / "checkpoint_manifest.json"
+    assert manifest_path.exists(), "checkpoint_manifest.json not found after training"
+
+    manifest = json.loads(manifest_path.read_text())
+    assert "runs" in manifest
+    assert len(manifest["runs"]) >= 1
+
+    main_run = manifest["runs"][0]
+    assert main_run["fold_label"] == "main"
+    assert main_run["fold_idx"] == 0
+    assert main_run["checkpoint_path"]  # non-empty string
+
+
+@pytest.mark.slow
+def test_train_separate_mode_no_extra_test(tmp_path: Path, cfg_train: DictConfig) -> None:
+    """In separate_train_eval_mode, training completes and manifest marks mode correctly."""
+    with open_dict(cfg_train):
+        cfg_train.trainer.max_epochs = 1
+        cfg_train.separate_train_eval_mode = True
+
+    HydraConfig().set_config(cfg_train)
+    train(cfg_train)
+
+    manifest_path = tmp_path / "checkpoint_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["separate_train_eval_mode"] is True

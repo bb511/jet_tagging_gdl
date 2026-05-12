@@ -7,6 +7,7 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 from torchinfo import summary as torchinfo_summary
 from torch.nn.functional import cross_entropy
+from pytorch_lightning.utlities.memory import garbage_collection_cuda
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +393,8 @@ class LorentzNetModule(LightningModule):
             f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
             flush=True,
         )
+
+        garbage_collection_cuda()
 
     # ------------------------------------------------------------------
     # Validation
