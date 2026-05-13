@@ -17,7 +17,7 @@ data:
   lorentz_nbr_rot: 8
   lorentz_eta_max: 2.0
   online_augmentation: true
-  batch_size: 256
+  batch_size: 2048
   n_folds: 1
 
 trainer:

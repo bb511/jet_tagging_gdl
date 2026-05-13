@@ -11,7 +11,6 @@ norm: null
 use_mask: false
 fill_masked: false
 bias: true
-coef_norm: null
 fast_path: true
 method: ${data.method}
 

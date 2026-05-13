@@ -14,7 +14,8 @@ data:
   nconstituents: 8
   method: symm_loss
   augmentation_scheme: so2
-  batch_size: 256
+  batch_size: 2048
+  n_folds: 1
 
 model:
   group: so2

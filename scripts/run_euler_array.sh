@@ -171,7 +171,7 @@ MANIFEST_PATH="${HYDRA_RUN_DIR}/checkpoint_manifest.json"
 # --- Phase 1: Train (fit-only, emits manifest) ---
 echo "--- Phase 1: Training ---"
 if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu +data.nconstituents="$NCONST" +data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}" 
+    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.nconstituents="$NCONST" data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}"
 else
     srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}" 
 fi
