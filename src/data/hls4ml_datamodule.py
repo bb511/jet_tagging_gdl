@@ -16,6 +16,12 @@ from typing import Any, Optional, Tuple, Dict
 import logging
 import os
 import tarfile
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=".*IterableDataset.*__len__.*multi-process.*",
+    category=UserWarning,
+)
 
 import h5py
 import numpy as np
@@ -24,7 +30,8 @@ from sklearn.model_selection import train_test_split, KFold
 import torch
 import wget
 from lightning import LightningDataModule
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader
+from src.data.components.dataset import HLS4MLDataset
 
 try:
     from IPython.display import display as ipy_display
@@ -522,7 +529,44 @@ class HLS4MLDataModule(LightningDataModule):
 
 
     # ------------------------------------------------------------------
-    # Online Augmentation Trial
+    # Online Augmentation — batch-level transform for HLS4MLDataset.__iter__
+    # ------------------------------------------------------------------
+    def _make_batch_transform(self):
+        scheme      = self.augmentation_scheme
+        all_names   = self.feature_names or []
+        eta_max     = self.lorentz_eta_max
+        norm_scales = (
+            {n: s for n, (_, s) in self.norm_params.items()}
+            if self.norm_params is not None else None
+        )
+        active_names = []
+        for feat in self.features:
+            if feat in all_names:
+                active_names.append(feat)
+            elif f"j1_{feat}" in all_names:
+                active_names.append(f"j1_{feat}")
+            else:
+                active_names.append(feat)
+
+        def transform(x):  # x: (B, N, F)
+            rng = np.random.default_rng()
+            if scheme == "so2":
+                x, _ = apply_random_so2(x, feature_names=active_names,
+                                        generator=rng, norm_scales=norm_scales)
+            elif scheme == "so3":
+                x, _ = apply_random_so3(x, feature_names=active_names,
+                                        generator=rng, norm_scales=norm_scales,
+                                        apply_filter=True)
+            elif scheme == "lorentz":
+                x, _ = apply_random_lorentz(x, feature_names=active_names,
+                                            eta_max=eta_max, generator=rng,
+                                            norm_scales=norm_scales)
+            return x
+
+        return transform
+
+    # ------------------------------------------------------------------
+    # Online Augmentation Trial (legacy collate-based path)
     # ------------------------------------------------------------------
     def _make_online_aug_collate(self):
         from src.utils.symmetry_loss import (
@@ -805,13 +849,24 @@ class HLS4MLDataModule(LightningDataModule):
                     f"==================================================="
                 )
 
-            self.data_train = TensorDataset(
+            transform = (
+                self._make_batch_transform()
+                if self.online_augmentation and self.augmentation_scheme not in {"none", "permute"}
+                else None
+            )
+            shuffler = torch.Generator()
+            shuffler.manual_seed(torch.seed())
+            self.data_train = HLS4MLDataset(
                 torch.from_numpy(x_train).float(),
                 torch.from_numpy(y_train).float(),
+                batch_size=self.batch_size,
+                shuffler=shuffler,
+                transform=transform,
             )
-            self.data_val = TensorDataset(
+            self.data_val = HLS4MLDataset(
                 torch.from_numpy(x_val).float(),
                 torch.from_numpy(y_val).float(),
+                batch_size=self.batch_size,
             )
 
         if stage in (None, "validate") and self.data_val is None:
@@ -819,9 +874,10 @@ class HLS4MLDataModule(LightningDataModule):
             y_val = np.load(processed_dir / "y_val.npy", allow_pickle=False)
             if feature_indices is not None:
                 x_val = x_val[:, :, feature_indices]
-            self.data_val = TensorDataset(
+            self.data_val = HLS4MLDataset(
                 torch.from_numpy(x_val).float(),
                 torch.from_numpy(y_val).float(),
+                batch_size=self.batch_size,
             )
 
         if stage in (None, "test", "predict") and self.data_test is None:
@@ -843,10 +899,11 @@ class HLS4MLDataModule(LightningDataModule):
                 x_test = x_test[:, :, feature_indices]
 
             log.info(f"[setup] Test — x_test: {x_test.shape}, y_test: {y_test.shape}")
-            self.data_test = TensorDataset(
+            self.data_test = HLS4MLDataset(
                 torch.from_numpy(x_test).float(),
                 torch.from_numpy(y_test).float(),
-)
+                batch_size=self.batch_size,
+            )
         # Optional overlap diagnostic plot (augmentation only)
         if (
             stage in (None, "fit")
@@ -879,43 +936,31 @@ class HLS4MLDataModule(LightningDataModule):
     # ------------------------------------------------------------------
     # DataLoaders
     # ------------------------------------------------------------------
-    def train_dataloader(self) -> DataLoader:
-        collate = (
-            self._make_online_aug_collate()
-            if self.online_augmentation and self.augmentation_scheme not in {"none", "permute"}
-            else None
+    def _make_dataloader(self, dataset: HLS4MLDataset) -> DataLoader:
+        return DataLoader(
+            dataset=dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            collate_fn=lambda b: b[0],
         )
-        if self.method == "augmentation":
-            return DataLoader(
-                dataset=self.data_train, batch_size=self.batch_size,
-                num_workers=self.num_workers, pin_memory=self.pin_memory, shuffle=True,
-                collate_fn=collate,
-            )
-        elif self.method in _BASELINE_METHODS:
-            return DataLoader(
-                dataset=self.data_train, batch_size=self.batch_size,
-                num_workers=self.num_workers, pin_memory=self.pin_memory, shuffle=True,
-            )
-        else:
-            raise ValueError(f"Unsupported method '{self.method}' for train_dataloader.")
+
+    def train_dataloader(self) -> DataLoader:
+        return self._make_dataloader(self.data_train)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(
-            dataset=self.data_val, batch_size=self.batch_size,
-            num_workers=self.num_workers, pin_memory=self.pin_memory, shuffle=False,
-        )
+        return self._make_dataloader(self.data_val)
 
     def test_dataloader(self) -> DataLoader:
-        return DataLoader(
-            dataset=self.data_test, batch_size=self.batch_size,
-            num_workers=self.num_workers, pin_memory=self.pin_memory, shuffle=False,
-        )
+        return self._make_dataloader(self.data_test)
 
     # ------------------------------------------------------------------
     # Lightning boilerplate
     # ------------------------------------------------------------------
     def teardown(self, stage: Optional[str] = None) -> None:
-        pass
+        self.data_train = None
+        self.data_val   = None
+        self.data_test  = None
 
     def state_dict(self) -> Dict[Any, Any]:
         return {}
@@ -927,3 +972,4 @@ class HLS4MLDataModule(LightningDataModule):
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[2]
     data_module = HLS4MLDataModule(data_dir=str(project_root / "datasets"))
+    
