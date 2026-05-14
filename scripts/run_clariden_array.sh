@@ -5,8 +5,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=00:00:30
-#SBATCH --array=0-8
+#SBATCH --time=12:00:00
+#SBATCH --array=0-0
 #SBATCH --account=a0166
 #SBATCH --output=logs/slurm/null
 #SBATCH --error=logs/slurm/null
@@ -83,14 +83,14 @@ AUGMENTATION_EXPERIMENTS=(
 )
 
 SYMM_LOSS_EXPERIMENTS=(
-    symm_loss/hls4ml_symm_loss_nconst8_so2
-    symm_loss/hls4ml_symm_loss_nconst8_so3
-    symm_loss/hls4ml_symm_loss_nconst8_lorentz
-    symm_loss/hls4ml_symm_loss_nconst16_so2
-    symm_loss/hls4ml_symm_loss_nconst16_so3
-    symm_loss/hls4ml_symm_loss_nconst16_lorentz
-    symm_loss/hls4ml_symm_loss_nconst32_so2
-    symm_loss/hls4ml_symm_loss_nconst32_so3
+    # symm_loss/hls4ml_symm_loss_nconst8_so2
+    # symm_loss/hls4ml_symm_loss_nconst8_so3
+    # symm_loss/hls4ml_symm_loss_nconst8_lorentz
+    # symm_loss/hls4ml_symm_loss_nconst16_so2
+    # symm_loss/hls4ml_symm_loss_nconst16_so3
+    # symm_loss/hls4ml_symm_loss_nconst16_lorentz
+    # symm_loss/hls4ml_symm_loss_nconst32_so2
+    # symm_loss/hls4ml_symm_loss_nconst32_so3
     symm_loss/hls4ml_symm_loss_nconst32_lorentz
 )
 

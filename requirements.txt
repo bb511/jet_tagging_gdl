@@ -1,3 +1,6 @@
+# CUDA 12.6 wheels for PyTorch (compatible with CUDA 13.x drivers via backward compat)
+--extra-index-url https://download.pytorch.org/whl/cu126
+
 absl-py==2.3.1
 annotated-types==0.7.0
 anyio==4.12.1
@@ -93,7 +96,7 @@ opt_einsum==3.4.0
 optree==0.18.0
 omegaconf
 packaging==25.0
-pandas==3.0.0
+pandas<3
 pandocfilters==1.5.1
 paramiko==4.0.0
 parso==0.8.6
@@ -140,7 +143,7 @@ termcolor==3.2.0
 terminado==0.18.1
 threadpoolctl==3.6.0
 tinycss2==1.4.0
-torch==2.9.1
+torch==2.9.1+cu126
 tornado==6.5.4
 tqdm==4.67.1
 traitlets==5.14.3
@@ -180,6 +183,6 @@ mlflow
 # --------- others --------- #
 rootutils       # standardizing the project root setup
 pre-commit      # hooks for applying linters on commit
-rich            # beautiful text formatting in terminal
+# rich            # beautiful text formatting in terminal
 pytest          # tests
 # sh            # for running bash commands in some tests (linux/macos only)
