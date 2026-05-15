@@ -3,3 +3,4 @@ invariance_metric:
   num_samples: 10000
   lorentz_eta_max: 2.0
   seed: 42
+  check_every_n_epochs: 5

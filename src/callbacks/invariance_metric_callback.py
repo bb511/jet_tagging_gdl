@@ -37,11 +37,13 @@ class InvarianceMetricCallback(L.Callback):
         num_samples: int = 10000,
         lorentz_eta_max: float = 2.0,
         seed: int = 42,
+        check_every_n_epochs: int = 5,
     ):
         super().__init__()
         self.num_samples = num_samples
         self.lorentz_eta_max = lorentz_eta_max
         self.rng = np.random.default_rng(seed)
+        self.check_every_n_epochs = check_every_n_epochs
 
         self._x_val_sorted: Optional[np.ndarray] = None
         self._feature_names: Optional[list] = None
@@ -201,6 +203,8 @@ class InvarianceMetricCallback(L.Callback):
     # ------------------------------------------------------------
     def on_validation_epoch_end(self, trainer, pl_module):
         if self._x_val_sorted is None:
+            return
+        if (trainer.current_epoch + 1) % self.check_every_n_epochs != 0:
             return
 
         pl_module.eval()
