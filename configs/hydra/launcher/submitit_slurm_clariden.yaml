@@ -1,0 +1,24 @@
+# @package hydra.launcher
+defaults:
+  - submitit_slurm
+
+submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+
+account: a0166
+qos: null
+
+partition: normal
+timeout_min: 1440
+cpus_per_task: 4
+gpus_per_node: 1
+tasks_per_node: 1
+nodes: 1
+mem_gb: 20
+
+array_parallelism: 96
+
+name: ${hydra.job.name}
+
+additional_parameters: {}
+signal_delay_s: 120
+max_num_timeout: 0
