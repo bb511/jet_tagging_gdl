@@ -1,8 +1,10 @@
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-import logging
+
+log = logging.getLogger(__name__)
 
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
@@ -354,10 +356,9 @@ class PELICANNanoModule(LightningModule):
     def on_train_epoch_end(self) -> None:
         train_loss = self.train_loss.compute()
         train_acc  = self.train_acc.compute()
-        print(
+        log.info(
             f"[Epoch {self.current_epoch:>3d}] "
-            f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
-            flush=True,
+            f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}"
         )
 
         garbage_collection_cuda()
@@ -378,10 +379,9 @@ class PELICANNanoModule(LightningModule):
         self.val_acc_best(acc)
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
         val_loss = self.val_loss.compute()
-        print(
+        log.info(
             f"[Epoch {self.current_epoch:>3d}]   Val | loss: {val_loss:.4f}  acc: {acc:.4f}"
-            f"  best: {self.val_acc_best.compute():.4f}",
-            flush=True,
+            f"  best: {self.val_acc_best.compute():.4f}"
         )
 
     # ------------------------------------------------------------------

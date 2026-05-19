@@ -2,18 +2,18 @@
 defaults:
   - submitit_slurm
 
-submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+submitit_folder: /capstor/scratch/cscs/agogia/submitit/%j
 
 account: a0166
 qos: null
 
 partition: normal
-timeout_min: 1440
+timeout_min: 720
 cpus_per_task: 4
 gpus_per_node: 1
 tasks_per_node: 1
 nodes: 1
-mem_gb: 20
+mem_gb: 100
 
 array_parallelism: 96
 

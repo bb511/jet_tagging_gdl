@@ -1,5 +1,8 @@
+import logging
 import time
 from typing import Any, Dict, Tuple
+
+log = logging.getLogger(__name__)
 
 import torch
 from lightning import LightningModule
@@ -253,20 +256,18 @@ class DeepSetsInvariant(LightningModule):
     def on_train_epoch_end(self) -> None:
         train_loss = self.train_loss.compute()
         train_acc  = self.train_acc.compute()
-        print(
+        log.info(
             f"[Epoch {self.current_epoch:>3d}] "
-            f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}",
-            flush=True,
+            f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}"
         )
         if hasattr(self, "_timing_steps") and self._timing_steps > 0:
             avg_transform_ms = self._transform_time_acc / self._timing_steps
             avg_forward_ms   = self._forward_time_acc   / self._timing_steps
             self.log("perf/transform_ms", avg_transform_ms, on_step=False, on_epoch=True)
             self.log("perf/forward_ms",   avg_forward_ms,   on_step=False, on_epoch=True)
-            print(
+            log.info(
                 f"[Epoch {self.current_epoch:>3d}] "
-                f"Timing | transform_ms: {avg_transform_ms:.1f}  forward_ms: {avg_forward_ms:.1f}",
-                flush=True,
+                f"Timing | transform_ms: {avg_transform_ms:.1f}  forward_ms: {avg_forward_ms:.1f}"
             )
             self._transform_time_acc = 0.0
             self._forward_time_acc   = 0.0
@@ -280,12 +281,11 @@ class DeepSetsInvariant(LightningModule):
             self.log("perf/to_cpu_ms",  t["to_cpu_ms"]  / steps, on_step=False, on_epoch=True)
             self.log("perf/loop_ms",    t["loop_ms"]    / steps, on_step=False, on_epoch=True)
             self.log("perf/to_gpu_ms",  t["to_gpu_ms"]  / steps, on_step=False, on_epoch=True)
-            print(
+            log.info(
                 f"[Epoch {self.current_epoch:>3d}] "
                 f"Transform breakdown | to_cpu_ms: {t['to_cpu_ms']/steps:.2f}  "
                 f"loop_ms: {t['loop_ms']/steps:.2f}  "
-                f"to_gpu_ms: {t['to_gpu_ms']/steps:.2f}",
-                flush=True,
+                f"to_gpu_ms: {t['to_gpu_ms']/steps:.2f}"
             )
 
         # Clear cuda memory after each epoch
@@ -307,9 +307,8 @@ class DeepSetsInvariant(LightningModule):
         self.val_acc_best(acc)
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
         val_loss = self.val_loss.compute()
-        print(
-            f"[Epoch {self.current_epoch:>3d}]   Val | loss: {val_loss:.4f}  acc: {acc:.4f}  best: {self.val_acc_best.compute():.4f}",
-            flush=True,
+        log.info(
+            f"[Epoch {self.current_epoch:>3d}]   Val | loss: {val_loss:.4f}  acc: {acc:.4f}  best: {self.val_acc_best.compute():.4f}"
         )
 
     # ------------------------------------------------------------------

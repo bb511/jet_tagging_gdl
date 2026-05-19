@@ -6,7 +6,7 @@ import hydra
 import rootutils
 import torch
 import omegaconf
-from lightning import LightningDataModule, LightningModule, Trainer
+from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig  # noqa: F401 (open_dict removed; keep for type hints)
 
@@ -22,10 +22,12 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 from src.utils import (
     RankedLogger,
     extras,
+    instantiate_callbacks,
     instantiate_loggers,
     log_hyperparameters,
     task_wrapper,
 )
+from src.callbacks.results_table_callback import ResultsTableCallback
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -35,6 +37,7 @@ def _eval_one_checkpoint(
     ckpt_path: str,
     fold_label: str,
     run_stage: str = "eval",
+    shared_results_callback: Optional[ResultsTableCallback] = None,
 ) -> Dict[str, Any]:
     """Run trainer.test for a single checkpoint and return callback_metrics."""
     log.info(f"[{fold_label}] Instantiating datamodule <{cfg.data._target_}>")
@@ -46,13 +49,22 @@ def _eval_one_checkpoint(
     log.info(f"[{fold_label}] Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
+    log.info(f"[{fold_label}] Instantiating callbacks...")
+    callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+    if shared_results_callback is not None:
+        callbacks = [
+            shared_results_callback if isinstance(c, ResultsTableCallback) else c
+            for c in callbacks
+        ]
+
     log.info(f"[{fold_label}] Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, logger=logger)
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
     object_dict = {
         "cfg": cfg,
         "datamodule": datamodule,
         "model": model,
+        "callbacks": callbacks,
         "logger": logger,
         "trainer": trainer,
         "fold_idx": fold_label,
@@ -76,7 +88,9 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     Two modes:
     - Manifest mode: reads ``checkpoint_manifest_path`` (JSON written by
       train.py) and evaluates main + all folds in sequence. Each fold gets its
-      own logger run tagged with fold_idx and run_stage=eval.
+      own logger run tagged with fold_idx and run_stage=eval. A single shared
+      ResultsTableCallback accumulates test acc across k-fold runs (skipping
+      the main checkpoint, matching the training behaviour).
     - Legacy mode: evaluates a single checkpoint at ``cfg.ckpt_path``.
 
     :param cfg: DictConfig configuration composed by Hydra.
@@ -99,8 +113,14 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             f"Manifest mode: evaluating {len(runs)} run(s) from {manifest_path}"
         )
 
+        # Shared ResultsTableCallback accumulates test/acc across k-fold runs
+        # only (not the main run), mirroring the training behaviour.
+        shared_results_callback: Optional[ResultsTableCallback] = None
+        if cfg.get("callbacks") and cfg.callbacks.get("results_table"):
+            shared_results_callback = hydra.utils.instantiate(cfg.callbacks.results_table)
+            log.info("ResultsTableCallback instantiated (shared across k-fold eval runs).")
+
         all_metrics: Dict[str, Any] = {}
-        last_object_dict: Dict[str, Any] = {}
 
         for run_info in runs:
             fold_label: str = run_info["fold_label"]
@@ -110,15 +130,19 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 log.warning(f"[{fold_label}] Checkpoint not found, skipping: {ckpt}")
                 continue
 
+            # Don't accumulate the main checkpoint into the k-fold summary
+            fold_results_cb = None if fold_label == "main" else shared_results_callback
+
             metrics = _eval_one_checkpoint(
                 cfg=cfg,
                 ckpt_path=ckpt,
                 fold_label=fold_label,
                 run_stage=cfg.get("run_stage", "eval"),
+                shared_results_callback=fold_results_cb,
             )
             all_metrics.update({f"{fold_label}/{k}": v for k, v in metrics.items()})
 
-        return all_metrics, last_object_dict
+        return all_metrics, {}
 
     # ------------------------------------------------------------------
     # Legacy mode — single checkpoint
@@ -136,13 +160,17 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
+    log.info("Instantiating callbacks...")
+    callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, logger=logger)
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
     object_dict = {
         "cfg": cfg,
         "datamodule": datamodule,
         "model": model,
+        "callbacks": callbacks,
         "logger": logger,
         "trainer": trainer,
         "run_stage": cfg.get("run_stage", "eval"),

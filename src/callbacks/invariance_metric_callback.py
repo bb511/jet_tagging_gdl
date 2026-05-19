@@ -53,12 +53,11 @@ class InvarianceMetricCallback(L.Callback):
     # ------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------
-    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
-        dm = trainer.datamodule
-
+    def _setup_cached_data(self, dm) -> bool:
+        """Cache validation jets for invariance testing. Returns True on success."""
         if dm.x_val_raw is None:
             log.warning("InvarianceMetricCallback: x_val_raw not available.")
-            return
+            return False
 
         x_sorted = dm._restrict_and_sort_by_pt(
             dm.x_val_raw, dm.pt_idx, dm.nconstituents
@@ -75,6 +74,14 @@ class InvarianceMetricCallback(L.Callback):
         )
 
         log.info(f"Cached {n} validation jets for invariance testing.")
+        return True
+
+    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        self._setup_cached_data(trainer.datamodule)
+
+    def on_test_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        """Cache val jets for invariance computation during the test pass."""
+        self._setup_cached_data(trainer.datamodule)
 
     # ------------------------------------------------------------
     # Convert raw → model input
@@ -199,20 +206,17 @@ class InvarianceMetricCallback(L.Callback):
         return var_g.mean().item()
 
     # ------------------------------------------------------------
-    # Validation hook
+    # Core invariance computation (shared by val and test hooks)
     # ------------------------------------------------------------
-    def on_validation_epoch_end(self, trainer, pl_module):
+    def _compute_and_log_invariance(self, trainer, pl_module) -> None:
+        """Compute all invariance metrics and log them via pl_module.log."""
         if self._x_val_sorted is None:
-            return
-        if (trainer.current_epoch + 1) % self.check_every_n_epochs != 0:
             return
 
         pl_module.eval()
         dm = trainer.datamodule
         x_raw = self._x_val_sorted  # numpy (N, C, F_raw)
 
-        # augmentation.py is now torch-only; this helper converts numpy→torch,
-        # applies fn, and converts the result back to numpy for _to_model_input.
         def aug(fn, x_np, *args):
             x_t = torch.from_numpy(x_np).float()
             return fn(x_t, *args).numpy()
@@ -319,27 +323,21 @@ class InvarianceMetricCallback(L.Callback):
                 sync_dist=True,
             )
 
-        log.info(
-            " | ".join([f"{k}: {v:.4f}" for k, v in results.items()])
-        )
+        log.info(" | ".join([f"{k}: {v:.4f}" for k, v in results.items()]))
 
-    # Compute mean of each invariance metric after we are done
+    # ------------------------------------------------------------
+    # Validation hook
+    # ------------------------------------------------------------
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if self._x_val_sorted is None:
+            return
+        if (trainer.current_epoch + 1) % self.check_every_n_epochs != 0:
+            return
+        self._compute_and_log_invariance(trainer, pl_module)
+
+    # ------------------------------------------------------------
+    # Test hook — runs once at the end of trainer.test()
+    # ------------------------------------------------------------
     def on_test_epoch_end(self, trainer, pl_module):
-        # Gather all metrics logged during test
-        metrics = trainer.callback_metrics  # This is a dict of all logged metrics
-
-        # Filter for invariance metrics
-        invariance_metrics = {k: v.item() if hasattr(v, 'item') else v
-                            for k, v in metrics.items() if k.startswith("invariance/")}
-
-        if invariance_metrics:
-            log.info("Mean invariance metrics (test set):")
-            for k, v in invariance_metrics.items():
-                log.info(f"  {k}: {v:.4f}")
-            print("Mean invariance metrics (test set):")
-            for k, v in invariance_metrics.items():
-                print(f"  {k}: {v:.4f}")
-        else:
-            log.info("No invariance metrics found in test metrics.")
-            print("No invariance metrics found in test metrics.")
+        self._compute_and_log_invariance(trainer, pl_module)
 

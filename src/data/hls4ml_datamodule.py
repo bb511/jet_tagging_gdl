@@ -939,7 +939,7 @@ class HLS4MLDataModule(LightningDataModule):
     def _make_dataloader(self, dataset: HLS4MLDataset) -> DataLoader:
         return DataLoader(
             dataset=dataset,
-            batch_size=1,
+            batch_size=1,  # HLS4MLDataset already handles batching internally
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             collate_fn=lambda b: b[0],

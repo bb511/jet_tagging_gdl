@@ -1,22 +1,23 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=augmentation/hls4ml_nconst16_aug_none
+# python src/train.py experiment=baseline/hls4ml_nconst8_none
 
 defaults:
   - override /data: hls4ml
-  - override /model: deepsets_16
+  - override /model: deepsets_8
 
-tags: ["hls4ml", "nconst-16", "aug-none"]
+tags: ["hls4ml", "nconst-8", "baseline"]
 seed: 12345
 
 data:
-  nconstituents: 16
+  nconstituents: 8
   method: augmentation
   augmentation_scheme: none
   online_augmentation: true
-  batch_size: 2048
+  batch_size: 4096
   n_folds: 1
 
 trainer:
   max_epochs: 200
+
