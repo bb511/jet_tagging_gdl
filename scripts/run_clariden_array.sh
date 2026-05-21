@@ -180,7 +180,7 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 # BASELINE EXPERIEMENTS FOR ALL MODELS
 # ==================================================
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=baseline/hls4ml_nconst8_none \
@@ -196,7 +196,7 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     trainer.max_epochs=200
 
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=baseline/hls4ml_nconst16_none \
@@ -212,7 +212,7 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     trainer.max_epochs=200
 
 
-python3 src/train.py \
+python src/train.py \
     -m \
     hydra/launcher=submitit_slurm_clariden \
     experiment=baseline/hls4ml_nconst32_none \
@@ -232,7 +232,7 @@ python3 src/train.py \
 # AUGMENTATION EXPERIMENTS FOR ALL MODELS
 # ==================================================
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=augmentation/hls4ml_nconst8_aug_so2 \
@@ -248,7 +248,7 @@ python3 src/train.py \
 #     trainer.max_epochs=200
 
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=augmentation/hls4ml_nconst16_aug_so2 \
@@ -264,7 +264,7 @@ python3 src/train.py \
 #     trainer.max_epochs=200
 
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=augmentation/hls4ml_nconst32_aug_so2 \
@@ -285,7 +285,7 @@ python3 src/train.py \
 # # SYMM_LOSS EXPERIMENTS FOR ALL MODELS
 # # ==================================================
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst8_so2 \
@@ -300,7 +300,7 @@ python3 src/train.py \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst16_so2 \
@@ -315,7 +315,7 @@ python3 src/train.py \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst32_so2 \
@@ -335,7 +335,7 @@ python3 src/train.py \
 # # PERMUTATION EXPERIMENTS FOR DEEPSETS
 # # ==================================================
 
-# python3 src/train.py \
+# python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=permutation/hls4ml_nconst8_permutation \

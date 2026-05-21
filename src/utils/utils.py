@@ -221,10 +221,22 @@ def plot_features_overlap_from_datasets(
         f"original_samples={n_orig}, augmented_samples={n_aug})..."
     )
 
+    # Mask out zero-padded constituents (pt=0) to avoid a spurious spike at phi=0.
+    pt_feat = "j1_pt" if "j1_pt" in feature_names else ("pt" if "pt" in feature_names else None)
+    if pt_feat is not None:
+        pt_f_idx = feature_names.index(pt_feat)
+        real_mask_orig = (x_orig[mask_orig, :, pt_f_idx] > 0).reshape(-1)
+        real_mask_aug  = (x_aug[mask_aug,  :, pt_f_idx] > 0).reshape(-1)
+    else:
+        n_orig_flat = x_orig[mask_orig].shape[0] * x_orig.shape[1]
+        n_aug_flat  = x_aug[mask_aug].shape[0]  * x_aug.shape[1]
+        real_mask_orig = np.ones(n_orig_flat, dtype=bool)
+        real_mask_aug  = np.ones(n_aug_flat,  dtype=bool)
+
     for f_idx in range(num_features):
         ax = axes[f_idx]
-        data_orig = x_orig[mask_orig, :, f_idx].reshape(-1)
-        data_aug = x_aug[mask_aug, :, f_idx].reshape(-1)
+        data_orig = x_orig[mask_orig, :, f_idx].reshape(-1)[real_mask_orig]
+        data_aug = x_aug[mask_aug, :, f_idx].reshape(-1)[real_mask_aug]
 
         ax.hist(
             data_orig,

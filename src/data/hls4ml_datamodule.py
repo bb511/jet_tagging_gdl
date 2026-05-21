@@ -674,6 +674,16 @@ class HLS4MLDataModule(LightningDataModule):
             f"(class={class_idx}, aug={scheme}, samples={int(mask.sum())})..."
         )
 
+        # Build a boolean mask (N, C) that is True for real (non-padded) constituents.
+        # Padded slots have px=py=pz=0, so atan2(0,0)=0 always — masking them out
+        # prevents a spurious spike at phi=0 in the diagnostic histograms.
+        pt_feat = "j1_pt" if "j1_pt" in full_feat_names else "pt"
+        if pt_feat in full_feat_names:
+            pt_f_idx = full_feat_names.index(pt_feat)
+            real_mask = (x_orig[:, :, pt_f_idx] > 0).reshape(-1)  # (N*C,)
+        else:
+            real_mask = np.ones(x_orig.shape[0] * x_orig.shape[1], dtype=bool)
+
         num_features = x_orig.shape[2]
         feat_names   = full_feat_names[:num_features]
         num_rows     = int(np.ceil(num_features / num_cols))
@@ -682,13 +692,15 @@ class HLS4MLDataModule(LightningDataModule):
 
         for f_idx in range(num_features):
             ax = axes[f_idx]
+            orig_vals = x_orig[:, :, f_idx].reshape(-1)[real_mask]
+            aug_vals  = x_aug[:, :, f_idx].reshape(-1)[real_mask]
             ax.hist(
-                x_orig[:, :, f_idx].reshape(-1),
+                orig_vals,
                 bins=bins, density=True, histtype="step",
                 linewidth=2.5, label="Original", color="black",
             )
             ax.hist(
-                x_aug[:, :, f_idx].reshape(-1),
+                aug_vals,
                 bins=bins, density=True, histtype="step",
                 linewidth=2.5, label="Augmented", color="red",
             )

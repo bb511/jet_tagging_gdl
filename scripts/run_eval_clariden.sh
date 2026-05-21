@@ -13,12 +13,11 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 # Absolute project root so the manifest path survives the submitit CWD change.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-
 # ==================================================
 # BASELINE EVAL FOR ALL MODELS
 # ==================================================
 
-python3 src/eval.py \
+python src/eval.py \
     -m \
     hydra/launcher=submitit_slurm_clariden \
     experiment=baseline/hls4ml_nconst8_none \
@@ -33,7 +32,7 @@ python3 src/eval.py \
     callbacks.results_table.invariance_metric=flip \
     hydra.job.name="eval_baseline_deepsets_nconst8"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=baseline/hls4ml_nconst16_none \
@@ -48,7 +47,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_baseline_deepsets_nconst16" \
 #     hydra.job.name="eval_baseline_deepsets_nconst16"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=baseline/hls4ml_nconst32_none \
@@ -68,7 +67,7 @@ python3 src/eval.py \
 # AUGMENTATION EVAL FOR ALL MODELS
 # ==================================================
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=augmentation/hls4ml_nconst8_aug_so2 \
@@ -83,7 +82,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_aug_so2_mlp_nconst8" \
 #     hydra.job.name="eval_aug_so2_mlp_nconst8"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=augmentation/hls4ml_nconst16_aug_so2 \
@@ -98,7 +97,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_aug_so2_mlp_nconst16" \
 #     hydra.job.name="eval_aug_so2_mlp_nconst16"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=augmentation/hls4ml_nconst32_aug_so2 \
@@ -118,7 +117,7 @@ python3 src/eval.py \
 # SYMM_LOSS EVAL FOR ALL MODELS
 # ==================================================
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst8_so2 \
@@ -133,7 +132,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_symm_loss_mlp_nconst8" \
 #     hydra.job.name="eval_symm_loss_mlp_nconst8"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst16_so2 \
@@ -148,7 +147,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_symm_loss_mlp_nconst16" \
 #     hydra.job.name="eval_symm_loss_mlp_nconst16"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst32_so2 \
@@ -168,7 +167,7 @@ python3 src/eval.py \
 # PERMUTATION EVAL FOR DEEPSETS
 # ==================================================
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=permutation/hls4ml_nconst8_permutation \
@@ -183,7 +182,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst8" \
 #     hydra.job.name="eval_permutation_deepsets_nconst8"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=permutation/hls4ml_nconst16_permutation \
@@ -198,7 +197,7 @@ python3 src/eval.py \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst16" \
 #     hydra.job.name="eval_permutation_deepsets_nconst16"
 
-# python3 src/eval.py \
+# python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     experiment=permutation/hls4ml_nconst32_permutation \

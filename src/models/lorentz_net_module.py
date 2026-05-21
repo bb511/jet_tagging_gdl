@@ -51,7 +51,7 @@ class LGEB(nn.Module):
         self,
         n_input: int,
         n_output: int,
-        n_hidden: int,
+        n_hidden: int,  
         n_node_attr: int = 0,
         dropout_rate: float = 0.0,
         c_weight: float = 1.0,

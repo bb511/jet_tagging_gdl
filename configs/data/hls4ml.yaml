@@ -1,6 +1,6 @@
 _target_: src.data.hls4ml_datamodule.HLS4MLDataModule
-# data_dir: /cluster/scratch/agogia/datasets/
-data_dir: /capstor/scratch/cscs/agogia/datasets/
+data_dir: /cluster/scratch/agogia/datasets/
+# data_dir: /capstor/scratch/cscs/agogia/datasets/
 method: augmentation
 batch_size: 256
 num_workers: 4

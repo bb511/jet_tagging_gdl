@@ -1,189 +1,175 @@
 #!/bin/bash
-#SBATCH --job-name=model-sweep
-#SBATCH --partition=gpu
-#SBATCH --gpus=quadro_rtx_6000:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=20
-#SBATCH --time=120:00:00
-#SBATCH --array=0-0
-#SBATCH --output=logs/slurm/null
-#SBATCH --error=logs/slurm/null
+export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
+# export PYTHONPATH=/cluster/home/agogia/jet_tagging_gdl:$PYTHONPATH
 
-# ---------------------------------------------------------------
-# Job array: runs method-specific experiments for a given model.
-#
-# Usage:
-#   sbatch scripts/run_euler_array.sh deepsets augmentation
-#   sbatch scripts/run_euler_array.sh irc_deepsets augmentation
-#   sbatch scripts/run_euler_array.sh transformer augmentation
-#   sbatch scripts/run_euler_array.sh deepsets symm_loss
-#   sbatch scripts/run_euler_array.sh irc_deepsets symm_loss
-#   sbatch scripts/run_euler_array.sh mlp symm_loss
-#   sbatch scripts/run_euler_array.sh lipschitz symm_loss
-#   sbatch scripts/run_euler_array.sh deepsets equivariance       # permutation test
-#   sbatch scripts/run_euler_array.sh irc_deepsets equivariance   # no-augmentation baseline for invariant models
-#   sbatch scripts/run_euler_array.sh nano_pelican equivariance   # Lorentz+perm invariant baseline
-#   sbatch scripts/run_euler_array.sh lorentz_net equivariance    # LorentzNet invariant baseline
-#   sbatch scripts/run_euler_array.sh lipschitz equivariance      # Lipschitz baseline (no augmentation)
-#
-# Task-id mapping:
-#   augmentation:        task 0-3  -> nconst=8, task 4-7  -> nconst=16, task 8-11 -> nconst=32
-#   symm_loss:           task 0-2  -> nconst=8, task 3-5  -> nconst=16, task 6-8  -> nconst=32
-#   equivariance (deepsets):         task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
-#   equivariance (invariant models): task 0 -> nconst=8, task 1 -> nconst=16, task 2 -> nconst=32
-#   (nano_pelican uses a single config; nconst is set by the experiment YAML)
-# ---------------------------------------------------------------
+# ==================================================
+# BASELINE EXPERIMENTS FOR ALL MODELS
+# ==================================================
 
-set -euo pipefail
-
-# Model from command-line argument (required).
-MODEL="${1:?Usage: sbatch scripts/run_euler_array.sh <model_name> <augmentation|symm_loss>}"
-# Method from command-line argument (required).
-METHOD_RAW="${2:?Usage: sbatch scripts/run_euler_array.sh <model_name> <augmentation|symm_loss>}"
-METHOD="$(echo "$METHOD_RAW" | tr '[:upper:]' '[:lower:]')"
-# Any extra Hydra overrides passed after model/method, e.g. trainer.max_epochs=1
-EXTRA_ARGS=("${@:3}")
-
-resolve_model_flag() {
-    local model="$1"
-    local experiment="$2"
-
-    if [[ "$model" == "deepsets" ]]; then
-        echo ""
-        return
-    fi
-
-    # For models with per-nconst configs (mlp, irc_deepsets, lipschitz, etc.), extract nconst from experiment name
-    if [[ "$model" == "mlp" || "$model" == "irc_deepsets" || "$model" == "lipschitz" ]]; then
-        local nconst
-        nconst=$(echo "$experiment" | grep -oP 'nconst\K[0-9]+')
-        if [[ -n "$nconst" ]]; then
-            echo "model=${model}_${nconst}"
-            return
-        fi
-    fi
-
-    echo "model=$model"
-}
-
-# --- Experiment sets ---
-AUGMENTATION_EXPERIMENTS=(
-    # augmentation/hls4ml_nconst8_aug_none
-    # augmentation/hls4ml_nconst8_aug_so2
-    # augmentation/hls4ml_nconst8_aug_so3
-    # augmentation/hls4ml_nconst8_aug_lorentz
-    # augmentation/hls4ml_nconst16_aug_none
-    # augmentation/hls4ml_nconst16_aug_so2
-    # augmentation/hls4ml_nconst16_aug_so3
-    # augmentation/hls4ml_nconst16_aug_lorentz
-    # augmentation/hls4ml_nconst32_aug_none
-    # augmentation/hls4ml_nconst32_aug_so2
-    # augmentation/hls4ml_nconst32_aug_so3
-    # augmentation/hls4ml_nconst32_aug_lorentz
-)
-
-SYMM_LOSS_EXPERIMENTS=(
-    # symm_loss/hls4ml_symm_loss_nconst8_so2
-    # symm_loss/hls4ml_symm_loss_nconst8_so3
-    # symm_loss/hls4ml_symm_loss_nconst8_lorentz
-    # symm_loss/hls4ml_symm_loss_nconst16_so2
-    # symm_loss/hls4ml_symm_loss_nconst16_so3
-    # symm_loss/hls4ml_symm_loss_nconst16_lorentz
-    # symm_loss/hls4ml_symm_loss_nconst32_so2
-    # symm_loss/hls4ml_symm_loss_nconst32_so3
-    symm_loss/hls4ml_symm_loss_nconst32_lorentz
-)
-
-# EQUIVARIANCE_EXPERIMENTS=(
-#     equivariance/hls4ml_nconst8_permutation
-#     equivariance/hls4ml_nconst16_permutation
-#     equivariance/hls4ml_nconst32_permutation
-# )
-
-# Baseline for inherently invariant/equivariant models: no augmentation, no symm_loss.
-# Model is always provided via CLI (resolve_model_flag), not hardcoded in the experiment YAML.
-# EQUIVARIANCE_NONE_EXPERIMENTS=(
-#     equivariance/hls4ml_nconst8_none
-#     equivariance/hls4ml_nconst16_none
-#     equivariance/hls4ml_nconst32_none
-# )
-
-if [[ "$METHOD" == "augmentation" ]]; then
-    EXPERIMENTS=("${AUGMENTATION_EXPERIMENTS[@]}")
-elif [[ "$METHOD" == "symm_loss" ]]; then
-    EXPERIMENTS=("${SYMM_LOSS_EXPERIMENTS[@]}")
-elif [[ "$METHOD" == "equivariance" ]]; then
-    if [[ "$MODEL" == "deepsets" ]]; then
-        EXPERIMENTS=("${EQUIVARIANCE_EXPERIMENTS[@]}")
-    elif [[ "$MODEL" == "irc_deepsets" || "$MODEL" == "nano_pelican" || "$MODEL" == "lorentz_net" || "$MODEL" == "lipschitz" ]]; then
-        EXPERIMENTS=("${EQUIVARIANCE_NONE_EXPERIMENTS[@]}")
-    fi
-else
-    echo "Unsupported method '$METHOD_RAW'. Use one of: augmentation, symm_loss, equivariance"
-    exit 1
-fi
-
-# If the job array is larger than the chosen method's experiment set, skip extras.
-if (( SLURM_ARRAY_TASK_ID >= ${#EXPERIMENTS[@]} )); then
-    echo "Task ${SLURM_ARRAY_TASK_ID} has no experiment for method '${METHOD}'. Skipping."
-    echo "Hint: augmentation has 12 tasks (0-11), symm_loss has 9 (0-8), equivariance has 3 (0-2)."
-    exit 0
-fi
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=baseline/hls4ml_nconst8_none \
+#     +experiment_name=hls4ml_nconst8_aug_none \
+#     model=deepsets_8 \
+#     data.nconstituents=8 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst8" \
+#     hydra.job.name="baseline_deepsets_nconst8" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
 
 
-EXPERIMENT="${EXPERIMENTS[$SLURM_ARRAY_TASK_ID]}"
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=baseline/hls4ml_nconst16_none \
+#     +experiment_name=hls4ml_nconst16_aug_none \
+#     model=deepsets_16 \
+#     data.nconstituents=16 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst16" \
+#     hydra.job.name="baseline_deepsets_nconst16" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
 
-MODEL_FLAG=$(resolve_model_flag "$MODEL" "$EXPERIMENT")
-RUN_NAME="${EXPERIMENT}_${METHOD}"
 
-# Extract nconst from experiment string if present
-NCONST=""
-if [[ "$EXPERIMENT" =~ nconst([0-9]+) ]]; then
-    NCONST="${BASH_REMATCH[1]}"
-fi
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=baseline/hls4ml_nconst32_none \
+#     +experiment_name=hls4ml_nconst32_aug_none \
+#     model=deepsets_32 \
+#     data.nconstituents=32 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst32" \
+#     hydra.job.name="baseline_deepsets_nconst32" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
 
-# Create slurm log directory
-mkdir -p logs/slurm/${SLURM_ARRAY_JOB_ID}
 
-# Descriptive log file name: <model>_<experiment_basename>_<taskid>
-EXPERIMENT_BASENAME=$(basename "$EXPERIMENT")
-LOG_BASE="logs/slurm/${SLURM_ARRAY_JOB_ID}/${MODEL}_${EXPERIMENT_BASENAME}_${SLURM_ARRAY_TASK_ID}"
-exec > "${LOG_BASE}.out" 2> "${LOG_BASE}.err"
-# SLURM will handle stdout and stderr redirection
+# ==================================================
+# AUGMENTATION EXPERIMENTS FOR ALL MODELS
+# ==================================================
 
-# Force a unique Hydra run dir per SLURM array task to avoid checkpoint collisions
-# between concurrent tasks with different model shapes.
-HYDRA_RUN_DIR="logs/train/runs/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}_${MODEL}_${METHOD}_${EXPERIMENT_BASENAME}"
+#  python src/train.py \
+#      -m \
+#      hydra/launcher=submitit_slurm_euler \
+#      experiment=augmentation/hls4ml_nconst8_aug_lorentz \
+#      +experiment_name=hls4ml_nconst8_aug_lorentz \
+#      model=deepsets_8 \
+#      data.nconstituents=8 \
+#      data.n_folds=5 \
+#      trainer=gpu \
+#      data.data_dir="$HLS4ML_DATA_DIR" \
+#      hydra.sweep.dir="logs/slurm/aug_lorentz_deepsets_nconst8" \
+#      hydra.job.name="aug_lorentz_deepsets_nconst8" \
+#      separate_train_eval_mode=true \
+#      trainer.max_epochs=200
 
-echo "============================================"
-echo "Job ID:       $SLURM_ARRAY_JOB_ID"
-echo "Task ID:      $SLURM_ARRAY_TASK_ID"
-echo "Node:         $(hostname)"
-echo "GPU:          $CUDA_VISIBLE_DEVICES"
-echo "Model:        $MODEL"
-echo "Method:       $METHOD"
-echo "Experiment:   $EXPERIMENT"
-echo "Nconst:       $NCONST"
-echo "============================================"
 
-MANIFEST_PATH="${HYDRA_RUN_DIR}/checkpoint_manifest.json"
+# python src/train.py \
+#      -m \
+#      hydra/launcher=submitit_slurm_euler \
+#      experiment=augmentation/hls4ml_nconst16_aug_lorentz \
+#      +experiment_name=hls4ml_nconst16_aug_lorentz \
+#      model=deepsets_16 \
+#      data.nconstituents=16 \
+#      data.n_folds=5 \
+#      trainer=gpu \
+#      data.data_dir="$HLS4ML_DATA_DIR" \
+#      hydra.sweep.dir="logs/slurm/aug_lorentz_deepsets_nconst16" \
+#      hydra.job.name="aug_lorentz_deepsets_nconst16" \
+#      separate_train_eval_mode=true \
+#      trainer.max_epochs=200
 
-# --- Phase 1: Train (fit-only, emits manifest) ---
-echo "--- Phase 1: Training ---"
-if [[ "$MODEL" == "transformer" && -n "$NCONST" ]]; then
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.nconstituents="$NCONST" data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}"
-else
-    srun python src/train.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu data.n_folds=5 hydra.run.dir="$HYDRA_RUN_DIR" separate_train_eval_mode=true "${EXTRA_ARGS[@]}" 
-fi
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
+#     +experiment_name=hls4ml_nconst32_aug_lorentz \
+#     model=deepsets_32 \
+#     data.nconstituents=32 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/aug_lorentz_deepsets_nconst32" \
+#     hydra.job.name="aug_lorentz_deepsets_nconst32" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
 
-# --- Phase 2: Eval (manifest-driven, test-only) ---
-# echo "--- Phase 2: Evaluation ---"
-srun python src/eval.py $MODEL_FLAG experiment="$EXPERIMENT" +experiment_name="$RUN_NAME" trainer=gpu hydra.run.dir="$HYDRA_RUN_DIR" checkpoint_manifest_path="$MANIFEST_PATH" "${EXTRA_ARGS[@]}" 
 
-# --- Phase 3: Aggregate MLflow results ---
-# echo "--- Phase 3: Aggregating results ---"
-# python src/utils/build_results_table_from_mlflow.py \
-#     --mlflow-dir logs/mlflow/mlruns \
-#     --output "results/summary_results_table.csv" \
-#     --min-folds 6 \
-#     --method "$METHOD"
+# ==================================================
+# SYMM_LOSS EXPERIMENTS FOR ALL MODELS
+# ==================================================
+
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=symm_loss/hls4ml_symm_loss_nconst8_so2 \
+#     +experiment_name=hls4ml_symm_loss_nconst8_so2 \
+#     model=mlp_8 \
+#     data.nconstituents=8 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/symm_loss_so2_mlp_nconst8" \
+#     hydra.job.name="symm_loss_so2_mlp_nconst8" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
+
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=symm_loss/hls4ml_symm_loss_nconst16_so2 \
+#     +experiment_name=hls4ml_symm_loss_nconst16_so2 \
+#     model=mlp_16 \
+#     data.nconstituents=16 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/symm_loss_so2_mlp_nconst16" \
+#     hydra.job.name="symm_loss_so2_mlp_nconst16" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
+
+python src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_euler \
+    experiment=symm_loss/hls4ml_symm_loss_nconst32_so2 \
+    +experiment_name=hls4ml_symm_loss_nconst32_so2 \
+    model=mlp_32 \
+    data.nconstituents=32 \
+    data.n_folds=5 \
+    trainer=gpu \
+    data.data_dir="$HLS4ML_DATA_DIR" \
+    hydra.sweep.dir="logs/slurm/symm_loss_so2_mlp_nconst32" \
+    hydra.job.name="symm_loss_so2_mlp_nconst32" \
+    separate_train_eval_mode=true \
+    trainer.max_epochs=200
+
+
+# ==================================================
+# PERMUTATION EXPERIMENTS FOR DEEPSETS
+# ==================================================
+
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=permutation/hls4ml_nconst8_permutation \
+#     +experiment_name=hls4ml_nconst8_permutation \
+#     model=deepsets_8 \
+#     data.nconstituents=8 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/permutation_deepsets_nconst8" \
+#     hydra.job.name="permutation_deepsets_nconst8" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200

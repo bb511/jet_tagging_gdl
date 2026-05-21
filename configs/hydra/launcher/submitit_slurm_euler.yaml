@@ -1,0 +1,29 @@
+# @package hydra.launcher
+defaults:
+  - submitit_slurm
+
+submitit_folder: /cluster/scratch/agogia/submitit/%j
+
+account: null
+qos: null
+
+partition: gpu
+timeout_min: 1440
+cpus_per_task: 4
+tasks_per_node: 1
+nodes: 1
+
+array_parallelism: 20
+
+name: ${hydra.job.name}
+
+additional_parameters:
+  gpus: "1"
+  mem_per_cpu: "20G"
+
+setup:
+  - source /cluster/home/agogia/pl_hydra_implementation/HYDRA/bin/activate
+  - export PYTHONPATH=/cluster/home/agogia/jet_tagging_gdl:$PYTHONPATH
+
+signal_delay_s: 120
+max_num_timeout: 0
