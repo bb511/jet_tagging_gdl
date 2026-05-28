@@ -21,10 +21,10 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: null
+    storage: sqlite:///nano_pelican_hparams_search.db
 
     # name of the study to persist optimization results
-    study_name: null
+    study_name: nano_pelican_hparams_search
 
     # number of parallel workers
     n_jobs: 1
@@ -45,11 +45,19 @@ hydra:
 
     # define hyperparameter search space
     params:
-      model.optimizer.lr: interval(0.0001, 0.1) # Logarithmic sampling
-      model.optimiser.weight_decay: choice(0, 1e-7, 1e-6, 1e-8) # Logarithmic sampling
-      model.optimizer.betas: choice()
+      model.optimizer.lr: tag(log, interval(1e-4, 2e-2)) # In the original implementation of nano-pelican, the learning rate is set to 1e-2 so we can sort of sample around that range 
+      model.optimizer.weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6) # In the original implementation of nano-pelican, the weight decay is set to 0 so we test that and a few values
+      model.optimizer.betas: choice([0.9, 0.999], [0.95, 0.999], [0.9, 0.98]) # In the original implementation of nano-pelican, the betas are set to [0.9, 0.999] so we test that and a few values
+      model.n_hidden: choice(4, 8, 16) # This parameter controls the number of feature maps that the model willl create 
+      model.activation: choice("relu", "leakyrelu", "silu")
+      model.drop_rate: choice(0.0, 0.1, 0.2, 0.3)
+      model.drop_rate_out: choice(0.0, 0.1, 0.2, 0.3)
+      # model.batchnorm: choice("b", "i")
+
+
+
     
     #   data.batch_size: choice(32, 64, 128, 256) 
     #   model.net.lin1_size: choice(64, 128, 256) 
     #   model.net.lin2_size: choice(64, 128, 256)
-    #   model.net.lin3_size: choice(32, 64, 128, 256)
+    #   model.net.lin3_size: choice(32, 64, 128, 256) 

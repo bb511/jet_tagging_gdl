@@ -89,25 +89,49 @@ def create_so2_rot_matrices(
     return mats
 
 
+def sample_haar_so3_rot_matrices(
+    num_rotations: int,
+    device: torch.device = torch.device("cpu"),
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Create Haar-random SO(3) matrices from unit quaternions on *device*."""
+    if num_rotations <= 0:
+        return torch.empty((0, 3, 3), dtype=dtype, device=device)
+
+    quat = torch.randn(num_rotations, 4, device=device, dtype=torch.float32)
+    quat = quat / quat.norm(dim=1, keepdim=True).clamp(min=1e-8)
+
+    x = quat[:, 0]
+    y = quat[:, 1]
+    z = quat[:, 2]
+    w = quat[:, 3]
+
+    xx, yy, zz = x * x, y * y, z * z
+    xy, xz, yz = x * y, x * z, y * z
+    wx, wy, wz = w * x, w * y, w * z
+
+    mats = torch.empty(num_rotations, 3, 3, device=device, dtype=torch.float32)
+    mats[:, 0, 0] = 1.0 - 2.0 * (yy + zz)
+    mats[:, 0, 1] = 2.0 * (xy - wz)
+    mats[:, 0, 2] = 2.0 * (xz + wy)
+    mats[:, 1, 0] = 2.0 * (xy + wz)
+    mats[:, 1, 1] = 1.0 - 2.0 * (xx + zz)
+    mats[:, 1, 2] = 2.0 * (yz - wx)
+    mats[:, 2, 0] = 2.0 * (xz - wy)
+    mats[:, 2, 1] = 2.0 * (yz + wx)
+    mats[:, 2, 2] = 1.0 - 2.0 * (xx + yy)
+    return mats.to(dtype)
+
+
 def create_so3_rot_matrices(
     num_rotations: int,
     rng: np.random.Generator,
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
-    """Create *num_rotations* Haar-random SO(3) matrices via batched QR on *device*."""
-    if num_rotations <= 0:
-        return torch.empty((0, 3, 3), dtype=dtype, device=device)
-    M = torch.randn(num_rotations, 3, 3, device=device, dtype=torch.float32)
-    Q, R = torch.linalg.qr(M)
-    # Fix sign convention (match numpy: column *= sign of diagonal of R)
-    signs = torch.sign(torch.diagonal(R, dim1=-2, dim2=-1))  # (B, 3)
-    Q = Q * signs.unsqueeze(1)
-    # Ensure det = +1 (not a reflection)
-    neg = torch.linalg.det(Q) < 0
-    if neg.any():
-        Q[neg, :, 0] *= -1
-    return Q.to(dtype)
+    """Create *num_rotations* Haar-random SO(3) matrices on *device*."""
+    _ = rng
+    return sample_haar_so3_rot_matrices(num_rotations, device=device, dtype=dtype)
 
 
 # ── SO(2) augmentation ─────────────────────────────────────────────

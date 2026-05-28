@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any, Dict, Tuple
 
 log = logging.getLogger(__name__)
@@ -129,7 +130,9 @@ class MLPClassifier(LightningModule):
         if y.ndim > 1 and y.shape[1] > 1:
             y = torch.argmax(y, dim=1)
 
+        t_fwd0 = time.perf_counter()
         logits = self.forward(x)
+        t_fwd1 = time.perf_counter()
 
         if self.method == "symm_loss":
             # Build symmetry-augmented batch on the fly.
@@ -141,22 +144,36 @@ class MLPClassifier(LightningModule):
                     "Ensure setup() has been called so the datamodule's "
                     "feature_names are available before training starts."
                 )
+            t_tr0 = time.perf_counter()
             x_sym, _ = build_symmetric_batch(
                 x,
                 group=self.group,
                 feature_names=self.feature_names,
                 norm_scales=self.norm_scales,
             )
+            t_tr1 = time.perf_counter()
+
+            t_fwd2 = time.perf_counter()
             logits_sym = self.forward(x_sym)
+            t_fwd3 = time.perf_counter()
             cls_loss = cross_entropy(logits, y)
             loss, _ = self.criterion(
                 cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
             )
 
+            if self.training and hasattr(self, "_timing_steps"):
+                self._transform_time_acc += (t_tr1 - t_tr0) * 1000
+                self._forward_time_acc += (t_fwd1 - t_fwd0 + t_fwd3 - t_fwd2) * 1000
+                self._timing_steps += 1
+
         else:
             # augmentation / another_method — plain cross-entropy
             # (augmentation differences are handled at the data level)
             loss = self.criterion(logits, y)
+
+            if self.training and hasattr(self, "_timing_steps"):
+                self._forward_time_acc += (t_fwd1 - t_fwd0) * 1000
+                self._timing_steps += 1
 
         preds = torch.argmax(logits, dim=1)
         return loss, preds, y
@@ -187,6 +204,9 @@ class MLPClassifier(LightningModule):
         self.val_loss.reset()
         self.val_acc.reset()
         self.val_acc_best.reset()
+        self._transform_time_acc: float = 0.0
+        self._forward_time_acc: float = 0.0
+        self._timing_steps: int = 0
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -207,6 +227,19 @@ class MLPClassifier(LightningModule):
             f"[Epoch {self.current_epoch:>3d}] "
             f"Train | loss: {train_loss:.4f}  acc: {train_acc:.4f}"
         )
+
+        if self._timing_steps > 0:
+            avg_transform_ms = self._transform_time_acc / self._timing_steps
+            avg_forward_ms = self._forward_time_acc / self._timing_steps
+            self.log("perf/transform_ms", avg_transform_ms, on_step=False, on_epoch=True)
+            self.log("perf/forward_ms", avg_forward_ms, on_step=False, on_epoch=True)
+            log.info(
+                f"[Epoch {self.current_epoch:>3d}] "
+                f"Timing | transform_ms: {avg_transform_ms:.1f}  forward_ms: {avg_forward_ms:.1f}"
+            )
+            self._transform_time_acc = 0.0
+            self._forward_time_acc = 0.0
+            self._timing_steps = 0
 
         garbage_collection_cuda()
 

@@ -244,7 +244,14 @@ def collect_fold_records(mlflow_root: Path) -> List[FoldRecord]:
             continue
 
         nconst = int(safe_float(nconst_raw))
-        method = method_raw.strip().lower() if method_raw else "augmentation"
+        method_raw = method_raw.strip().lower() if method_raw else "augmentation"
+        aug_val = aug.strip().lower()
+        if method_raw == "augmentation" and aug_val == "none":
+            method = "baseline"
+        elif method_raw == "equivariance":
+            method = "permutation"
+        else:
+            method = method_raw
 
         # --- Run stage (None for legacy runs without this param) ---
         run_stage = read_param(run_dir, "run_stage")
@@ -453,13 +460,25 @@ def write_csv(rows: List[Dict], output_path: Path) -> None:
     if not rows:
         print("[write_csv] No rows to write — table is empty.")
         return
+    
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = list(rows[0].keys())
-    with output_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"[write_csv] Wrote {len(rows)} rows to {output_path}")
+    
+    # Group rows by method to write separate CSV files
+    by_method: Dict[str, List[Dict]] = {}
+    for r in rows:
+        by_method.setdefault(str(r.get("method", "augmentation")).lower(), []).append(r)
+
+    stem = output_path.with_suffix("")
+    suffix = output_path.suffix
+
+    for method, method_rows in sorted(by_method.items()):
+        method_path = output_path.parent / f"{stem.name}_{method}{suffix}"
+        with method_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(method_rows)
+        print(f"[write_csv] Wrote {len(method_rows)} rows to {method_path}")
 
 
 def _latex_table_body(rows: List[Dict]) -> List[str]:

@@ -43,6 +43,7 @@ from src.utils.augmentation import (
     create_so3_rot_matrices,
     feature_index,
     get_norm_scale,
+    sample_haar_so3_rot_matrices,
     so3_jet_filter,
     wrap_phi,
 )
@@ -246,14 +247,7 @@ def _apply_random_so3_gpu(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Sample B Haar-random SO(3) matrices on GPU and apply them in one einsum."""
     B = x.shape[0]
-    M = torch.randn(B, 3, 3, device=x.device, dtype=torch.float32)
-    Q, R = torch.linalg.qr(M)
-    signs = torch.sign(torch.diagonal(R, dim1=-2, dim2=-1))
-    Q = Q * signs.unsqueeze(1)
-    neg = torch.linalg.det(Q) < 0
-    if neg.any():
-        Q[neg, :, 0] *= -1
-    mats = Q.to(x.dtype)
+    mats = sample_haar_so3_rot_matrices(B, device=x.device, dtype=x.dtype)
     return _apply_batched_so3(x, mats, names, norm_scales, apply_filter), mats
 
 

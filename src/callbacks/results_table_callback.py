@@ -17,6 +17,7 @@ class ResultsTableCallback(L.Callback):
         self,
         output_path: str = "results/results_table.csv",
         n_folds: int = 1,
+        method: str = "baseline",
         model_name: str = "model",
         augmentation_scheme: str = "none",
         nconstituents: int = 0,
@@ -28,9 +29,25 @@ class ResultsTableCallback(L.Callback):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.n_folds = int(n_folds)
+        self.run_method_raw = method
         self.model_name = model_name
         self.augmentation_scheme = str(augmentation_scheme).lower()
+        
+        # Determine the display method based on the raw method and augmentation scheme
+        if self.run_method_raw == "augmentation" and self.augmentation_scheme == "none":
+            self.display_method = "baseline"
+        elif self.run_method_raw == "equivariance":
+            self.display_method = "permutation"
+        elif self.run_method_raw == "augmentation":
+            self.display_method = "augmentation"
+        else:
+            self.display_method = self.run_method_raw
+            
         self.nconstituents = int(nconstituents)
+        
+        # Override output_path to include the method, e.g., results_table_baseline.csv
+        base_path = Path(output_path)
+        self.output_path = base_path.parent / f"{base_path.stem}_{self.display_method}{base_path.suffix}"
         self.selected_metric_mode = selected_metric_mode
         self.invariance_metric = invariance_metric
         self.INVARIANCE_KEYS = (
@@ -129,6 +146,7 @@ class ResultsTableCallback(L.Callback):
         flops_mean = self._safe_mean(flops_folds)
 
         row = {
+            "method": self.display_method,
             "model": self.model_name,
             "augmentation_scheme": self.augmentation_scheme,
             "nconstituents": self.nconstituents,
@@ -151,6 +169,7 @@ class ResultsTableCallback(L.Callback):
         }
 
         fieldnames = [
+            "method",
             "model",
             "augmentation_scheme",
             "nconstituents",
@@ -182,7 +201,7 @@ class ResultsTableCallback(L.Callback):
         inv_summary = "" if selected_key == "n/a" else f", {selected_key}={row['selected_inv_pm']}"
         log.info(
             f"[ResultsTableCallback] Written summary row -> {self.output_path}\n"
-            f"  model={self.model_name}, aug={self.augmentation_scheme}, nconst={self.nconstituents}\n"
+            f"  method={self.display_method}, model={self.model_name}, aug={self.augmentation_scheme}, nconst={self.nconstituents}\n"
             f"  test_acc={row['test_acc_pm']}{inv_summary}, flops={row['flops_mean']}"
         )
 
@@ -190,6 +209,7 @@ class ResultsTableCallback(L.Callback):
         print(
             f"\n{'='*60}\n"
             f"Results Table Updated: {self.output_path}\n"
+            f"Method:             {self.display_method}\n"
             f"Model:              {self.model_name}\n"
             f"Augmentation:       {self.augmentation_scheme}\n"
             f"nconst:             {self.nconstituents}\n"
