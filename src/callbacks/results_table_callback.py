@@ -144,6 +144,13 @@ class ResultsTableCallback(L.Callback):
         selected_mean = self._safe_mean(selected_values)
         selected_std = self._safe_std(selected_values)
         flops_mean = self._safe_mean(flops_folds)
+        
+        so2_mean = self._safe_mean(so2_values)
+        so2_std = self._safe_std(so2_values)
+        so3_mean = self._safe_mean(so3_values)
+        so3_std = self._safe_std(so3_values)
+        lor_mean = self._safe_mean(lor_values)
+        lor_std = self._safe_std(lor_values)
 
         row = {
             "method": self.display_method,
@@ -158,9 +165,15 @@ class ResultsTableCallback(L.Callback):
             "selected_inv_mean": round(selected_mean, 6),
             "selected_inv_std": round(selected_std, 6),
             "selected_inv_pm": self._format_pm(selected_mean, selected_std),
-            f"so2_{m}_mean": round(self._safe_mean(so2_values), 6),
-            f"so3_{m}_mean": round(self._safe_mean(so3_values), 6),
-            f"lorentz_{m}_mean": round(self._safe_mean(lor_values), 6),
+            f"so2_{m}_mean": round(so2_mean, 6),
+            f"so2_{m}_std": round(so2_std, 6),
+            f"so2_{m}_pm": self._format_pm(so2_mean, so2_std),
+            f"so3_{m}_mean": round(so3_mean, 6),
+            f"so3_{m}_std": round(so3_std, 6),
+            f"so3_{m}_pm": self._format_pm(so3_mean, so3_std),
+            f"lorentz_{m}_mean": round(lor_mean, 6),
+            f"lorentz_{m}_std": round(lor_std, 6),
+            f"lorentz_{m}_pm": self._format_pm(lor_mean, lor_std),
             "flops_mean": round(flops_mean, 3) if not math.isnan(flops_mean) else float("nan"),
             "test_acc_folds": ";".join(f"{v:.6f}" for v in test_folds),
             "selected_inv_folds": ";".join(
@@ -182,8 +195,14 @@ class ResultsTableCallback(L.Callback):
             "selected_inv_std",
             "selected_inv_pm",
             f"so2_{m}_mean",
+            f"so2_{m}_std",
+            f"so2_{m}_pm",
             f"so3_{m}_mean",
+            f"so3_{m}_std",
+            f"so3_{m}_pm",
             f"lorentz_{m}_mean",
+            f"lorentz_{m}_std",
+            f"lorentz_{m}_pm",
             "flops_mean",
             "test_acc_folds",
             "selected_inv_folds",
