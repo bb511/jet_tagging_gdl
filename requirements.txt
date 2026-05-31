@@ -173,6 +173,11 @@ hydra-core==1.3.2
 hydra-colorlog==1.2.0
 hydra-optuna-sweeper==1.2.0
 
+
+# --------- SQL --------- #
+SQLAlchemy<2.0.0
+# ray[tune]  # for distributed hyperparameter tuning (optional, can be heavy to
+
 # --------- loggers --------- #
 # wandb
 # neptune-client
