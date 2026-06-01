@@ -11,7 +11,7 @@ seed: 12345
 
 data:
   nconstituents: 16
-  method: none
+  method: augmentation
   augmentation_scheme: none
   online_augmentation: true
   batch_size: 2048
