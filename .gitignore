@@ -17,11 +17,6 @@ bin/
 
 # Ignore logs and outputs
 logs/
-logs/slurm/
-logs/train/
-results/
-*.out
-*.log
 
 # Ignore Hydra outputs and working directories
 outputs/
@@ -46,10 +41,12 @@ build/
 # Ignore data and scratch directories
 data/
 *.npz
-*.csv
+# *.csv
 *.tex
 
 # Ignore user-specific files
 *.swp
 *.swo
 *~
+
+share/
