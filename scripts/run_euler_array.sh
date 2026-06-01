@@ -11,13 +11,13 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     hydra/launcher=submitit_slurm_euler \
 #     experiment=baseline/hls4ml_nconst8_none \
 #     +experiment_name=hls4ml_nconst8_aug_none \
-#     model=deepsets_8 \
+#     model=irc_deepsets_8 \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst8" \
-#     hydra.job.name="baseline_deepsets_nconst8" \
+#     hydra.sweep.dir="logs/slurm/baseline_irc_deepsets_nconst8" \
+#     hydra.job.name="baseline_irc_deepsets_nconst8" \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
@@ -27,13 +27,13 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     hydra/launcher=submitit_slurm_euler \
 #     experiment=baseline/hls4ml_nconst16_none \
 #     +experiment_name=hls4ml_nconst16_aug_none \
-#     model=deepsets_16 \
+#     model=nano_pelican \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst16" \
-#     hydra.job.name="baseline_deepsets_nconst16" \
+#     hydra.sweep.dir="logs/slurm/baseline_nano_pelican_nconst16" \
+#     hydra.job.name="baseline_nano_pelican_nconst16" \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
@@ -43,13 +43,13 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     hydra/launcher=submitit_slurm_euler \
 #     experiment=baseline/hls4ml_nconst32_none \
 #     +experiment_name=hls4ml_nconst32_aug_none \
-#     model=deepsets_32 \
+#     model=nano_pelican \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst32" \
-#     hydra.job.name="baseline_deepsets_nconst32" \
+#     hydra.sweep.dir="logs/slurm/baseline_nano_pelican_nconst32" \
+#     hydra.job.name="baseline_nano_pelican_nconst32" \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
@@ -112,45 +112,45 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 # python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
-#     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
+#     experiment=symm_loss/hls4ml_symm_loss_nconst8_so3 \
+#     +experiment_name=hls4ml_symm_loss_nconst8_so3 \
 #     model=deepsets_8 \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/symm_loss_lorentz_deepsets_nconst8" \
-#     hydra.job.name="symm_loss_lorentz_deepsets_nconst8" \
+#     hydra.sweep.dir="logs/slurm/symm_loss_so3_deepsets_nconst8" \
+#     hydra.job.name="symm_loss_so3_deepsets_nconst8" \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 # python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
-#     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
+#     experiment=symm_loss/hls4ml_symm_loss_nconst16_so3 \
+#     +experiment_name=hls4ml_symm_loss_nconst16_so3 \
 #     model=deepsets_16 \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/symm_loss_lorentz_deepsets_nconst16" \
-#     hydra.job.name="symm_loss_lorentz_deepsets_nconst16" \
+#     hydra.sweep.dir="logs/slurm/symm_loss_so3_deepsets_nconst16" \
+#     hydra.job.name="symm_loss_so3_deepsets_nconst16" \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 # python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
-#     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
+#     experiment=symm_loss/hls4ml_symm_loss_nconst32_so3 \
+#     +experiment_name=hls4ml_symm_loss_nconst32_so3 \
 #     model=deepsets_32 \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/symm_loss_lorentz_deepsets_nconst32" \
-#     hydra.job.name="symm_loss_lorentz_deepsets_nconst32" \
+#     hydra.sweep.dir="logs/slurm/symm_loss_so3_deepsets_nconst32" \
+#     hydra.job.name="symm_loss_so3_deepsets_nconst32" \
 #     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
@@ -178,22 +178,22 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 
 # ==================================================
 # HYPERPARAMETER SEARCH FOR NANO-PELICAN
-# # ==================================================
-python src/train.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=baseline/hls4ml_nconst32_none \
-    +experiment_name=hls4ml_nconst32_aug_none \
-    model=nano_pelican \
-    data.nconstituents=32 \
-    data.n_folds=0 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    ~logger \
-    ~callbacks \
-    hydra.sweep.dir="logs/slurm/hyperparameter_search_nano_pelican" \
-    hydra.job.name="hyperparameter_search_nano_pelican" \
-    trainer.max_epochs=50 \
-    hparams_search=nano_pelican_optuna \
-    hydra.sweeper.n_trials=20 \
-    hydra.sweeper.direction="maximize"
+# # ================================================
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=baseline/hls4ml_nconst32_none \
+#     +experiment_name=hls4ml_nconst32_aug_none \
+#     model=nano_pelican \
+#     data.nconstituents=32 \
+#     data.n_folds=0 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     ~logger \
+#     ~callbacks \
+#     hydra.sweep.dir="logs/slurm/hyperparameter_search_nano_pelican" \
+#     hydra.job.name="hyperparameter_search_nano_pelican" \
+#     trainer.max_epochs=50 \
+#     hparams_search=nano_pelican_optuna \
+#     hydra.sweeper.n_trials=20 \
+#     hydra.sweeper.direction="maximize"
