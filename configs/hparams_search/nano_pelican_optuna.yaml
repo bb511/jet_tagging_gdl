@@ -21,7 +21,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///nano_pelican_hparams_search.db
+    storage: sqlite:////cluster/home/agogia/jet_tagging_gdl/logs/optuna/nano_pelican_hparams_search.db
 
     # name of the study to persist optimization results
     study_name: nano_pelican_hparams_search

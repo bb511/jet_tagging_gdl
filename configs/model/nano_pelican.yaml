@@ -15,10 +15,10 @@ activate_agg_out: true
 activate_lin_out: false
 factorize: false
 masked: true
-dropout: true
-drop_rate: 0.05
-drop_rate_out: 0.05
-batchnorm: null
+dropout: false
+drop_rate: 0.0
+drop_rate_out: 0.0
+batchnorm: none
 
 # Training
 method: ${data.method}
@@ -27,15 +27,6 @@ symm_loss_weight: 0.1
 optimizer:
   _target_: torch.optim.AdamW
   _partial_: true
-  lr: 0.001
-  weight_decay: 0.0
+  lr: 1.0e-03
+  weight_decay: 1.0e-05
   betas: [0.9, 0.999]
-
-
-# scheduler:
-#   _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
-#   _partial_: true
-#   mode: "max"
-#   patience: 80
-#   factor: 0.1
-#   threshold: 1e-4
