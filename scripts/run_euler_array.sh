@@ -38,20 +38,21 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     trainer.max_epochs=200
 
 
-# python src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_euler \
-#     experiment=baseline/hls4ml_nconst32_none \
-#     +experiment_name=hls4ml_nconst32_aug_none \
-#     model=nano_pelican \
-#     data.nconstituents=32 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/baseline_nano_pelican_nconst32" \
-#     hydra.job.name="baseline_nano_pelican_nconst32" \
-#     separate_train_eval_mode=true \
-#     trainer.max_epochs=200
+python src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_euler \
+    experiment=baseline/hls4ml_nconst32_none \
+    +experiment_name=hls4ml_nconst32_aug_none \
+    model=pelican \
+    data.nconstituents=32 \
+    data.n_folds=5 \
+    trainer=gpu \
+    data.data_dir="$HLS4ML_DATA_DIR" \
+    data.batch_size=4096 \
+    hydra.sweep.dir="logs/slurm/baseline_pelican_nconst32" \
+    hydra.job.name="baseline_pelican_nconst32" \
+    separate_train_eval_mode=true \
+    trainer.max_epochs=200
 
 
 # ==================================================
@@ -122,7 +123,7 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     hydra.sweep.dir="logs/slurm/symm_loss_so3_deepsets_nconst8" \
 #     hydra.job.name="symm_loss_so3_deepsets_nconst8" \
 #     separate_train_eval_mode=true \
-#     trainer.max_epochs=200
+#     trainer.max_epochs=1 & 
 
 # python src/train.py \
 #     -m \
@@ -137,7 +138,7 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     hydra.sweep.dir="logs/slurm/symm_loss_so3_deepsets_nconst16" \
 #     hydra.job.name="symm_loss_so3_deepsets_nconst16" \
 #     separate_train_eval_mode=true \
-#     trainer.max_epochs=200
+#     trainer.max_epochs=1 &
 
 # python src/train.py \
 #     -m \
@@ -195,5 +196,5 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 #     hydra.job.name="hyperparameter_search_nano_pelican" \
 #     trainer.max_epochs=50 \
 #     hparams_search=nano_pelican_optuna \
-#     hydra.sweeper.n_trials=20 \
-#     hydra.sweeper.direction="maximize"
+#     hydra.sweeper.n_trials=200 \
+#     hydra.sweeper.direction="maximize" 

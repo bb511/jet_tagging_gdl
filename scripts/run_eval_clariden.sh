@@ -32,20 +32,20 @@ python src/eval.py \
     callbacks.results_table.invariance_metric=flip \
     hydra.job.name="eval_baseline_deepsets_nconst8"
 
-# python src/eval.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     experiment=baseline/hls4ml_nconst16_none \
-#     +experiment_name=hls4ml_nconst16_aug_none \
-#     model=deepsets_16 \
-#     data.nconstituents=16 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_deepsets_nconst16/0/checkpoint_manifest.json" \
-#     callbacks.results_table.invariance_metric=flip \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_deepsets_nconst16" \
-#     hydra.job.name="eval_baseline_deepsets_nconst16"
+python src/eval.py \
+    -m \
+    hydra/launcher=submitit_slurm_clariden \
+    experiment=baseline/hls4ml_nconst16_none \
+    +experiment_name=hls4ml_nconst16_aug_none \
+    model=deepsets_16 \
+    data.nconstituents=16 \
+    data.n_folds=5 \
+    trainer=gpu \
+    data.data_dir="$HLS4ML_DATA_DIR" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_deepsets_nconst16/0/checkpoint_manifest.json" \
+    callbacks.results_table.invariance_metric=flip \
+    hydra.sweep.dir="logs/slurm/eval_baseline_deepsets_nconst16" \
+    hydra.job.name="eval_baseline_deepsets_nconst16"
 
 # python src/eval.py \
 #     -m \

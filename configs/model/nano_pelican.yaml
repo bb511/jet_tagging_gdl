@@ -11,14 +11,14 @@ config: "s"
 config_out: "s"
 activate_agg: false
 activate_lin: true
-activate_agg_out: true
+activate_agg_out: false
 activate_lin_out: false
 factorize: false
 masked: true
 dropout: false
 drop_rate: 0.0
 drop_rate_out: 0.0
-batchnorm: none
+batchnorm: "b"
 
 # Training
 method: ${data.method}
@@ -30,3 +30,13 @@ optimizer:
   lr: 1.0e-03
   weight_decay: 1.0e-05
   betas: [0.9, 0.999]
+
+# CosineAnnealingWarmRestarts: restarts at epoch T_0, T_0*T_mult, T_0*(T_mult^2), ...
+# Paper uses T_0=4, T_mult=2 — restarts at epochs 4, 12, 28, 60, ...
+# eta_min: floor for the lr at each cosine trough
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  _partial_: true
+  T_0: 4
+  T_mult: 2
+  eta_min: 1.0e-6

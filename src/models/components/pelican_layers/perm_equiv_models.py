@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .perm_equiv_layers import eops_1_to_2, eops_2_to_2, eops_2_to_1, eops_2_to_0 #, eset_ops_3_to_3, eset_ops_4_to_4, eset_ops_1_to_3, eops_1_to_2
-from .generic_layers import get_activation_fn, MessageNet, BasicMLP, SoftMask
+from .generic_layers import get_activation_fn, MessageNet
 from .masked_batchnorm import MaskedBatchNorm3d
 
 # class Eq1to1(nn.Module):
@@ -43,8 +43,10 @@ class Eq2to0(nn.Module):
         self.basis_dim = 2 * len(config)
         self.alphas = nn.ParameterList([None] * len(config))
         for i, char in enumerate(config):
-            if char in ['M', 'X', 'N', 'S']:
-                self.alphas[i] = nn.Parameter(torch.rand(in_dim, 2, device=device, dtype=dtype))
+            if char in ['M', 'X', 'N']:
+                self.alphas[i] = nn.Parameter(torch.rand(1, in_dim, 2, device=device, dtype=dtype))
+            elif char=='S':
+                self.alphas[i] = nn.Parameter(torch.rand(1, in_dim, 2, device=device, dtype=dtype))
 
         self.out_dim = out_dim
         self.in_dim = in_dim
@@ -73,8 +75,8 @@ class Eq2to0(nn.Module):
                 op = self.ops_func(inputs, nobj=nobj, nobj_avg=self.average_nobj, aggregation=d[char], weight=irc_weight)
             elif char in ['S', 'M', 'X', 'N']:
                 op = self.ops_func(inputs, nobj=nobj, nobj_avg=self.average_nobj, aggregation=d[char.lower()], weight=irc_weight)
-                mult = (nobj).view([-1,1,1])**self.alphas[i].view(1,self.in_dim,2)
-                mult = mult / (self.average_nobj** self.alphas[i].view(1,self.in_dim,2))
+                mult = (nobj).view([-1,1,1])**self.alphas[i]
+                mult = mult / (self.average_nobj** self.alphas[i])
                 op = op * mult            
             else:
                 raise ValueError("args.config must consist of the following letters: smxnSMXN", self.config)
@@ -266,16 +268,18 @@ class Eq2to2(nn.Module):
         self.factorize=factorize
         self.folklore = folklore
 
-        self.average_nobj = average_nobj                 # 49 is the mean number of particles per event in the toptag dataset; ADJUST FOR YOUR DATASET
-        # self.basis_dim = (16 if folklore else 15) + (11 if folklore else 10) * (len(config) - 1)
-        self.basis_dim = 6
+        self.average_nobj = average_nobj
+        self.basis_dim = (16 if folklore else 15) + (11 if folklore else 10) * (len(config) - 1)
+        # self.basis_dim = 6
 
         self.alphas = nn.ParameterList([None] * len(config))
-        self.dummy_alphas = torch.zeros(in_dim, device=device, dtype=dtype)
+        self.register_buffer('dummy_alphas', torch.zeros(1, in_dim, 5, 1, 1, device=device, dtype=dtype))
         # countM = 0
         for i, char in enumerate(config):
-            if char in ['M', 'X', 'N', 'S']:
-                self.alphas[i] = nn.Parameter(torch.rand(in_dim, 5, device=device, dtype=dtype))
+            if char in ['M', 'X', 'N']:
+                self.alphas[i] = nn.Parameter(torch.rand(1, in_dim, 11 if folklore else 10,  1, 1, device=device, dtype=dtype))
+            elif char=='S':
+                self.alphas[i] = nn.Parameter(torch.rand(1, in_dim, 11 if folklore else 10,  1, 1, device=device, dtype=dtype))
 
         self.out_dim = out_dim
         self.in_dim = in_dim
@@ -306,10 +310,9 @@ class Eq2to2(nn.Module):
                 op = self.ops_func(inputs, nobj, self.average_nobj, aggregation=d[char.lower()], weight=irc_weight, skip_order_zero=False if i==0 else True, folklore = self.folklore)
                 if char in ['S', 'M', 'X', 'N']:
                     if i==0:
-                        alphas = torch.cat([self.dummy_alphas.view(1,self.in_dim,1,1,1), self.alphas[0].view(1,self.in_dim,5,1,1)], dim=2)
+                        alphas = torch.cat([self.dummy_alphas, self.alphas[0]], dim=2)
                     else:
-                        alphas = self.alphas[i].view(1,self.in_dim,6,1,1)
-                    
+                        alphas = self.alphas[i]
                     mult = (nobj).view([-1,1,1,1,1])**alphas
                     mult = mult / (self.average_nobj**alphas)
                     op = op * mult
@@ -336,7 +339,7 @@ class Eq2to2(nn.Module):
         
         output = torch.einsum('dsb,ndbij->nijs', coefs, ops)
 
-        diag_eye = torch.eye(inputs.shape[1], device=self.device, dtype=self.dtype).unsqueeze(0).unsqueeze(-1)
+        diag_eye = torch.eye(inputs.shape[1], device=inputs.device, dtype=inputs.dtype).unsqueeze(0).unsqueeze(-1)
         diag_bias = diag_eye.multiply(self.diag_bias.view(1,1,1,-1))
         output = output + self.bias.view(1,1,1,-1) + diag_bias
 
