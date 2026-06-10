@@ -896,6 +896,8 @@ class HLS4MLDataModule(LightningDataModule):
             x_test, y_test, _, test_pt_idx = self._load_all_h5_files(
                 self.raw_data_dir, isTest=True
             )
+            self.x_test_raw = x_test          # raw before restrict/sort/norm — used by InvarianceMetricCallback
+            self.y_test_raw = y_test
             x_test = self._restrict_and_sort_by_pt(x_test, test_pt_idx, self.nconstituents)
 
             # 2. normalise on FULL feature set (norm_params keys match full feature_names)

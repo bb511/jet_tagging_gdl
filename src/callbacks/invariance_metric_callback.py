@@ -1,32 +1,31 @@
 """Invariance metric callback.
 
-Computes multiple invariance metrics d(f(x), f(T(x))) for each symmetry group
-(SO2, SO3, Lorentz) at the end of every validation epoch.
+Computes invariance metrics d(f(x), f(T(x))) for each symmetry group
+(SO2, SO3, Lorentz) during the test pass.
 
-Metrics:
+Augmentation is applied directly to each test batch (already normalized,
+on-device) using the same central pipeline as online training augmentation.
+Metrics are accumulated per batch and averaged at epoch end.
+
+Metrics per group:
 - Normalised L2
 - Cosine distance
 - Jensen-Shannon divergence
 - Flip rate
-- Orbit variance
+- Orbit variance: E_x [ Var_g ( f(gx) ) ]
 """
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Dict, List, Optional
 
 import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.utils.augmentation import (
-    apply_so2_single_rotation,
-    apply_so3_single_rotation,
-    apply_boost_preserve_phi,
-    create_lorentz_boosts,
-    permute_constituents,
-)
+from src.utils.augmentation import permute_constituents
+from src.utils.symmetry_loss import apply_random_so2, apply_random_so3, apply_random_lorentz
 
 log = logging.getLogger(__name__)
 
@@ -34,310 +33,133 @@ log = logging.getLogger(__name__)
 class InvarianceMetricCallback(L.Callback):
     def __init__(
         self,
-        num_samples: int = 10000,
         lorentz_eta_max: float = 2.0,
         seed: int = 42,
-        check_every_n_epochs: int = 5,
+        orbit_variance_k: int = 5,
     ):
         super().__init__()
-        self.num_samples = num_samples
         self.lorentz_eta_max = lorentz_eta_max
-        self.rng = np.random.default_rng(seed)
-        self.check_every_n_epochs = check_every_n_epochs
+        self.rng = np.random.default_rng(seed)   # used only for permutation
+        self.orbit_variance_k = orbit_variance_k
 
-        self._x_val_sorted: Optional[np.ndarray] = None
-        self._feature_names: Optional[list] = None
-        self._norm_params: Optional[dict] = None
-        self._feature_indices: Optional[np.ndarray] = None
+        self._model_feature_names: Optional[List[str]] = None
+        self._norm_scales: Optional[dict] = None
+        self._dm_method: Optional[str] = None
+        self._batch_metrics: Dict[str, List[float]] = {}
 
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Setup
-    # ------------------------------------------------------------
-    def _setup_cached_data(self, dm) -> bool:
-        """Cache validation jets for invariance testing. Returns True on success."""
-        if dm.x_val_raw is None:
-            log.warning("InvarianceMetricCallback: x_val_raw not available.")
-            return False
+    # ------------------------------------------------------------------
+    def on_test_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:  # noqa: ARG002
+        dm = trainer.datamodule
+        if dm.feature_names is None or dm.norm_params is None:
+            log.warning("InvarianceMetricCallback: feature_names or norm_params not available.")
+            return
 
-        x_sorted = dm._restrict_and_sort_by_pt(
-            dm.x_val_raw, dm.pt_idx, dm.nconstituents
-        )
+        feature_indices = dm._get_feature_indices(Path(dm.processed_data_dir))
+        if feature_indices is not None:
+            self._model_feature_names = [dm.feature_names[i] for i in feature_indices]
+        else:
+            self._model_feature_names = list(dm.feature_names)
 
-        n = min(self.num_samples, x_sorted.shape[0])
-        idx = self.rng.choice(x_sorted.shape[0], size=n, replace=False)
-        self._x_val_sorted = x_sorted[idx]
+        # Augmentation functions need {feature_name: scale} to undo/redo normalisation
+        self._norm_scales = {name: scale for name, (_kind, scale) in dm.norm_params.items()}
+        self._dm_method = getattr(dm, "method", None)
+        self._batch_metrics = {}
 
-        self._feature_names = dm.feature_names
-        self._norm_params = dm.norm_params
-        self._feature_indices = dm._get_feature_indices(
-            Path(dm.processed_data_dir)
-        )
+        log.info(f"InvarianceMetricCallback: ready. Features: {self._model_feature_names}")
 
-        log.info(f"Cached {n} validation jets for invariance testing.")
-        return True
-
-    def on_fit_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
-        self._setup_cached_data(trainer.datamodule)
-
-    def on_test_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
-        """Cache val jets for invariance computation during the test pass."""
-        self._setup_cached_data(trainer.datamodule)
-
-    # ------------------------------------------------------------
-    # Convert raw → model input
-    # ------------------------------------------------------------
-    def _to_model_input(self, x_raw: np.ndarray, dm) -> torch.Tensor:
-        x_norm = dm.apply_physics_norm(
-            x_raw, self._feature_names, self._norm_params
-        )
-
-        if self._feature_indices is not None:
-            x_norm = x_norm[:, :, self._feature_indices]
-
-        return torch.from_numpy(x_norm).float()
-
-    # ------------------------------------------------------------
-    # Core metric computation
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Per-batch metrics
+    # ------------------------------------------------------------------
     @torch.no_grad()
-    def _measure_invariance(
-        self,
-        pl_module: L.LightningModule,
-        dm,
-        x_raw: np.ndarray,
-        x_aug: np.ndarray,
+    def _point_metrics(
+        self, y_orig: torch.Tensor, y_aug: torch.Tensor
     ) -> Dict[str, float]:
-
-        device = pl_module.device
-
-        x_orig_t = self._to_model_input(x_raw, dm).to(device)
-        x_aug_t = self._to_model_input(x_aug, dm).to(device)
-
-        batch_size = 256
-        all_orig, all_aug = [], []
-
-        for start in range(0, x_orig_t.shape[0], batch_size):
-            end = start + batch_size
-            all_orig.append(pl_module(x_orig_t[start:end]))
-            all_aug.append(pl_module(x_aug_t[start:end]))
-
-        y_orig = torch.cat(all_orig, dim=0)
-        y_aug = torch.cat(all_aug, dim=0)
-
-        # -----------------------
-        # 1. Normalised L2
-        # -----------------------
+        """L2, cosine, JSD, flip between two batches of logits."""
         diff_norm = (y_orig - y_aug).norm(dim=1)
         base_norm = y_orig.norm(dim=1)
-
-        mean_l2 = diff_norm.mean().item()
         mean_norm = base_norm.mean().item()
+        l2_normed = 0.0 if mean_norm < 1e-12 else diff_norm.mean().item() / mean_norm
 
-        l2_normed = 0.0 if mean_norm < 1e-12 else mean_l2 / mean_norm
+        cos_dist = (1 - F.cosine_similarity(y_orig, y_aug, dim=1)).mean().item()
 
-        # -----------------------
-        # 2. Cosine distance
-        # -----------------------
-        cos_sim = F.cosine_similarity(y_orig, y_aug, dim=1)
-        cos_dist = (1 - cos_sim).mean().item()
-
-        # -----------------------
-        # 3. Jensen-Shannon
-        # -----------------------
         p = F.softmax(y_orig, dim=-1)
         q = F.softmax(y_aug, dim=-1)
-        m = 0.5 * (p + q)
-
+        m_mix = 0.5 * (p + q)
         eps = 1e-8
         js = 0.5 * (
-            (p * (p.add(eps).log() - m.add(eps).log())).sum(dim=1)
-            + (q * (q.add(eps).log() - m.add(eps).log())).sum(dim=1)
+            (p * (p.add(eps).log() - m_mix.add(eps).log())).sum(dim=1)
+            + (q * (q.add(eps).log() - m_mix.add(eps).log())).sum(dim=1)
         ).clamp(min=0).mean().item()
 
-        # -----------------------
-        # 4. Flip rate
-        # -----------------------
-        pred_orig = y_orig.argmax(dim=1)
-        pred_aug = y_aug.argmax(dim=1)
-        flip_rate = (pred_orig != pred_aug).float().mean().item()
+        flip_rate = (y_orig.argmax(dim=1) != y_aug.argmax(dim=1)).float().mean().item()
 
-        return {
-            "l2": l2_normed,
-            "cosine": cos_dist,
-            "js": js,
-            "flip": flip_rate,
-        }
+        return {"l2": l2_normed, "cosine": cos_dist, "js": js, "flip": flip_rate}
 
-    # ------------------------------------------------------------
-    # Orbit variance: E_x [ Var_g ( f(gx) ) ]
-    # ------------------------------------------------------------
     @torch.no_grad()
-    def _measure_orbit_variance(
-        self,
-        pl_module: L.LightningModule,
-        dm,
-        x_raw: np.ndarray,
-        transform_fn,
-        K: int = 5,
+    def _orbit_variance(
+        self, pl_module: L.LightningModule, x: torch.Tensor, transform_fn
     ) -> float:
-
-        device = pl_module.device
+        """E_x [ Var_g ( f(gx) ) ] estimated over orbit_variance_k draws."""
         preds = []
-
-        for _ in range(K):
-            x_aug = transform_fn(x_raw)
-            x_t = self._to_model_input(x_aug, dm).to(device)
-
-            outputs = []
-            for start in range(0, x_t.shape[0], 256):
-                outputs.append(pl_module(x_t[start:start+256]))
-
-            y = torch.cat(outputs, dim=0)
-
-            y = F.normalize(y, dim=1)
-
+        for _ in range(self.orbit_variance_k):
+            y = F.normalize(pl_module(transform_fn(x)), dim=1)
             preds.append(y)
-
-        preds = torch.stack(preds, dim=0)  # (K, N, C)
-
+        preds = torch.stack(preds, dim=0)           # (K, B, C)
         mean_g = preds.mean(dim=0, keepdim=True)
-        var_g = ((preds - mean_g) ** 2).mean(dim=0)
+        return ((preds - mean_g) ** 2).mean().item()
 
-        return var_g.mean().item()
-
-    # ------------------------------------------------------------
-    # Core invariance computation (shared by val and test hooks)
-    # ------------------------------------------------------------
-    def _compute_and_log_invariance(self, trainer, pl_module) -> None:
-        """Compute all invariance metrics and log them via pl_module.log."""
-        if self._x_val_sorted is None:
+    # ------------------------------------------------------------------
+    # Test batch hook
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def on_test_batch_end(  # noqa: ARG002
+        self,
+        trainer: L.Trainer,
+        pl_module: L.LightningModule,
+        outputs,
+        batch,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        if self._model_feature_names is None:
             return
 
-        pl_module.eval()
-        dm = trainer.datamodule
-        x_raw = self._x_val_sorted  # numpy (N, C, F_raw)
+        x = batch[0]                          # (B, C, F) — normalised, on device
+        names = self._model_feature_names
+        ns = self._norm_scales
 
-        def aug(fn, x_np, *args):
-            x_t = torch.from_numpy(x_np).float()
-            return fn(x_t, *args).numpy()
+        y_orig = pl_module(x)
 
-        results = {}
+        transforms: Dict[str, object] = {
+            "so2":     lambda t: apply_random_so2(t, feature_names=names, norm_scales=ns)[0],
+            "so3":     lambda t: apply_random_so3(t, feature_names=names, norm_scales=ns, apply_filter=True)[0],
+            "lorentz": lambda t: apply_random_lorentz(t, feature_names=names, eta_max=self.lorentz_eta_max, norm_scales=ns)[0],
+        }
+        if self._dm_method == "equivariance":
+            transforms["permutation"] = lambda t: permute_constituents(t, self.rng)
 
-        # ---------------- SO(2)
-        theta = self.rng.uniform(0.3, 2 * np.pi - 0.3)
-        cos_t, sin_t = float(np.cos(theta)), float(np.sin(theta))
+        for group, transform_fn in transforms.items():
+            x_aug = transform_fn(x)
+            y_aug = pl_module(x_aug)
 
-        rot_so2 = torch.tensor(
-            [[cos_t, -sin_t, 0.0],
-             [sin_t,  cos_t, 0.0],
-             [0.0,    0.0,   1.0]],
-            dtype=torch.float32,
-        )
+            for k, v in self._point_metrics(y_orig, y_aug).items():
+                self._batch_metrics.setdefault(f"invariance/{group}_{k}", []).append(v)
 
-        x_aug_so2 = aug(apply_so2_single_rotation, x_raw, rot_so2, self._feature_names)
+            ov = self._orbit_variance(pl_module, x, transform_fn)
+            self._batch_metrics.setdefault(f"invariance/{group}_orbit_var", []).append(ov)
 
-        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_so2)
-        for k, v in metrics.items():
-            results[f"invariance/so2_{k}"] = v
+    # ------------------------------------------------------------------
+    # Epoch end: average across batches and log
+    # ------------------------------------------------------------------
+    def on_test_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        if not self._batch_metrics:
+            return
 
-        def _so2_transform(x):
-            t = self.rng.uniform(0.3, 2 * np.pi - 0.3)
-            c, s = float(np.cos(t)), float(np.sin(t))
-            R = torch.tensor([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float32)
-            return aug(apply_so2_single_rotation, x, R, self._feature_names)
+        results = {k: float(np.mean(v)) for k, v in self._batch_metrics.items()}
 
-        results["invariance/so2_orbit_var"] = self._measure_orbit_variance(
-            pl_module, dm, x_raw, _so2_transform
-        )
-
-        # ---------------- SO(3)
-        angles = self.rng.uniform(0.3, 2 * np.pi - 0.3, size=3)
-
-        cz, sz = np.cos(angles[0]), np.sin(angles[0])
-        cy, sy = np.cos(angles[1]), np.sin(angles[1])
-        cx, sx = np.cos(angles[2]), np.sin(angles[2])
-
-        rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
-        ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
-        rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
-
-        rot_so3 = torch.from_numpy((rz @ ry @ rx).astype(np.float32))
-
-        x_aug_so3 = aug(apply_so3_single_rotation, x_raw, rot_so3, self._feature_names)
-
-        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_so3)
-        for k, v in metrics.items():
-            results[f"invariance/so3_{k}"] = v
-
-        def _so3_transform(x):
-            a = self.rng.uniform(0.3, 2 * np.pi - 0.3, size=3)
-            _cz, _sz = np.cos(a[0]), np.sin(a[0])
-            _cy, _sy = np.cos(a[1]), np.sin(a[1])
-            _cx, _sx = np.cos(a[2]), np.sin(a[2])
-            _rz = np.array([[_cz, -_sz, 0], [_sz, _cz, 0], [0, 0, 1]])
-            _ry = np.array([[_cy, 0, _sy], [0, 1, 0], [-_sy, 0, _cy]])
-            _rx = np.array([[1, 0, 0], [0, _cx, -_sx], [0, _sx, _cx]])
-            R = torch.from_numpy((_rz @ _ry @ _rx).astype(np.float32))
-            return aug(apply_so3_single_rotation, x, R, self._feature_names)
-
-        results["invariance/so3_orbit_var"] = self._measure_orbit_variance(
-            pl_module, dm, x_raw, _so3_transform
-        )
-
-        # ---------------- Lorentz
-        boost = create_lorentz_boosts(1, self.lorentz_eta_max, self.rng)
-
-        x_aug_lor = aug(apply_boost_preserve_phi, x_raw, boost[0], self._feature_names)
-
-        metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_lor)
-        for k, v in metrics.items():
-            results[f"invariance/lorentz_{k}"] = v
-
-        def _lorentz_transform(x):
-            b = create_lorentz_boosts(1, self.lorentz_eta_max, self.rng)
-            return aug(apply_boost_preserve_phi, x, b[0], self._feature_names)
-
-        results["invariance/lorentz_orbit_var"] = self._measure_orbit_variance(
-            pl_module, dm, x_raw, _lorentz_transform
-        )
-
-        # ---------------- Permutation (equivariance method only)
-        if getattr(dm, "method", None) == "equivariance":
-            x_aug_perm = aug(permute_constituents, x_raw, self.rng)
-            metrics = self._measure_invariance(pl_module, dm, x_raw, x_aug_perm)
-            for k, v in metrics.items():
-                results[f"invariance/permutation_{k}"] = v
-
-            results["invariance/permutation_orbit_var"] = self._measure_orbit_variance(
-                pl_module, dm, x_raw,
-                lambda x: aug(permute_constituents, x, self.rng),
-            )
-
-        # ---------------- Logging
         for name, value in results.items():
-            pl_module.log(
-                name,
-                value,
-                prog_bar=False,
-                on_epoch=True,
-                sync_dist=True,
-            )
+            pl_module.log(name, value, prog_bar=False, on_epoch=True, sync_dist=True)
 
-        log.info(" | ".join([f"{k}: {v:.4f}" for k, v in results.items()]))
-
-    # ------------------------------------------------------------
-    # Validation hook
-    # ------------------------------------------------------------
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if self._x_val_sorted is None:
-            return
-        if (trainer.current_epoch + 1) % self.check_every_n_epochs != 0:
-            return
-        self._compute_and_log_invariance(trainer, pl_module)
-
-    # ------------------------------------------------------------
-    # Test hook — runs once at the end of trainer.test()
-    # ------------------------------------------------------------
-    def on_test_epoch_end(self, trainer, pl_module):
-        self._compute_and_log_invariance(trainer, pl_module)
-
+        log.info(" | ".join(f"{k}: {v:.4f}" for k, v in results.items()))
