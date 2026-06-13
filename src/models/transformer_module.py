@@ -69,13 +69,14 @@ class Transformer(LightningModule):
 
         # Architecture
         self.lifting_layer      = nn.Linear(nbr_feat, d_models, bias=bias)
+        self.cls_token          = nn.Parameter(torch.zeros(1, 1, d_models))
         self.encoder_layer      = nn.TransformerEncoderLayer(
             d_model=d_models, nhead=nhead, batch_first=True, bias=bias
         )
         self.transformer_encoder = nn.TransformerEncoder(
             self.encoder_layer, num_layers=num_layers, enable_nested_tensor=fast_path
         )
-        self.fc = nn.Linear(d_models * nbr_const, output_size)
+        self.classifier = nn.Linear(d_models, output_size)
 
         # Loss
         if self.method == "symm_loss":
@@ -119,18 +120,21 @@ class Transformer(LightningModule):
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(torch.float32)
+        B = x.size(0)
 
         mask = (x.sum(dim=-1) == 0) if self.use_mask else None  # (B, nbr_const)
 
-        x = self.lifting_layer(x)                                          # (B, nbr_const, d_models)
-        x = self.transformer_encoder(x, src_key_padding_mask=mask)        # (B, nbr_const, d_models)
+        x = self.lifting_layer(x)  # (B, nbr_const, d_models)
 
-        # Zero out masked positions before flattening
-        if self.use_mask and self.fill_masked and mask is not None:
-            x = x.masked_fill(mask.unsqueeze(-1), 0.0)
+        # Prepend CLS token; extend mask so CLS is never padding-masked
+        cls = self.cls_token.expand(B, -1, -1)        # (B, 1, d_models)
+        x   = torch.cat([cls, x], dim=1)              # (B, 1+nbr_const, d_models)
+        if mask is not None:
+            cls_mask = torch.zeros(B, 1, dtype=torch.bool, device=x.device)
+            mask = torch.cat([cls_mask, mask], dim=1) # (B, 1+nbr_const)
 
-        x = x.view(x.size(0), -1)   # (B, nbr_const * d_models)
-        return self.fc(x)            # (B, output_size)
+        x = self.transformer_encoder(x, src_key_padding_mask=mask)  # (B, 1+nbr_const, d_models)
+        return self.classifier(x[:, 0, :])  # (B, output_size)
 
     # ------------------------------------------------------------------
     # Shared step — branched cleanly by method

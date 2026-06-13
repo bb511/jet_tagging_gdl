@@ -17,10 +17,10 @@ method: ${data.method}
 optimizer:
   _target_: torch.optim.AdamW
   _partial_: true
-  lr: 1e-6
-  weight_decay: 1e-4
+  lr: 1e-3
+  weight_decay: 1e-2
 
-# We have to implement the custom scheduler in the codebase since the default PyTorch implementation does not support the "warmup" phase.
+# Cosine schedule with warmup — warmup ramps from lr/25 to lr over first 1000 steps.
 scheduler:
   _target_: src.utils.utils.get_cosine_schedule_with_warmup
   _partial_: true
