@@ -1,0 +1,32 @@
+_target_: src.models.jetformer_module.JetFormer
+
+# Exact-architecture JetFormer replica (see arXiv:2601.17215) — custom attention
+# block in src/models/components/jetformer_layers.py, matching the reference
+# parameter count/computation graph (bias-free Q/K/V, pre-activation FFN, no
+# padding mask) rather than reusing nn.TransformerEncoderLayer.
+nbr_const: ${data.nconstituents}
+nbr_feat: 5
+embed_dim: 64
+num_heads: 2
+num_transformers: 3
+output_size: 5
+normalization: batch
+activation: relu
+dropout: 0.0
+method: ${data.method}
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-3
+  weight_decay: 1e-2
+
+# OneCycleLR — ramps lr up over the first 20% of training then anneals down.
+scheduler:
+  _target_: src.utils.utils.get_onecycle_schedule
+  _partial_: true
+  max_lr: 1e-3
+  pct_start: 0.2
+  last_epoch: -1
+
+symm_loss_weight: 0.1

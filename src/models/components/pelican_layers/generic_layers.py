@@ -498,13 +498,22 @@ def dot11(p1, p2):
     prod = p1[...,[0,-1]] * p2[...,[0,-1]]
     return 2 * prod[..., 0] - prod.sum(dim=-1)
 
+import torch.amp
+
 def fn(x, alphas, mode):
-    if mode=='log':
-        x = ((1 + x).abs().pow(1e-6 + alphas ** 2) - 1) / (1e-6 + alphas ** 2)
-    elif mode=='slog':
-        x = ((1 + x.abs()).pow(1e-6 + alphas ** 2) - 1) / (1e-6 + alphas ** 2) * x.sign()
-    elif mode=='angle':
-        x = ((1e-5 + x.abs()).pow(1e-6 + alphas ** 2) - 1) / (1e-6 + alphas ** 2)
-    elif mode=='arcsinh':
-        x = (x * 2 * alphas).arcsinh() / (1e-6 + alphas.abs())
-    return x
+    # Enforce float32 in embedding specifically to prevent float16 overflow 
+    # causing NaNs when alphas grow and exponentiate.
+    with torch.amp.autocast('cuda', enabled=False):
+        x_fp32 = x.float()
+        alphas_fp32 = alphas.float()
+        
+        if mode=='log':
+            x_out = ((1 + x_fp32).abs().pow(1e-6 + alphas_fp32 ** 2) - 1) / (1e-6 + alphas_fp32 ** 2)
+        elif mode=='slog':
+            x_out = ((1 + x_fp32.abs()).pow(1e-6 + alphas_fp32 ** 2) - 1) / (1e-6 + alphas_fp32 ** 2) * x_fp32.sign()
+        elif mode=='angle':
+            x_out = ((1e-5 + x_fp32.abs()).pow(1e-6 + alphas_fp32 ** 2) - 1) / (1e-6 + alphas_fp32 ** 2)
+        elif mode=='arcsinh':
+            x_out = (x_fp32 * 2 * alphas_fp32).arcsinh() / (1e-6 + alphas_fp32.abs())
+            
+        return x_out.type_as(x)

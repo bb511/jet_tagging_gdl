@@ -532,6 +532,14 @@ class HLS4MLDataModule(LightningDataModule):
     # Online Augmentation — batch-level transform for HLS4MLDataset.__iter__
     # ------------------------------------------------------------------
     def _make_batch_transform(self):
+        """Build the per-batch geometric transform for online augmentation.
+
+        ``x`` arrives with the *full* on-disk feature set (not yet reduced to
+        ``self.features``) so so2/so3/lorentz always have px/py/pz available
+        to compute the transform and recompute derived quantities — even when
+        the model itself only consumes a reduced subset (e.g. pt/etarel/phirel).
+        The reduction to ``self.features`` happens last, after the transform.
+        """
         scheme      = self.augmentation_scheme
         all_names   = self.feature_names or []
         eta_max     = self.lorentz_eta_max
@@ -539,29 +547,33 @@ class HLS4MLDataModule(LightningDataModule):
             {n: s for n, (_, s) in self.norm_params.items()}
             if self.norm_params is not None else None
         )
-        active_names = []
+
+        output_indices = []
         for feat in self.features:
             if feat in all_names:
-                active_names.append(feat)
+                output_indices.append(all_names.index(feat))
             elif f"j1_{feat}" in all_names:
-                active_names.append(f"j1_{feat}")
+                output_indices.append(all_names.index(f"j1_{feat}"))
             else:
-                active_names.append(feat)
+                raise ValueError(
+                    f"Requested feature '{feat}' not found in saved names: {all_names}"
+                )
+        output_indices = np.array(output_indices)
 
-        def transform(x):  # x: (B, N, F)
+        def transform(x):  # x: (B, N, F_full) -> (B, N, len(self.features))
             rng = np.random.default_rng()
             if scheme == "so2":
-                x, _ = apply_random_so2(x, feature_names=active_names,
+                x, _ = apply_random_so2(x, feature_names=all_names,
                                         generator=rng, norm_scales=norm_scales)
             elif scheme == "so3":
-                x, _ = apply_random_so3(x, feature_names=active_names,
+                x, _ = apply_random_so3(x, feature_names=all_names,
                                         generator=rng, norm_scales=norm_scales,
                                         apply_filter=True)
             elif scheme == "lorentz":
-                x, _ = apply_random_lorentz(x, feature_names=active_names,
+                x, _ = apply_random_lorentz(x, feature_names=all_names,
                                             eta_max=eta_max, generator=rng,
                                             norm_scales=norm_scales)
-            return x
+            return x[:, :, output_indices]
 
         return transform
 
@@ -830,6 +842,13 @@ class HLS4MLDataModule(LightningDataModule):
 
         feature_indices = self._get_feature_indices(processed_dir)
 
+        # symm_loss builds its symmetric partner inside the model (see
+        # JetFormer.model_step), which needs the full on-disk feature set
+        # (px/py/pz, ...) regardless of which reduced subset the model
+        # consumes for its own forward pass. So for this method, defer the
+        # self.features reduction to the model instead of doing it here.
+        keep_full_for_model = self.method == "symm_loss"
+
         # --- Fit stage: build train + val datasets ---
         if stage in (None, "fit") and self.data_train is None:
             x_train_disk = np.load(processed_dir / "x_train.npy", allow_pickle=False)
@@ -849,9 +868,21 @@ class HLS4MLDataModule(LightningDataModule):
                 x_train, y_train = x_train_disk, y_train_disk
                 x_val,   y_val   = x_val_disk,   y_val_disk
 
-            if feature_indices is not None:
+            if feature_indices is not None and not keep_full_for_model:
+                x_val = x_val[:, :, feature_indices]
+
+            transform = (
+                self._make_batch_transform()
+                if self.online_augmentation and self.augmentation_scheme not in {"none", "permute"}
+                else None
+            )
+
+            # When a transform is attached, it needs the full on-disk feature
+            # set (px/py/pz, ...) to compute so2/so3/lorentz, and reduces to
+            # self.features itself afterward. Otherwise reduce right away —
+            # unless symm_loss needs the full set kept for the model itself.
+            if transform is None and feature_indices is not None and not keep_full_for_model:
                 x_train = x_train[:, :, feature_indices]
-                x_val   = x_val[:,   :, feature_indices]
 
             if self.n_folds > 1:
                 log.info(
@@ -861,11 +892,6 @@ class HLS4MLDataModule(LightningDataModule):
                     f"==================================================="
                 )
 
-            transform = (
-                self._make_batch_transform()
-                if self.online_augmentation and self.augmentation_scheme not in {"none", "permute"}
-                else None
-            )
             shuffler = torch.Generator()
             shuffler.manual_seed(torch.seed())
             self.data_train = HLS4MLDataset(
@@ -884,7 +910,7 @@ class HLS4MLDataModule(LightningDataModule):
         if stage in (None, "validate") and self.data_val is None:
             x_val = np.load(processed_dir / "x_val.npy", allow_pickle=False)
             y_val = np.load(processed_dir / "y_val.npy", allow_pickle=False)
-            if feature_indices is not None:
+            if feature_indices is not None and not keep_full_for_model:
                 x_val = x_val[:, :, feature_indices]
             self.data_val = HLS4MLDataset(
                 torch.from_numpy(x_val).float(),
@@ -909,7 +935,7 @@ class HLS4MLDataModule(LightningDataModule):
             x_test = self.apply_physics_norm(x_test, self.feature_names, self.norm_params)
 
             # 3. THEN select the subset of features the model actually uses
-            if feature_indices is not None:
+            if feature_indices is not None and not keep_full_for_model:
                 x_test = x_test[:, :, feature_indices]
 
             log.info(f"[setup] Test — x_test: {x_test.shape}, y_test: {y_test.shape}")

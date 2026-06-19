@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Add paired t-test p-values to results table CSVs.
+"""Add p-values and bootstrap confidence intervals to results table CSVs.
 
 For each (model, nconstituents) group the row with augmentation_scheme=none
-is used as the baseline.  A two-sided paired t-test (scipy.stats.ttest_rel)
-compares every other row against that baseline using the per-fold test
-accuracies stored in the test_acc_folds column.
+is used as the baseline.  Two significance tests are computed:
+
+1. Paired t-test (scipy.stats.ttest_rel) — kept as a reference.
+2. Paired bootstrap p-value — resamples the per-fold differences under H0
+   (true mean difference = 0) and counts how often |bootstrap mean| >= |observed
+   mean|.  Makes no normality assumption; better calibrated at n=5 folds.
+
+Bootstrap 95% CI for the mean accuracy is computed for every row by resampling
+the per-fold values with replacement (--n-boot iterations, default 10 000).
 
 Why paired: KFold uses random_state=kfold_seed (default 42) and the test set
 is a fixed held-out split, so fold i of condition A and fold i of condition B
-are trained/tested on identical data — pairing is valid and more powerful than
-an independent-samples test.
+are trained/tested on identical data.
 
-Caveat: with n=5 folds the test has low power (~0.3 for small effects).
-Interpret p-values qualitatively; consider them alongside effect sizes.
+Caveat: with n=5 folds statistical power is inherently limited (~0.3–0.5).
+Interpret p-values qualitatively alongside effect sizes.
 
 Usage
 -----
@@ -35,6 +40,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import random
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -107,6 +113,8 @@ def read_csv(path: Path) -> List[Dict[str, str]]:
 
     result = []
     for row in rows_raw:
+        if not any(cell.strip() for cell in row):  # skip blank/empty rows
+            continue
         # Pad short rows so zip doesn't silently drop columns
         padded = row + [""] * (len(header) - len(row))
         result.append(dict(zip(header, padded)))
@@ -156,37 +164,111 @@ def compute_pvalue(aug_folds: List[float], baseline_folds: List[float]) -> float
         return float("nan")
 
 
+def bootstrap_ci(
+    folds: List[float],
+    n_boot: int = 10_000,
+    ci: float = 0.95,
+    seed: int = 0,
+) -> Tuple[float, float]:
+    """Bootstrap percentile CI for the mean of fold values.
+
+    Resamples the fold list with replacement n_boot times and returns the
+    (alpha/2, 1-alpha/2) quantiles of the bootstrap distribution of the mean.
+    """
+    if len(folds) < 2:
+        return (float("nan"), float("nan"))
+    rng = random.Random(seed)
+    n = len(folds)
+    boot_means = sorted(sum(rng.choices(folds, k=n)) / n for _ in range(n_boot))
+    alpha = (1.0 - ci) / 2.0
+    lo = boot_means[int(alpha * n_boot)]
+    hi = boot_means[min(int((1.0 - alpha) * n_boot), n_boot - 1)]
+    return (lo, hi)
+
+
+def bootstrap_pvalue(
+    aug_folds: List[float],
+    baseline_folds: List[float],
+    n_boot: int = 10_000,
+    seed: int = 0,
+) -> float:
+    """Two-sided paired bootstrap p-value.
+
+    Computes per-fold differences d_i = aug[i] - baseline[i], then centers
+    them under H0 (true mean = 0) and counts the fraction of bootstrap means
+    of the centered differences whose absolute value meets or exceeds the
+    observed |mean(d)|.
+    """
+    if len(aug_folds) != len(baseline_folds) or len(aug_folds) < 2:
+        return float("nan")
+    n = len(aug_folds)
+    diffs = [a - b for a, b in zip(aug_folds, baseline_folds)]
+    obs_mean = sum(diffs) / n
+    if obs_mean == 0.0:
+        return 1.0
+    # Shift diffs to satisfy H0: E[d] = 0
+    centered = [d - obs_mean for d in diffs]
+    rng = random.Random(seed)
+    count = sum(
+        1 for _ in range(n_boot)
+        if abs(sum(rng.choices(centered, k=n)) / n) >= abs(obs_mean)
+    )
+    return count / n_boot
+
+
 def annotate_rows(
     rows: List[Dict[str, str]],
     baseline_index: Dict[Tuple[str, str], List[float]],
+    n_boot: int = 10_000,
 ) -> List[Dict]:
-    """Return new row dicts with p_value and significant_005 columns added."""
+    """Return new row dicts with p-value, bootstrap p-value, and CI columns added."""
     out = []
     for r in rows:
         row = dict(r)
         aug_scheme = str(row.get("augmentation_scheme", "")).lower()
         key = (row.get("model", ""), str(row.get("nconstituents", "")))
+        aug_folds = _parse_folds(row.get("test_acc_folds", ""))
+
+        # Bootstrap CI for this row's mean (applies to every row with valid folds)
+        if aug_folds is not None:
+            ci_lo, ci_hi = bootstrap_ci(aug_folds, n_boot=n_boot)
+            row["ci_lower"] = f"{ci_lo:.6f}" if not math.isnan(ci_lo) else "nan"
+            row["ci_upper"] = f"{ci_hi:.6f}" if not math.isnan(ci_hi) else "nan"
+        else:
+            row["ci_lower"] = "nan"
+            row["ci_upper"] = "nan"
 
         if aug_scheme == "none":
-            # Baseline row — no comparison needed
             row["p_value"] = "baseline"
             row["significant_005"] = "—"
+            row["bootstrap_pvalue"] = "baseline"
+            row["significant_boot_005"] = "—"
         else:
             baseline_folds = baseline_index.get(key)
-            aug_folds = _parse_folds(row.get("test_acc_folds", ""))
 
             if baseline_folds is None:
                 row["p_value"] = "no_baseline"
                 row["significant_005"] = "—"
+                row["bootstrap_pvalue"] = "no_baseline"
+                row["significant_boot_005"] = "—"
             elif aug_folds is None:
                 row["p_value"] = "no_folds"
                 row["significant_005"] = "—"
+                row["bootstrap_pvalue"] = "no_folds"
+                row["significant_boot_005"] = "—"
             else:
                 pval = compute_pvalue(aug_folds, baseline_folds)
                 row["p_value"] = f"{pval:.4f}" if not math.isnan(pval) else "nan"
                 row["significant_005"] = (
                     "yes" if (not math.isnan(pval) and pval < 0.05) else "no"
                 )
+
+                bpval = bootstrap_pvalue(aug_folds, baseline_folds, n_boot=n_boot)
+                row["bootstrap_pvalue"] = f"{bpval:.4f}" if not math.isnan(bpval) else "nan"
+                row["significant_boot_005"] = (
+                    "yes" if (not math.isnan(bpval) and bpval < 0.05) else "no"
+                )
+
         out.append(row)
     return out
 
@@ -251,15 +333,40 @@ def _pval_cell(pval_str: str) -> str:
         return pval_str
 
 
+def _ci_cell(r: Dict, digits: int = 1) -> str:
+    """Format bootstrap CI as '[lo, hi]' in percentage units."""
+    lo_raw = r.get("ci_lower", "nan")
+    hi_raw = r.get("ci_upper", "nan")
+    try:
+        lo = float(lo_raw)
+        hi = float(hi_raw)
+        if math.isnan(lo) or math.isnan(hi):
+            return "N/A"
+        # Convert proportion → percentage if stored as proportion
+        if lo < 2.0:
+            lo *= 100
+            hi *= 100
+        return f"[{lo:.{digits}f}, {hi:.{digits}f}]"
+    except (ValueError, TypeError):
+        return "N/A"
+
+
 def write_latex_table(rows: List[Dict], output_path: Path) -> None:
     if not rows:
         return
 
-    sorted_rows = sorted(rows, key=lambda x: (
-        x.get("model", ""),
-        int(x.get("nconstituents", 0)),
-        AUG_ORDER.get(str(x.get("augmentation_scheme", "")).lower(), 99),
-    ))
+    def _sort_key(x):
+        try:
+            nconst = int(x.get("nconstituents", 0) or 0)
+        except (ValueError, TypeError):
+            nconst = 0
+        return (
+            x.get("model", ""),
+            nconst,
+            AUG_ORDER.get(str(x.get("augmentation_scheme", "")).lower(), 99),
+        )
+
+    sorted_rows = sorted(rows, key=_sort_key)
 
     from collections import Counter
     model_span = Counter(r["model"] for r in sorted_rows)
@@ -273,12 +380,12 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         r"\begin{document}",
         r"\setlength{\tabcolsep}{5pt}",
         r"\scriptsize",
-        r"\begin{tabular}{ll l c S[table-format=2.2(2)] S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r}",
+        r"\begin{tabular}{ll l c S[table-format=2.2(2)] l S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r r}",
         r"    \toprule",
         (
             r"    \textbf{Model} & \textbf{\# Const} & \textbf{Group} & \textbf{FLOPs} & "
-            r"{\textbf{Acc. (\%)}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & "
-            r"{\textbf{SO(3) flip}} & \textbf{$p$-value} \\"
+            r"{\textbf{Acc. (\%)}} & {\textbf{95\% CI}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & "
+            r"{\textbf{SO(3) flip}} & \textbf{$p$ (boot)} & \textbf{$p$ (t-test)} \\"
         ),
         r"    \midrule",
     ]
@@ -325,8 +432,8 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         )
 
         # acc is stored as proportion in the callback CSV, percentage in mlflow CSV
-        acc_mean = float(r.get("test_acc_mean", "nan"))
-        acc_std = float(r.get("test_acc_std", "nan"))
+        acc_mean = float(r.get("test_acc_mean", "nan") or "nan")
+        acc_std = float(r.get("test_acc_std", "nan") or "nan")
         # normalise to percentage if stored as proportion (< 2.0)
         if not math.isnan(acc_mean) and acc_mean < 2.0:
             acc_mean *= 100
@@ -335,9 +442,11 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         lines.append(
             f"    {model_str} & {n_str} & {aug_display} & {flops_str} & "
             f"{_safe_fmt(acc_mean, 2)} \\pm {_safe_fmt(acc_std, 2)} & "
+            f"{_ci_cell(r)} & "
             f"{_fmt_inv_cell(r, 'lorentz_flip_mean', 'lorentz_flip_std')} & "
             f"{_fmt_inv_cell(r, 'so2_flip_mean', 'so2_flip_std')} & "
             f"{_fmt_inv_cell(r, 'so3_flip_mean', 'so3_flip_std')} & "
+            f"{_pval_cell(r.get('bootstrap_pvalue', '—'))} & "
             f"{_pval_cell(r.get('p_value', '—'))} \\\\"
         )
         prev_model, prev_n = model_raw, n
@@ -359,6 +468,10 @@ def main() -> None:
         "--baseline", type=Path, default=None,
         help="External baseline CSV containing none-augmentation rows (for cross-table comparisons). "
              "When omitted the baseline rows are taken from within each input CSV.",
+    )
+    parser.add_argument(
+        "--n-boot", type=int, default=10_000,
+        help="Number of bootstrap resamples for CI and p-value estimation (default: 10000).",
     )
     args = parser.parse_args()
 
@@ -388,7 +501,17 @@ def main() -> None:
                 "Pass --baseline <path> to provide an external baseline CSV."
             )
 
-        annotated = annotate_rows(rows, baseline_index)
+        annotated = annotate_rows(rows, baseline_index, n_boot=args.n_boot)
+
+        # When using an external baseline, include its none rows in the output
+        # so the LaTeX table has a reference row for each (model, nconstituents).
+        if args.baseline is not None:
+            baseline_rows = [
+                r for r in read_csv(args.baseline)
+                if str(r.get("augmentation_scheme", "")).lower() == "none"
+            ]
+            baseline_annotated = annotate_rows(baseline_rows, baseline_index, n_boot=args.n_boot)
+            annotated = baseline_annotated + annotated
 
         out_csv = csv_path.parent / (csv_path.stem + "_pvalues.csv")
         out_tex = csv_path.parent / (csv_path.stem + "_pvalues.tex")
@@ -397,12 +520,12 @@ def main() -> None:
         write_latex_table(annotated, out_tex)
 
         # Print a quick summary to stdout
-        print(f"\n{'─' * 60}")
+        print(f"\n{'─' * 85}")
         print(f"Table: {csv_path.name}")
-        print(f"{'Model':<12} {'nconst':>7} {'Aug':<10} {'Acc (%)':>8} {'p-value':>10} {'sig':>5}")
-        print(f"{'─' * 60}")
+        print(f"{'Model':<12} {'nconst':>7} {'Aug':<10} {'Acc (%)':>8} {'95% CI':>16} {'p (boot)':>10} {'p (t)':>8} {'sig*':>5}")
+        print(f"{'─' * 85}")
         for r in annotated:
-            acc = float(r.get("test_acc_mean", "nan"))
+            acc = float(r.get("test_acc_mean", "nan") or "nan")
             if not math.isnan(acc) and acc < 2.0:
                 acc *= 100
             print(
@@ -410,9 +533,13 @@ def main() -> None:
                 f"{r.get('nconstituents', ''):>7} "
                 f"{r.get('augmentation_scheme', ''):<10} "
                 f"{acc:>8.2f} "
-                f"{r.get('p_value', '—'):>10} "
-                f"{r.get('significant_005', '—'):>5}"
+                f"{_ci_cell(r):>16} "
+                f"{r.get('bootstrap_pvalue', '—'):>10} "
+                f"{r.get('p_value', '—'):>8} "
+                f"{r.get('significant_boot_005', '—'):>5}"
             )
+        print(f"{'─' * 85}")
+        print("  * significant_boot_005: bootstrap p < 0.05")
         print()
 
 

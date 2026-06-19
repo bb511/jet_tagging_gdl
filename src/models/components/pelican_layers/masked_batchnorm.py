@@ -72,13 +72,8 @@ class MaskedBatchNorm1d(nn.BatchNorm1d):
 
         # calculate running estimates
         if self.training and n > 1:
-            # Here lies the trick. Using Var(X) = E[X^2] - E[X]^2 as the biased
-            # variance, we do not need to make any tensor shape manipulation.
-            # mean = E[X] is simply the sum-product of our "probability" mask with the input...
             mean = (mask * inp).sum([0, 1])
-            # ...whereas Var(X) is directly derived from the above formulae
-            # This should be numerically equivalent to the biased sample variance
-            var = (mask * inp ** 2).sum([0, 1]) - mean ** 2
+            var = (mask * (inp - mean[None, None, :]) ** 2).sum([0, 1])
             with torch.no_grad():
                 self.running_mean = exponential_average_factor * mean\
                     + (1 - exponential_average_factor) * self.running_mean
@@ -146,13 +141,8 @@ class MaskedBatchNorm2d(nn.BatchNorm2d):
 
         # calculate running estimates
         if self.training and n > 1:
-            # Here lies the trick. Using Var(X) = E[X^2] - E[X]^2 as the biased
-            # variance, we do not need to make any tensor shape manipulation.
-            # mean = E[X] is simply the sum-product of our "probability" mask with the input...
             mean = (mask * inp).sum([0, 1, 2])
-            # ...whereas Var(X) is directly derived from the above formulae
-            # This should be numerically equivalent to the biased sample variance
-            var = (mask * inp ** 2).sum([0, 1, 2]) - mean ** 2
+            var = (mask * (inp - mean[None, None, None, :]) ** 2).sum([0, 1, 2])
             with torch.no_grad():
                 self.running_mean = exponential_average_factor * mean\
                     + (1 - exponential_average_factor) * self.running_mean
@@ -220,13 +210,8 @@ class MaskedBatchNorm3d(nn.BatchNorm3d):
 
         # calculate running estimates
         if self.training and (n > 1).all():
-            # Here lies the trick. Using Var(X) = E[X^2] - E[X]^2 as the biased
-            # variance, we do not need to make any tensor shape manipulation.
-            # mean = E[X] is simply the sum-product of our "probability" mask with the input...
             mean = (mask * inp).sum([0, 1, 2, 3])
-            # ...whereas Var(X) is directly derived from the above formulae
-            # This should be numerically equivalent to the biased sample variance
-            var = (mask * inp ** 2).sum([0, 1, 2, 3]) - mean ** 2
+            var = (mask * (inp - mean[None, None, None, None, :]) ** 2).sum([0, 1, 2, 3])
             with torch.no_grad():
                 self.running_mean = exponential_average_factor * mean\
                     + (1 - exponential_average_factor) * self.running_mean

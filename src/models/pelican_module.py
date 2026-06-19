@@ -186,17 +186,6 @@ class PELICANClassifier(nn.Module):
         else:
             prediction = act3
 
-        check_nan = torch.isnan(prediction).any()
-        if check_nan:
-            logging.info(torch.isnan(act1).sum(1,2,3))
-            logging.info(f"inputs has NaNs: {torch.isnan(inputs).any()}")
-            logging.info(f"rank1_inputs: {torch.isnan(rank1_inputs).any()}")
-            logging.info(f"rank2_inputs: {torch.isnan(rank2_inputs).any()}")
-            logging.info(f"act1 has NaNs: {torch.isnan(act1).any()}")
-            logging.info(f"act2 has NaNs: {torch.isnan(act2).any()}")
-            logging.info(f"prediction has NaNs: {check_nan}")
-        assert not check_nan, "There are NaN entries in the output! Evaluation terminated."
-
         if covariance_test:
             return {'predict': prediction, 'inputs': inputs, 'act1': act1, 'act2': act2, 'act3': act3}
         else:
@@ -467,6 +456,9 @@ class PELICANModule(LightningModule):
             batchnorm=batchnorm,
             dataset='',
         )
+
+        if compile:
+            self.net = torch.compile(self.net)
 
         self.criterion = combine_with_symmetry_loss if method == "symm_loss" else nn.CrossEntropyLoss()
 

@@ -44,6 +44,8 @@ class Transformer(LightningModule):
         fill_masked: bool = True,
         bias: bool = True,
         fast_path: bool = False,
+        dim_feedforward: Optional[int] = None,
+        dropout: float = 0.1,
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         compile: bool = False,
@@ -71,7 +73,12 @@ class Transformer(LightningModule):
         self.lifting_layer      = nn.Linear(nbr_feat, d_models, bias=bias)
         self.cls_token          = nn.Parameter(torch.zeros(1, 1, d_models))
         self.encoder_layer      = nn.TransformerEncoderLayer(
-            d_model=d_models, nhead=nhead, batch_first=True, bias=bias
+            d_model=d_models,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward if dim_feedforward is not None else 2048,
+            dropout=dropout,
+            batch_first=True,
+            bias=bias,
         )
         self.transformer_encoder = nn.TransformerEncoder(
             self.encoder_layer, num_layers=num_layers, enable_nested_tensor=fast_path

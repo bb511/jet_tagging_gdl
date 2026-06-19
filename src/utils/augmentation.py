@@ -415,7 +415,7 @@ def apply_boost_preserve_phi(
     feature_names: List[str],
     norm_scales: Optional[dict] = None,
 ) -> torch.Tensor:
-    """Boost 4-vectors and apply a compensating SO(2) rotation to preserve jet φ.
+    """Boost 4-vectors (no compensating rotation — jet φ is left as the boost leaves it).
 
     All computation stays on the device of *x_data*.
     Energy approximated as |p| when the energy feature is absent.
@@ -458,20 +458,8 @@ def apply_boost_preserve_phi(
     e_b  = p4b[:, :, 0]; px_b = p4b[:, :, 1]
     py_b = p4b[:, :, 2]; pz_b = p4b[:, :, 3]
 
-    jet_phi_orig  = torch.atan2(
-        (py_phys * pad_mask).sum(dim=1, keepdim=True),
-        (px_phys * pad_mask).sum(dim=1, keepdim=True),
-    )
-    jet_phi_boost = torch.atan2(
-        (py_b * pad_mask).sum(dim=1, keepdim=True),
-        (px_b * pad_mask).sum(dim=1, keepdim=True),
-    )
-
-    theta = jet_phi_orig - jet_phi_boost
-    cos_t = torch.cos(theta); sin_t = torch.sin(theta)
-
-    px_r = (cos_t * px_b - sin_t * py_b) * pad_mask
-    py_r = (sin_t * px_b + cos_t * py_b) * pad_mask
+    px_r = px_b * pad_mask
+    py_r = py_b * pad_mask
     pz_r = pz_b * pad_mask
     e_r  = e_b  * pad_mask
     energy_mask = (e_r > 0) & pad_mask

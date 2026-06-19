@@ -34,11 +34,14 @@ from src.callbacks.results_table_callback import ResultsTableCallback
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-def _get_last_ckpt(trainer: Trainer) -> Optional[str]:
-    """Safely retrieve the best checkpoint path, falling back to last."""
-    # Fallback: use last saved checkpoint
+def _get_best_ckpt(trainer: Trainer) -> Optional[str]:
+    """Retrieve the best checkpoint path, falling back to last if no best was saved."""
+    best = trainer.checkpoint_callback.best_model_path
+    if best:
+        log.info(f"Using best checkpoint: {best}")
+        return best
     last = trainer.checkpoint_callback.last_model_path
-    log.info(f"Saving last checkpoint: {last}")
+    log.info(f"No best checkpoint found, falling back to last: {last}")
     return last
 
 
@@ -99,13 +102,13 @@ def _run_one_fold(
     if cfg.get("train"):
         log.info(f"[{fold_label}] Starting training...")
         trainer.fit(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
-        last_ckpt = _get_last_ckpt(trainer)
+        last_ckpt = _get_best_ckpt(trainer)
         log.info(f"[{fold_label}] Best checkpoint path: {last_ckpt}")
         
 
     # if cfg.get("test"):
     #     log.info(f"[{fold_label}] Starting testing...")
-    #     last_ckpt = _get_last_ckpt(trainer)
+    #     last_ckpt = _get_best_ckpt(trainer)
     #     log.info(f"[{fold_label}] Loading checkpoint: {last_ckpt}")
     #     datamodule.setup(stage="test")
     #     trainer.test(
@@ -194,7 +197,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     # Collect best checkpoint path for manifest
     manifest_runs: List[Dict] = []
-    main_ckpt = _get_last_ckpt(main_trainer)
+    main_ckpt = _get_best_ckpt(main_trainer)
     manifest_runs.append({"fold_label": "main", "fold_idx": 0, "checkpoint_path": main_ckpt})
 
     # ==================================================================
@@ -243,7 +246,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             for k, v in fold_trainer.callback_metrics.items()
         })
 
-        fold_ckpt = _get_last_ckpt(fold_trainer)
+        fold_ckpt = _get_best_ckpt(fold_trainer)
         manifest_runs.append({
             "fold_label": f"fold_{fold_idx + 1}",
             "fold_idx": fold_idx + 1,

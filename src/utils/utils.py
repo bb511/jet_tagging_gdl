@@ -509,3 +509,14 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
 
     return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
+
+
+def get_onecycle_schedule(optimizer, num_training_steps, max_lr, pct_start=0.2, last_epoch=-1):
+    """OneCycleLR wrapper matching the (optimizer, num_training_steps) call signature used by configure_optimizers."""
+    return optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=max_lr,
+        total_steps=num_training_steps,
+        pct_start=pct_start,
+        last_epoch=last_epoch,
+    )

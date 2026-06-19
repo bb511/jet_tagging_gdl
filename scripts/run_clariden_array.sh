@@ -36,20 +36,20 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     trainer.max_epochs=200
 
 
-python src/train.py \
-    -m \
-    hydra/launcher=submitit_slurm_clariden \
-    experiment=baseline/hls4ml_nconst32_none \
-    +experiment_name=hls4ml_nconst32_aug_none \
-    model=deepsets_32 \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst32" \
-    hydra.job.name="baseline_deepsets_nconst32" \
-    separate_train_eval_mode=true \
-    trainer.max_epochs=200
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_clariden \
+#     experiment=baseline/hls4ml_nconst32_none \
+#     +experiment_name=hls4ml_nconst32_aug_none \
+#     model=deepsets_32 \
+#     data.nconstituents=32 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst32" \
+#     hydra.job.name="baseline_deepsets_nconst32" \
+#     separate_train_eval_mode=true \
+#     trainer.max_epochs=200
 
 
 # ==================================================
