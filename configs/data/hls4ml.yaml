@@ -9,9 +9,5 @@ nconstituents: 32
 features: ["px", "py", "pz", "etarel", "phirel"]
 augmentation_scheme: none
 augmentation_seed: ${seed}
-rotation_nbr_rot: 8
-rotation_shuffle: True
-lorentz_nbr_rot: 8
 lorentz_eta_max: 2.0
 n_folds: 5
-online_augmentation: true   # when true, applies per-jet random rotation at batch time

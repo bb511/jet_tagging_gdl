@@ -14,8 +14,6 @@ data:
   nconstituents: 16
   method: augmentation
   augmentation_scheme: lorentz
-  online_augmentation: true
-  lorentz_nbr_rot: 8
   lorentz_eta_max: 2.0
   batch_size: 2048
   n_folds: 1

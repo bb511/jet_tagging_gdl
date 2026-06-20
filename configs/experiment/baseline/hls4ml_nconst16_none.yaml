@@ -13,7 +13,6 @@ data:
   nconstituents: 16
   method: augmentation
   augmentation_scheme: none
-  online_augmentation: true
   batch_size: 2048
   n_folds: 1
 

@@ -24,8 +24,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.utils.augmentation import permute_constituents
-from src.utils.symmetry_loss import apply_random_so2, apply_random_so3, apply_random_lorentz
+from src.utils.augmentation import (
+    apply_random_lorentz, apply_random_so2, apply_random_so3, permute_constituents,
+)
 
 log = logging.getLogger(__name__)
 

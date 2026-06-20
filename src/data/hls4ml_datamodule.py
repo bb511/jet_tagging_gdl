@@ -2,7 +2,7 @@
 Data module for HLS4ML jet classification.
 
 Three training methods are supported:
-1. augmentation  — offline augmentation baked into processed arrays
+1. augmentation  — per-jet random rotation/boost applied online at batch time
 2. symm_loss     — no augmentation; symmetry enforced via loss term
 3. another_method — placeholder for future methods (same pipeline as symm_loss for now)
 
@@ -38,14 +38,12 @@ try:
 except Exception:
     ipy_display = None
 
-from src.utils.utils import plot_features_overlap_from_datasets
-from src.utils.augmentation import apply_augmentation, permute_constituents
+from src.utils.augmentation import (
+    apply_random_lorentz, apply_random_so2, apply_random_so3, permute_constituents,
+)
 
 import matplotlib.pyplot as plt
 from pathlib import Path as _Path
-from src.utils.symmetry_loss import (
-    apply_random_so2, apply_random_so3, apply_random_lorentz,
-)
 
 
 log = logging.getLogger(__name__)
@@ -74,8 +72,9 @@ class HLS4MLDataModule(LightningDataModule):
     1. ``prepare_data`` downloads/extracts train and val archives (if missing).
     2. Raw H5 data is loaded into numpy arrays.
     3. Data is preprocessed (nconst restriction + pt sorting).
-    4. [augmentation only] Train split is augmented (so2/so3/lorentz).
-    5. Physics normalisation is applied and arrays are saved as ``.npy`` files.
+    4. Physics normalisation is applied and arrays are saved as ``.npy`` files.
+    5. [augmentation only] so2/so3/lorentz transforms are applied online,
+       per batch, at train time (see ``_make_batch_transform``).
 
     K-fold usage in train.py:
         datamodule.prepare_data()
@@ -97,11 +96,7 @@ class HLS4MLDataModule(LightningDataModule):
         features: Optional[Any] = None,
         augmentation_scheme: str = "lorentz",
         augmentation_seed: Optional[int] = None,
-        rotation_nbr_rot: int = 8,
-        rotation_shuffle: bool = True,
-        lorentz_nbr_rot: int = 8,
         lorentz_eta_max: float = 2.0,
-        online_augmentation: bool = False,
         n_folds: int = 1,
         kfold_seed: int = 42,
     ) -> None:
@@ -112,8 +107,6 @@ class HLS4MLDataModule(LightningDataModule):
         self.pin_memory    = pin_memory
         self.nconstituents = nconstituents
         self.features      = features if features is not None else ["px", "py", "pz", "etarel", "phirel"]
-
-        self.online_augmentation = online_augmentation
 
         # --- Validate method ---
         self.method = method.lower()
@@ -143,11 +136,8 @@ class HLS4MLDataModule(LightningDataModule):
         else:
             self.augmentation_scheme = requested_scheme
 
-        self._rng              = np.random.default_rng(augmentation_seed)
-        self.rotation_nbr_rot  = rotation_nbr_rot
-        self.rotation_shuffle  = rotation_shuffle
-        self.lorentz_nbr_rot   = lorentz_nbr_rot
-        self.lorentz_eta_max   = lorentz_eta_max
+        self._rng            = np.random.default_rng(augmentation_seed)
+        self.lorentz_eta_max = lorentz_eta_max
 
         # --- K-fold config ---
         self.n_folds    = n_folds
@@ -165,20 +155,17 @@ class HLS4MLDataModule(LightningDataModule):
         # Canonical layout (method-aware):
         #   <data_dir>/processed/<method>/<augmentation_scheme>/<nconst_tag>/
         # This prevents collisions between augmentation and symm_loss pipelines.
+        # For method="augmentation", so2/so3/lorentz are applied online at batch
+        # time, so the on-disk cache only ever holds the normalised baseline
+        # arrays — always stored under the "none" scheme to avoid collisions.
+        aug_dir_component = "none" if self.method == "augmentation" else self.augmentation_scheme
         self.processed_data_dir = os.path.join(
             self.data_path,
             "processed",
             self.method,
-            self.augmentation_scheme,
+            aug_dir_component,
             nconst_tag,
         )
-
-        if self.online_augmentation:
-            # No offline rotation copies; store normalised-only arrays under
-            # augmentation/none/ to avoid colliding with offline processed files.
-            self.processed_data_dir = os.path.join(
-                self.data_path, "processed", self.method, "none", nconst_tag
-            )
 
         # Backward-compatibility layout used in older runs:
         #   <data_dir>/processed/<augmentation_scheme>/<nconst_tag>/
@@ -306,17 +293,10 @@ class HLS4MLDataModule(LightningDataModule):
 
         # Step 3: Method-specific pipeline
         if self.method == "augmentation":
-            if self.online_augmentation:
-                self._pipeline_online_augmentation(
-                    self.raw_data_dir, self.processed_data_dir,
-                    self.nconstituents, self.features
-                )
-            else:
-                self._pipeline_augmentation(
-                    self.raw_data_dir, self.processed_data_dir,
-                    self.nconstituents, self.features,
-                )
-        
+            self._pipeline_augmentation(
+                self.raw_data_dir, self.processed_data_dir,
+                self.nconstituents, self.features,
+            )
         elif self.method in _BASELINE_METHODS:
             self._pipeline_baseline(
                 self.raw_data_dir, self.processed_data_dir,
@@ -326,33 +306,12 @@ class HLS4MLDataModule(LightningDataModule):
             raise ValueError(f"Unsupported method '{self.method}'.")
 
     # ------------------------------------------------------------------
-    # Pipeline A: augmentation
+    # Pipeline A: augmentation — so2/so3/lorentz applied online at batch time
     # ------------------------------------------------------------------
-    def _pipeline_augmentation(
-        self, raw_data_dir, processed_data_dir, nconstituents, features
-    ) -> None:
+    def _pipeline_augmentation(self, raw_data_dir, processed_data_dir, nconstituents, features) -> None:
         log.info("[augmentation] Starting augmentation pipeline.")
-
-        x_train_sorted = self._restrict_and_sort_by_pt(self.x_train_raw, self.pt_idx, nconstituents)
-        x_val_sorted   = self._restrict_and_sort_by_pt(self.x_val_raw,   self.pt_idx, nconstituents)
-
-        x_train_aug, y_train_aug = self._setup_augmentation_schemes(x_train_sorted, self.y_train_raw)
-
-        # Fit norm on unaugmented train split
-        norm_params  = self.fit_physics_norm(x_train_sorted, self.feature_names)
-        x_train_aug  = self.apply_physics_norm(x_train_aug,  self.feature_names, norm_params)
-        x_val_norm   = self.apply_physics_norm(x_val_sorted, self.feature_names, norm_params)
-        self.norm_params = norm_params
-
-        log.info(f"[augmentation] train: {x_train_aug.shape}, val: {x_val_norm.shape}")
-        self._save_processed_arrays(
-            processed_data_dir, x_train_aug, y_train_aug,
-            x_val_norm, self.y_val_raw, norm_params,
-        )
-
-    def _pipeline_online_augmentation(self, raw_data_dir, processed_data_dir, nconstituents, features) -> None:
-        log.info("[augmentation] Starting online augmentation pipeline.")
-        # For online augmentation, we still need to prepare and save the baseline processed arrays
+        # The disk cache only holds the normalised baseline arrays; so2/so3/lorentz
+        # transforms are applied per-batch at train time (see _make_batch_transform).
         x_train_sorted = self._restrict_and_sort_by_pt(self.x_train_raw, self.pt_idx, nconstituents)
         x_val_sorted   = self._restrict_and_sort_by_pt(self.x_val_raw,   self.pt_idx, nconstituents)
         norm_params  = self.fit_physics_norm(x_train_sorted, self.feature_names)
@@ -491,19 +450,6 @@ class HLS4MLDataModule(LightningDataModule):
         sort_idx = np.argsort(x_data[:, :, pt_idx], axis=1)[:, ::-1]
         return np.take_along_axis(x_data, sort_idx[:, :, np.newaxis], axis=1)
 
-    def _setup_augmentation_schemes(self, x_train, y_train) -> Tuple[np.ndarray, np.ndarray]:
-        return apply_augmentation(
-            scheme=self.augmentation_scheme,
-            x_train=x_train,
-            y_train=y_train,
-            feature_names=self.feature_names,
-            rng=self._rng,
-            rotation_nbr_rot=self.rotation_nbr_rot,
-            rotation_shuffle=self.rotation_shuffle,
-            lorentz_nbr_rot=self.lorentz_nbr_rot,
-            lorentz_eta_max=self.lorentz_eta_max,
-        )
-
     def fit_physics_norm(self, x_train, feature_names) -> Dict[str, Tuple[str, float]]:
         params: Dict[str, Tuple[str, float]] = {}
         for i, name in enumerate(feature_names):
@@ -581,9 +527,6 @@ class HLS4MLDataModule(LightningDataModule):
     # Online Augmentation Trial (legacy collate-based path)
     # ------------------------------------------------------------------
     def _make_online_aug_collate(self):
-        from src.utils.symmetry_loss import (
-            apply_random_so2, apply_random_so3, apply_random_lorentz
-        )
         scheme = self.augmentation_scheme
         all_names = self.feature_names or []
         eta_max   = self.lorentz_eta_max
@@ -873,7 +816,7 @@ class HLS4MLDataModule(LightningDataModule):
 
             transform = (
                 self._make_batch_transform()
-                if self.online_augmentation and self.augmentation_scheme not in {"none", "permute"}
+                if self.augmentation_scheme not in {"none", "permute"}
                 else None
             )
 
@@ -948,6 +891,7 @@ class HLS4MLDataModule(LightningDataModule):
         if (
             stage in (None, "fit")
             and not self._overlap_plot_done
+            and self.method == "augmentation"
             and self.augmentation_scheme != "none"
             and self.feature_names is not None
         ):
@@ -955,22 +899,7 @@ class HLS4MLDataModule(LightningDataModule):
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                 "logs", "plots",
             )
-            if self.online_augmentation:
-                self._plot_online_aug_diagnostic(save_dir=save_dir, n_batches=20)
-            else:
-                try:
-                    plot_features_overlap_from_datasets(
-                        datasets_dir=self.data_path,
-                        feature_names=self.feature_names,
-                        class_idx=0,
-                        augmentation_scheme=self.augmentation_scheme,
-                        method=self.method,
-                        nconstituents=self.nconstituents,
-                        split="train",
-                        save_dir=save_dir,
-                    )
-                except FileNotFoundError:
-                    log.warning("Skipping overlap plot — baseline 'none' processed files not found.")
+            self._plot_online_aug_diagnostic(save_dir=save_dir, n_batches=20)
             self._overlap_plot_done = True
 
     # ------------------------------------------------------------------

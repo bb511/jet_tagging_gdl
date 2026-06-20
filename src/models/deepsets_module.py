@@ -75,6 +75,7 @@ class DeepSetsInvariant(LightningModule):
         self.activ_name   = activation
         self.aggregation  = aggregation
         self.mask_enabled = mask
+        self.nbr_feats    = nbr_feats
 
         # Example input for torchinfo and RichModelSummary
         self.example_input_array = torch.randn(2, 32, nbr_feats)
@@ -113,8 +114,10 @@ class DeepSetsInvariant(LightningModule):
         self.test_loss    = MeanMetric()
         self.val_acc_best = MaxMetric()
 
-        # feature_names and norm_scales populated in setup() from the datamodule
+        # feature_names, model_feature_indices and norm_scales populated in
+        # setup() from the datamodule
         self.feature_names = None
+        self.model_feature_indices = None
         self.norm_scales = None
 
         # ----------------------------------------------------------------
@@ -140,6 +143,15 @@ class DeepSetsInvariant(LightningModule):
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(torch.float32)
+
+        # symm_loss callers (model_step, but also callbacks that call the
+        # module directly, e.g. plotting/invariance) may pass the full
+        # on-disk feature set rather than the model's reduced input width —
+        # reduce here so every caller can just hand over whatever the
+        # dataloader yields.
+        if self.model_feature_indices is not None and x.shape[-1] != self.nbr_feats:
+            x = x[:, :, self.model_feature_indices]
+
         phi_out = self.phi(x)
 
         if self.mask_enabled:
@@ -216,20 +228,40 @@ class DeepSetsInvariant(LightningModule):
     def setup(self, stage: str) -> None:
         if hasattr(self.trainer, "datamodule") and self.trainer.datamodule is not None:
             dm = self.trainer.datamodule
-            # Use the *selected* feature names (matching tensor dimensions), not
-            # the raw full list from the H5 file which has j1_-prefixed names at
-            # indices that no longer correspond to the feature-selected tensor.
-            self.feature_names = list(dm.features)
-            if self.method == "symm_loss" and not self.feature_names:
-                raise RuntimeError(
-                    "datamodule.features is empty after setup(). "
-                    "Ensure HLS4MLDataModule is configured with a features list."
+            if self.method == "symm_loss":
+                # Full on-disk schema — x arrives at this width; build_symmetric_batch
+                # needs px/py/pz even when the model itself consumes fewer features.
+                self.feature_names = list(dm.feature_names)
+                if not self.feature_names:
+                    raise RuntimeError(
+                        "datamodule.feature_names is empty after setup(). "
+                        "Ensure HLS4MLDataModule is configured with a features list."
+                    )
+                self.model_feature_indices = self._compute_model_feature_indices(
+                    dm.features, self.feature_names
                 )
+            else:
+                self.feature_names = list(dm.features)
+                self.model_feature_indices = None
             raw_params = getattr(dm, "norm_params", None)
             self.norm_scales = (
                 {name: float(scale) for name, (_, scale) in raw_params.items()}
                 if raw_params else None
             )
+
+    @staticmethod
+    def _compute_model_feature_indices(model_features, full_feature_names) -> list:
+        indices = []
+        for feat in model_features:
+            if feat in full_feature_names:
+                indices.append(full_feature_names.index(feat))
+            elif f"j1_{feat}" in full_feature_names:
+                indices.append(full_feature_names.index(f"j1_{feat}"))
+            else:
+                raise ValueError(
+                    f"Requested feature '{feat}' not found in saved names: {full_feature_names}"
+                )
+        return indices
 
     # ------------------------------------------------------------------
     # Training
