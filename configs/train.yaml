@@ -47,11 +47,6 @@ train: True
 # lightning chooses best weights based on the metric specified in checkpoint callback
 test: False
 
-# When True: training runs fit-only (no in-train test), emits a checkpoint manifest
-# JSON under hydra.run.dir, and tags MLflow runs with run_stage=train.
-# A separate eval.py pass in manifest mode then performs testing.
-separate_train_eval_mode: false
-
 # simply provide checkpoint path to resume training
 ckpt_path: null
 

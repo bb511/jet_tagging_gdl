@@ -7,4 +7,4 @@ results_table:
   augmentation_scheme: ${data.augmentation_scheme}
   nconstituents: ${data.nconstituents}
   selected_metric_mode: "scheme"
-  invariance_metric: "l2"  # l2 | flip | cosine | js
+  invariance_metric: "l2"  # l2 | flip | cosine | js | wasserstein

@@ -13,16 +13,22 @@ Metrics per group:
 - Jensen-Shannon divergence
 - Flip rate
 - Orbit variance: E_x [ Var_g ( f(gx) ) ]
+- Wasserstein-1 distance between the *distributions* of f(x) and f(T(x))
+  (per class-logit channel, averaged over channels) — unlike the metrics
+  above, this is not a paired/pointwise comparison: it asks whether the
+  augmented test set's logit distribution matches the original's overall,
+  regardless of which jet produced which value.
 """
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.stats import wasserstein_distance
 
 from src.utils.augmentation import (
     apply_random_lorentz, apply_random_so2, apply_random_so3, permute_constituents,
@@ -37,16 +43,23 @@ class InvarianceMetricCallback(L.Callback):
         lorentz_eta_max: float = 2.0,
         seed: int = 42,
         orbit_variance_k: int = 5,
+        compute_wasserstein: bool = True,
+        class_names: Sequence[str] = ("g", "q", "W", "Z", "t"),
     ):
         super().__init__()
         self.lorentz_eta_max = lorentz_eta_max
         self.rng = np.random.default_rng(seed)   # used only for permutation
         self.orbit_variance_k = orbit_variance_k
+        self.compute_wasserstein = compute_wasserstein
+        self.class_names = list(class_names)
 
         self._model_feature_names: Optional[List[str]] = None
+        self._full_feature_names: Optional[List[str]] = None
         self._norm_scales: Optional[dict] = None
         self._dm_method: Optional[str] = None
         self._batch_metrics: Dict[str, List[float]] = {}
+        self._orig_logits: List[torch.Tensor] = []
+        self._aug_logits: Dict[str, List[torch.Tensor]] = {}
 
     # ------------------------------------------------------------------
     # Setup
@@ -62,11 +75,18 @@ class InvarianceMetricCallback(L.Callback):
             self._model_feature_names = [dm.feature_names[i] for i in feature_indices]
         else:
             self._model_feature_names = list(dm.feature_names)
+        # Test batches may carry either the model's reduced feature set or
+        # the full on-disk set (e.g. datamodule.keep_full_features_at_test,
+        # or method="symm_loss" which always keeps the full set) — pick the
+        # right name list per-batch in on_test_batch_end by matching width.
+        self._full_feature_names = list(dm.feature_names)
 
         # Augmentation functions need {feature_name: scale} to undo/redo normalisation
         self._norm_scales = {name: scale for name, (_kind, scale) in dm.norm_params.items()}
         self._dm_method = getattr(dm, "method", None)
         self._batch_metrics = {}
+        self._orig_logits = []
+        self._aug_logits = {}
 
         log.info(f"InvarianceMetricCallback: ready. Features: {self._model_feature_names}")
 
@@ -128,10 +148,20 @@ class InvarianceMetricCallback(L.Callback):
             return
 
         x = batch[0]                          # (B, C, F) — normalised, on device
-        names = self._model_feature_names
+        # x may carry the model's reduced feature set or the full on-disk set
+        # (see on_test_start) — match names to x's actual width so so2/so3/
+        # lorentz can find px/py/pz by name when they're present.
+        names = (
+            self._full_feature_names
+            if self._full_feature_names is not None and x.shape[-1] == len(self._full_feature_names)
+            else self._model_feature_names
+        )
         ns = self._norm_scales
 
         y_orig = pl_module(x)
+
+        if self.compute_wasserstein:
+            self._orig_logits.append(y_orig.detach().cpu())
 
         transforms: Dict[str, object] = {
             "so2":     lambda t: apply_random_so2(t, feature_names=names, norm_scales=ns)[0],
@@ -151,6 +181,35 @@ class InvarianceMetricCallback(L.Callback):
             ov = self._orbit_variance(pl_module, x, transform_fn)
             self._batch_metrics.setdefault(f"invariance/{group}_orbit_var", []).append(ov)
 
+            if self.compute_wasserstein:
+                self._aug_logits.setdefault(group, []).append(y_aug.detach().cpu())
+
+    # ------------------------------------------------------------------
+    # Wasserstein: distribution-level (unpaired) comparison of f(x) vs f(T(x))
+    # ------------------------------------------------------------------
+    def _wasserstein_metrics(self) -> Dict[str, float]:
+        """Per-group Wasserstein-1 distance between the original and augmented
+        logit distributions, computed per class-logit channel and averaged.
+        """
+        if not self._orig_logits:
+            return {}
+
+        y_orig_all = torch.cat(self._orig_logits, dim=0).numpy()  # (N, C)
+        num_classes = y_orig_all.shape[1]
+        names = self.class_names[:num_classes]
+
+        results: Dict[str, float] = {}
+        for group, chunks in self._aug_logits.items():
+            y_aug_all = torch.cat(chunks, dim=0).numpy()  # (N, C)
+            per_class = []
+            for c, name in enumerate(names):
+                w = wasserstein_distance(y_orig_all[:, c], y_aug_all[:, c])
+                results[f"invariance/{group}_wasserstein_{name}"] = w
+                per_class.append(w)
+            results[f"invariance/{group}_wasserstein"] = float(np.mean(per_class))
+
+        return results
+
     # ------------------------------------------------------------------
     # Epoch end: average across batches and log
     # ------------------------------------------------------------------
@@ -159,6 +218,9 @@ class InvarianceMetricCallback(L.Callback):
             return
 
         results = {k: float(np.mean(v)) for k, v in self._batch_metrics.items()}
+
+        if self.compute_wasserstein:
+            results.update(self._wasserstein_metrics())
 
         for name, value in results.items():
             pl_module.log(name, value, prog_bar=False, on_epoch=True, sync_dist=True)

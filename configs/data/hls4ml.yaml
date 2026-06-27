@@ -11,3 +11,4 @@ augmentation_scheme: none
 augmentation_seed: ${seed}
 lorentz_eta_max: 2.0
 n_folds: 5
+keep_full_features_at_test: false

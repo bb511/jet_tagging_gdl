@@ -130,19 +130,3 @@ def test_train_manifest_created(tmp_path: Path, cfg_train: DictConfig) -> None:
     assert main_run["fold_label"] == "main"
     assert main_run["fold_idx"] == 0
     assert main_run["checkpoint_path"]  # non-empty string
-
-
-@pytest.mark.slow
-def test_train_separate_mode_no_extra_test(tmp_path: Path, cfg_train: DictConfig) -> None:
-    """In separate_train_eval_mode, training completes and manifest marks mode correctly."""
-    with open_dict(cfg_train):
-        cfg_train.trainer.max_epochs = 1
-        cfg_train.separate_train_eval_mode = True
-
-    HydraConfig().set_config(cfg_train)
-    train(cfg_train)
-
-    manifest_path = tmp_path / "checkpoint_manifest.json"
-    assert manifest_path.exists()
-    manifest = json.loads(manifest_path.read_text())
-    assert manifest["separate_train_eval_mode"] is True

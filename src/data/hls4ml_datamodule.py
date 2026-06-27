@@ -99,6 +99,7 @@ class HLS4MLDataModule(LightningDataModule):
         lorentz_eta_max: float = 2.0,
         n_folds: int = 1,
         kfold_seed: int = 42,
+        keep_full_features_at_test: bool = False,
     ) -> None:
         super().__init__()
 
@@ -107,6 +108,13 @@ class HLS4MLDataModule(LightningDataModule):
         self.pin_memory    = pin_memory
         self.nconstituents = nconstituents
         self.features      = features if features is not None else ["px", "py", "pz", "etarel", "phirel"]
+        # When self.features excludes px/py/pz (e.g. a model trained on
+        # pt/etarel/phirel alone), so2/so3/lorentz can't be computed from the
+        # reduced test tensor. Setting this keeps the full on-disk feature set
+        # in x_test so InvarianceMetricCallback can still apply those
+        # transforms; the model's forward() is responsible for reducing back
+        # down to its own input width (see JetFormer.forward()).
+        self.keep_full_features_at_test = keep_full_features_at_test
 
         # --- Validate method ---
         self.method = method.lower()
@@ -878,7 +886,11 @@ class HLS4MLDataModule(LightningDataModule):
             x_test = self.apply_physics_norm(x_test, self.feature_names, self.norm_params)
 
             # 3. THEN select the subset of features the model actually uses
-            if feature_indices is not None and not keep_full_for_model:
+            if (
+                feature_indices is not None
+                and not keep_full_for_model
+                and not self.keep_full_features_at_test
+            ):
                 x_test = x_test[:, :, feature_indices]
 
             log.info(f"[setup] Test — x_test: {x_test.shape}, y_test: {y_test.shape}")

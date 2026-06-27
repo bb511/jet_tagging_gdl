@@ -16,7 +16,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/baseline_transformer_nconst8" \
 #     hydra.job.name="baseline_transformer_nconst8" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -32,7 +31,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/baseline_transformer_nconst16" \
 #     hydra.job.name="baseline_transformer_nconst16" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -48,7 +46,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst32" \
 #     hydra.job.name="baseline_deepsets_nconst32" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -68,7 +65,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/aug_so2_deepsets_nconst8" \
 #     hydra.job.name="augmentation_deepsets_nconst8_so2" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -84,7 +80,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/aug_so2_deepsets_nconst16" \
 #     hydra.job.name="aug_so2_deepsets_nconst16_so2" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -100,7 +95,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/aug_so2_deepsets_nconst32" \
 #     hydra.job.name="aug_so2_deepsets_nconst32_so2" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -121,7 +115,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/symm_loss_deepsets_nconst8" \
 #     hydra.job.name="symm_loss_deepsets_nconst8" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 # python src/train.py \
@@ -136,7 +129,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/symm_loss_deepsets_nconst16" \
 #     hydra.job.name="symm_loss_deepsets_nconst16" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 # python src/train.py \
@@ -151,7 +143,6 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/symm_loss_deepsets_nconst32" \
 #     hydra.job.name="symm_loss_deepsets_nconst32" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200
 
 
@@ -171,5 +162,4 @@ export HLS4ML_DATA_DIR=/capstor/scratch/cscs/agogia/datasets/
 #     data.data_dir="$HLS4ML_DATA_DIR" \
 #     hydra.sweep.dir="logs/slurm/permutation_deepsets_nconst8" \
 #     hydra.job.name="permutation_deepsets_nconst8" \
-#     separate_train_eval_mode=true \
 #     trainer.max_epochs=200

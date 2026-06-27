@@ -44,9 +44,9 @@ test: True
 # In manifest mode, leave null and set checkpoint_manifest_path instead.
 ckpt_path: null
 
-# Manifest mode: path to checkpoint_manifest.json written by train.py in
-# separate_train_eval_mode. When set, eval iterates all folds listed in the
-# manifest. ckpt_path is ignored.
+# Manifest mode: path to checkpoint_manifest.json written by train.py.
+# When set, eval iterates all folds listed in the manifest. ckpt_path is
+# ignored.
 checkpoint_manifest_path: null
 
 # seed for random number generators in pytorch, numpy and python.random

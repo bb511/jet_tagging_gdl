@@ -137,8 +137,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("seed"):
         L.seed_everything(cfg.seed, workers=True)
 
-    separate_mode: bool = bool(cfg.get("separate_train_eval_mode", False))
-    run_stage: Optional[str] = "train" if separate_mode else None
+    # Training always runs fit-only (no in-train test) and emits a checkpoint
+    # manifest JSON under hydra.run.dir; a separate eval.py pass reads that
+    # manifest to perform testing.
+    run_stage: str = "train"
 
     # ------------------------------------------------------------------
     # Datamodule — instantiated ONCE, reused across all runs.
@@ -269,12 +271,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # ------------------------------------------------------------------
     # Write checkpoint manifest so a separate eval pass can discover all
     # fold checkpoints without relying on callback state.
-    # Written unconditionally (harmless in non-separated mode too).
     # ------------------------------------------------------------------
     manifest = {
         "n_folds": kfold_n if run_kfold else 0,
         "include_main": True,
-        "separate_train_eval_mode": separate_mode,
         "hydra_output_dir": str(cfg.paths.output_dir),
         "runs": manifest_runs,
     }

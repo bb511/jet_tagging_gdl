@@ -12,6 +12,7 @@ timeout_min: 2880
 cpus_per_task: 4
 tasks_per_node: 1
 nodes: 1
+exclude: eu-lo-g2-028  # CUDA init fails on this node (torch._C._cuda_init -> "CUDA unknown error"); SLURM still reports it healthy
 
 array_parallelism: 200
 
@@ -22,7 +23,7 @@ additional_parameters:
   mem_per_cpu: "20G"
 
 setup:
-  - source /cluster/home/agogia/pl_hydra_implementation/HYDRA/bin/activate
+  - source /cluster/home/agogia/jet_tagging_gdl/HYDRA/bin/activate
   - export PYTHONPATH=/cluster/home/agogia/jet_tagging_gdl:$PYTHONPATH
 
 signal_delay_s: 120

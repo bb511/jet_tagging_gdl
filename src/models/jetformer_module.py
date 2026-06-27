@@ -184,21 +184,22 @@ class JetFormer(LightningModule):
     def setup(self, stage: str) -> None:
         if hasattr(self.trainer, "datamodule") and self.trainer.datamodule is not None:
             dm = self.trainer.datamodule
-            if self.method == "symm_loss":
-                # Full on-disk schema — x arrives at this width; build_symmetric_batch
-                # needs px/py/pz even when the model itself consumes fewer features.
-                self.feature_names = list(dm.feature_names)
-                if not self.feature_names:
-                    raise RuntimeError(
-                        "datamodule.feature_names is empty after setup(). "
-                        "Ensure HLS4MLDataModule is configured with a features list."
-                    )
-                self.model_feature_indices = self._compute_model_feature_indices(
-                    dm.features, self.feature_names
+            # Full on-disk schema, regardless of method — symm_loss's
+            # build_symmetric_batch needs px/py/pz, and so does any callback
+            # (plotting/invariance) that hands forward() a wider-than-nbr_feat
+            # tensor (e.g. when the datamodule keeps full test features for
+            # InvarianceMetricCallback). forward() only reduces when the input
+            # width actually differs from nbr_feat, so normal train/val/test
+            # steps — which already receive pre-reduced input — are unaffected.
+            self.feature_names = list(dm.feature_names)
+            if not self.feature_names:
+                raise RuntimeError(
+                    "datamodule.feature_names is empty after setup(). "
+                    "Ensure HLS4MLDataModule is configured with a features list."
                 )
-            else:
-                self.feature_names = list(dm.features)
-                self.model_feature_indices = None
+            self.model_feature_indices = self._compute_model_feature_indices(
+                dm.features, self.feature_names
+            )
             raw_params = getattr(dm, "norm_params", None)
             self.norm_scales = (
                 {name: float(scale) for name, (_, scale) in raw_params.items()}

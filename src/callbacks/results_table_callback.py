@@ -115,7 +115,7 @@ class ResultsTableCallback(L.Callback):
             return
 
         n_test = len(self._fold_test_acc)
-        # In eval-only mode (separate_train_eval_mode), invariance and flops
+        # In the eval-only pass, invariance and flops
         # are never collected (on_fit_end never fires). Allow writing the
         # summary with NaN invariance/flops when only test acc is available.
         has_inv = len(self._fold_invariance) > 0
@@ -274,7 +274,7 @@ class ResultsTableCallback(L.Callback):
             f"[ResultsTableCallback] Fold {fold_idx}/{self.n_folds} | test/acc={test_acc:.4f}"
         )
 
-        # In eval-only mode (separate_train_eval_mode), on_fit_end never fires
+        # In the eval-only pass, on_fit_end never fires
         # so invariance and flops are not yet collected. Pick them up here from
         # callback_metrics (InvarianceMetricCallback logs them in on_test_epoch_end)
         # and from the model's saved hparams.

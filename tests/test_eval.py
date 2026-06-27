@@ -35,12 +35,11 @@ def test_train_eval(tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig)
 
 @pytest.mark.slow
 def test_eval_manifest_mode(tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig) -> None:
-    """Manifest mode: train in separate mode, then eval reads the manifest."""
+    """Manifest mode: train, then eval reads the checkpoint manifest."""
     assert str(tmp_path) == cfg_train.paths.output_dir == cfg_eval.paths.output_dir
 
     with open_dict(cfg_train):
         cfg_train.trainer.max_epochs = 1
-        cfg_train.separate_train_eval_mode = True
 
     HydraConfig().set_config(cfg_train)
     train(cfg_train)

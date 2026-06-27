@@ -3,3 +3,5 @@ invariance_metric:
   lorentz_eta_max: 2.0
   seed: 42
   orbit_variance_k: 5
+  compute_wasserstein: true
+  class_names: ["g", "q", "W", "Z", "t"]

@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Add p-values and bootstrap confidence intervals to results table CSVs.
+"""Add bootstrap p-values and confidence intervals to results table CSVs.
 
 For each (model, nconstituents) group the row with augmentation_scheme=none
-is used as the baseline.  Two significance tests are computed:
-
-1. Paired t-test (scipy.stats.ttest_rel) — kept as a reference.
-2. Paired bootstrap p-value — resamples the per-fold differences under H0
-   (true mean difference = 0) and counts how often |bootstrap mean| >= |observed
-   mean|.  Makes no normality assumption; better calibrated at n=5 folds.
+is used as the baseline.  A paired bootstrap p-value is computed: resamples
+the per-fold differences under H0 (true mean difference = 0) and counts how
+often |bootstrap mean| >= |observed mean|.  Makes no normality assumption;
+better calibrated at n=5 folds than a t-test.
 
 Bootstrap 95% CI for the mean accuracy is computed for every row by resampling
 the per-fold values with replacement (--n-boot iterations, default 10 000).
@@ -44,11 +42,6 @@ import random
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
-try:
-    from scipy import stats as scipy_stats
-except ImportError:
-    sys.exit("scipy is required: pip install scipy")
 
 
 # ---------------------------------------------------------------------------
@@ -153,17 +146,6 @@ def build_baseline_index(rows: List[Dict[str, str]]) -> Dict[Tuple[str, str], Li
 # p-value computation
 # ---------------------------------------------------------------------------
 
-def compute_pvalue(aug_folds: List[float], baseline_folds: List[float]) -> float:
-    """Two-sided paired t-test; returns NaN on failure."""
-    if len(aug_folds) != len(baseline_folds) or len(aug_folds) < 2:
-        return float("nan")
-    try:
-        result = scipy_stats.ttest_rel(aug_folds, baseline_folds)
-        return float(result.pvalue)
-    except Exception:
-        return float("nan")
-
-
 def bootstrap_ci(
     folds: List[float],
     n_boot: int = 10_000,
@@ -239,30 +221,18 @@ def annotate_rows(
             row["ci_upper"] = "nan"
 
         if aug_scheme == "none":
-            row["p_value"] = "baseline"
-            row["significant_005"] = "—"
             row["bootstrap_pvalue"] = "baseline"
             row["significant_boot_005"] = "—"
         else:
             baseline_folds = baseline_index.get(key)
 
             if baseline_folds is None:
-                row["p_value"] = "no_baseline"
-                row["significant_005"] = "—"
                 row["bootstrap_pvalue"] = "no_baseline"
                 row["significant_boot_005"] = "—"
             elif aug_folds is None:
-                row["p_value"] = "no_folds"
-                row["significant_005"] = "—"
                 row["bootstrap_pvalue"] = "no_folds"
                 row["significant_boot_005"] = "—"
             else:
-                pval = compute_pvalue(aug_folds, baseline_folds)
-                row["p_value"] = f"{pval:.4f}" if not math.isnan(pval) else "nan"
-                row["significant_005"] = (
-                    "yes" if (not math.isnan(pval) and pval < 0.05) else "no"
-                )
-
                 bpval = bootstrap_pvalue(aug_folds, baseline_folds, n_boot=n_boot)
                 row["bootstrap_pvalue"] = f"{bpval:.4f}" if not math.isnan(bpval) else "nan"
                 row["significant_boot_005"] = (
@@ -380,12 +350,12 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         r"\begin{document}",
         r"\setlength{\tabcolsep}{5pt}",
         r"\scriptsize",
-        r"\begin{tabular}{ll l c S[table-format=2.2(2)] l S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r r}",
+        r"\begin{tabular}{ll l c S[table-format=2.2(2)] l S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r}",
         r"    \toprule",
         (
             r"    \textbf{Model} & \textbf{\# Const} & \textbf{Group} & \textbf{FLOPs} & "
             r"{\textbf{Acc. (\%)}} & {\textbf{95\% CI}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & "
-            r"{\textbf{SO(3) flip}} & \textbf{$p$ (boot)} & \textbf{$p$ (t-test)} \\"
+            r"{\textbf{SO(3) flip}} & \textbf{$p$ (boot)} \\"
         ),
         r"    \midrule",
     ]
@@ -446,8 +416,7 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
             f"{_fmt_inv_cell(r, 'lorentz_flip_mean', 'lorentz_flip_std')} & "
             f"{_fmt_inv_cell(r, 'so2_flip_mean', 'so2_flip_std')} & "
             f"{_fmt_inv_cell(r, 'so3_flip_mean', 'so3_flip_std')} & "
-            f"{_pval_cell(r.get('bootstrap_pvalue', '—'))} & "
-            f"{_pval_cell(r.get('p_value', '—'))} \\\\"
+            f"{_pval_cell(r.get('bootstrap_pvalue', '—'))} \\\\"
         )
         prev_model, prev_n = model_raw, n
 
@@ -520,10 +489,10 @@ def main() -> None:
         write_latex_table(annotated, out_tex)
 
         # Print a quick summary to stdout
-        print(f"\n{'─' * 85}")
+        print(f"\n{'─' * 76}")
         print(f"Table: {csv_path.name}")
-        print(f"{'Model':<12} {'nconst':>7} {'Aug':<10} {'Acc (%)':>8} {'95% CI':>16} {'p (boot)':>10} {'p (t)':>8} {'sig*':>5}")
-        print(f"{'─' * 85}")
+        print(f"{'Model':<12} {'nconst':>7} {'Aug':<10} {'Acc (%)':>8} {'95% CI':>16} {'p (boot)':>10} {'sig*':>5}")
+        print(f"{'─' * 76}")
         for r in annotated:
             acc = float(r.get("test_acc_mean", "nan") or "nan")
             if not math.isnan(acc) and acc < 2.0:
@@ -535,10 +504,9 @@ def main() -> None:
                 f"{acc:>8.2f} "
                 f"{_ci_cell(r):>16} "
                 f"{r.get('bootstrap_pvalue', '—'):>10} "
-                f"{r.get('p_value', '—'):>8} "
                 f"{r.get('significant_boot_005', '—'):>5}"
             )
-        print(f"{'─' * 85}")
+        print(f"{'─' * 76}")
         print("  * significant_boot_005: bootstrap p < 0.05")
         print()
 
