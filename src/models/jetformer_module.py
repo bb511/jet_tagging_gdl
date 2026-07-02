@@ -35,7 +35,7 @@ class JetFormer(LightningModule):
     def __init__(
         self,
         nbr_const: int,
-        nbr_feat: int,
+        nbr_feats: int,
         embed_dim: int,
         num_heads: int,
         num_transformers: int,
@@ -60,13 +60,13 @@ class JetFormer(LightningModule):
         self.method    = method
         self.group     = group
         self.nbr_const = nbr_const
-        self.nbr_feat  = nbr_feat
+        self.nbr_feats = nbr_feats
 
-        self.example_input_array = torch.randn(2, nbr_const, nbr_feat)
+        self.example_input_array = torch.randn(2, nbr_const, nbr_feats)
 
         # Architecture
         num_tokens = nbr_const + 1  # +1 for the CLS token
-        self.embedding  = nn.Linear(nbr_feat, embed_dim)
+        self.embedding  = nn.Linear(nbr_feats, embed_dim)
         self.input_norm = SeqNorm(embed_dim, normalization)
         self.cls_token  = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.blocks     = nn.ModuleList(
@@ -120,7 +120,7 @@ class JetFormer(LightningModule):
         # on-disk feature set rather than the model's reduced input width —
         # reduce here so every caller can just hand over whatever the
         # dataloader yields.
-        if self.model_feature_indices is not None and x.shape[-1] != self.nbr_feat:
+        if self.model_feature_indices is not None and x.shape[-1] != self.nbr_feats:
             x = x[:, :, self.model_feature_indices]
 
         B = x.size(0)
@@ -186,10 +186,10 @@ class JetFormer(LightningModule):
             dm = self.trainer.datamodule
             # Full on-disk schema, regardless of method — symm_loss's
             # build_symmetric_batch needs px/py/pz, and so does any callback
-            # (plotting/invariance) that hands forward() a wider-than-nbr_feat
+            # (plotting/invariance) that hands forward() a wider-than-nbr_feats
             # tensor (e.g. when the datamodule keeps full test features for
             # InvarianceMetricCallback). forward() only reduces when the input
-            # width actually differs from nbr_feat, so normal train/val/test
+            # width actually differs from nbr_feats, so normal train/val/test
             # steps — which already receive pre-reduced input — are unaffected.
             self.feature_names = list(dm.feature_names)
             if not self.feature_names:

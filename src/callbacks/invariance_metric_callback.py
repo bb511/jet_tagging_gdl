@@ -44,6 +44,7 @@ class InvarianceMetricCallback(L.Callback):
         seed: int = 42,
         orbit_variance_k: int = 5,
         compute_wasserstein: bool = True,
+        compute_flip_breakdown: bool = True,
         class_names: Sequence[str] = ("g", "q", "W", "Z", "t"),
     ):
         super().__init__()
@@ -51,6 +52,7 @@ class InvarianceMetricCallback(L.Callback):
         self.rng = np.random.default_rng(seed)   # used only for permutation
         self.orbit_variance_k = orbit_variance_k
         self.compute_wasserstein = compute_wasserstein
+        self.compute_flip_breakdown = compute_flip_breakdown
         self.class_names = list(class_names)
 
         self._model_feature_names: Optional[List[str]] = None
@@ -60,6 +62,7 @@ class InvarianceMetricCallback(L.Callback):
         self._batch_metrics: Dict[str, List[float]] = {}
         self._orig_logits: List[torch.Tensor] = []
         self._aug_logits: Dict[str, List[torch.Tensor]] = {}
+        self._flip_counts: Dict[str, Dict[str, int]] = {}
 
     # ------------------------------------------------------------------
     # Setup
@@ -87,6 +90,7 @@ class InvarianceMetricCallback(L.Callback):
         self._batch_metrics = {}
         self._orig_logits = []
         self._aug_logits = {}
+        self._flip_counts = {}
 
         log.info(f"InvarianceMetricCallback: ready. Features: {self._model_feature_names}")
 
@@ -163,6 +167,12 @@ class InvarianceMetricCallback(L.Callback):
         if self.compute_wasserstein:
             self._orig_logits.append(y_orig.detach().cpu())
 
+        if self.compute_flip_breakdown:
+            y_true = batch[1]
+            if y_true.ndim > 1 and y_true.shape[1] > 1:
+                y_true = torch.argmax(y_true, dim=1)
+            correct_before = (y_orig.argmax(dim=1) == y_true)
+
         transforms: Dict[str, object] = {
             "so2":     lambda t: apply_random_so2(t, feature_names=names, norm_scales=ns)[0],
             "so3":     lambda t: apply_random_so3(t, feature_names=names, norm_scales=ns, apply_filter=True)[0],
@@ -180,6 +190,17 @@ class InvarianceMetricCallback(L.Callback):
 
             ov = self._orbit_variance(pl_module, x, transform_fn)
             self._batch_metrics.setdefault(f"invariance/{group}_orbit_var", []).append(ov)
+
+            if self.compute_flip_breakdown:
+                correct_after = (y_aug.argmax(dim=1) == y_true)
+                wrong_before = ~correct_before
+                c = self._flip_counts.setdefault(
+                    group, {"wrong_before": 0, "recovered": 0, "correct_before": 0, "stable": 0}
+                )
+                c["wrong_before"] += int(wrong_before.sum().item())
+                c["recovered"] += int((wrong_before & correct_after).sum().item())
+                c["correct_before"] += int(correct_before.sum().item())
+                c["stable"] += int((correct_before & correct_after).sum().item())
 
             if self.compute_wasserstein:
                 self._aug_logits.setdefault(group, []).append(y_aug.detach().cpu())
@@ -211,6 +232,23 @@ class InvarianceMetricCallback(L.Callback):
         return results
 
     # ------------------------------------------------------------------
+    # Flip breakdown: label-aware transition probabilities, conditioned on
+    # correctness before augmentation (unlike the label-agnostic "flip" rate
+    # in _point_metrics, which only checks whether the predicted class changed).
+    # ------------------------------------------------------------------
+    def _flip_breakdown_metrics(self) -> Dict[str, float]:
+        """Per-group P(correct after | wrong before), P(correct after | correct
+        before), and P(wrong after | correct before), from accumulated counts.
+        """
+        results: Dict[str, float] = {}
+        for group, c in self._flip_counts.items():
+            wb, rec, cb, st = c["wrong_before"], c["recovered"], c["correct_before"], c["stable"]
+            results[f"invariance/{group}_flip_recover"] = (rec / wb) if wb > 0 else float("nan")
+            results[f"invariance/{group}_flip_stable"] = (st / cb) if cb > 0 else float("nan")
+            results[f"invariance/{group}_flip_degrade"] = ((cb - st) / cb) if cb > 0 else float("nan")
+        return results
+
+    # ------------------------------------------------------------------
     # Epoch end: average across batches and log
     # ------------------------------------------------------------------
     def on_test_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
@@ -221,6 +259,9 @@ class InvarianceMetricCallback(L.Callback):
 
         if self.compute_wasserstein:
             results.update(self._wasserstein_metrics())
+
+        if self.compute_flip_breakdown:
+            results.update(self._flip_breakdown_metrics())
 
         for name, value in results.items():
             pl_module.log(name, value, prog_bar=False, on_epoch=True, sync_dist=True)

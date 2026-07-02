@@ -13,6 +13,11 @@ log = logging.getLogger(__name__)
 class ResultsTableCallback(L.Callback):
     """Aggregates fold-level test accuracy, invariance, and FLOPs into one table row."""
 
+    # Label-aware flip-breakdown metrics (see InvarianceMetricCallback._flip_breakdown_metrics).
+    # Always extracted/aggregated regardless of `invariance_metric`, unlike the
+    # so2/so3/lorentz_{m} columns below which are parametrized by it.
+    FLIP_BREAKDOWN_SUFFIXES = ("flip_recover", "flip_stable", "flip_degrade")
+
     def __init__(
         self,
         output_path: str = "results/results_table.csv",
@@ -55,6 +60,11 @@ class ResultsTableCallback(L.Callback):
             f"invariance/so3_{invariance_metric}",
             f"invariance/lorentz_{invariance_metric}",
         )
+        self._FLIP_BREAKDOWN_KEYS = tuple(
+            f"invariance/{g}_{s}"
+            for s in self.FLIP_BREAKDOWN_SUFFIXES
+            for g in ("so2", "so3", "lorentz")
+        )
 
         self._fold_invariance: list[Dict[str, float]] = []
         self._fold_flops: list[float] = []
@@ -92,7 +102,8 @@ class ResultsTableCallback(L.Callback):
         return f"{mean_val:.4f} +/- {std_val:.4f}"
 
     def _extract_invariance(self, metrics: Dict[str, object]) -> Dict[str, float]:
-        return {k: self._to_float(metrics.get(k, None)) for k in self.INVARIANCE_KEYS}
+        keys = self.INVARIANCE_KEYS + self._FLIP_BREAKDOWN_KEYS
+        return {k: self._to_float(metrics.get(k, None)) for k in keys}
 
     def _selected_metric_for_fold(self, inv: Dict[str, float]) -> tuple[str, float]:
         m = self.invariance_metric
@@ -109,6 +120,21 @@ class ResultsTableCallback(L.Callback):
 
         vals = [inv.get(k, float("nan")) for k in self.INVARIANCE_KEYS]
         return f"invariance/mean_{m}", self._safe_mean(vals)
+
+    def _selected_group_value(self, inv: Dict[str, float], suffix: str) -> float:
+        """Like _selected_metric_for_fold's group-selection, but for a fixed
+        suffix (e.g. 'flip_recover') instead of the configurable invariance_metric."""
+        keys = (f"invariance/so2_{suffix}", f"invariance/so3_{suffix}", f"invariance/lorentz_{suffix}")
+        if self.selected_metric_mode == "mean_all":
+            return self._safe_mean([inv.get(k, float("nan")) for k in keys])
+
+        if self.augmentation_scheme == "permute":
+            return float("nan")
+
+        if self.augmentation_scheme in {"so2", "so3", "lorentz"}:
+            return inv.get(f"invariance/{self.augmentation_scheme}_{suffix}", float("nan"))
+
+        return self._safe_mean([inv.get(k, float("nan")) for k in keys])
 
     def _maybe_write_summary(self) -> None:
         if self._summary_written:
@@ -152,6 +178,17 @@ class ResultsTableCallback(L.Callback):
         lor_mean = self._safe_mean(lor_values)
         lor_std = self._safe_std(lor_values)
 
+        flip_breakdown_cols: Dict[str, object] = {}
+        for suffix in self.FLIP_BREAKDOWN_SUFFIXES:
+            vals = [self._selected_group_value(inv, suffix) for inv in inv_folds]
+            v_mean, v_std = self._safe_mean(vals), self._safe_std(vals)
+            flip_breakdown_cols[f"{suffix}_mean"] = round(v_mean, 6)
+            flip_breakdown_cols[f"{suffix}_std"] = round(v_std, 6)
+            flip_breakdown_cols[f"{suffix}_pm"] = self._format_pm(v_mean, v_std)
+            flip_breakdown_cols[f"{suffix}_folds"] = ";".join(
+                "nan" if math.isnan(v) else f"{v:.6f}" for v in vals
+            )
+
         row = {
             "method": self.display_method,
             "model": self.model_name,
@@ -174,6 +211,10 @@ class ResultsTableCallback(L.Callback):
             f"lorentz_{m}_mean": round(lor_mean, 6),
             f"lorentz_{m}_std": round(lor_std, 6),
             f"lorentz_{m}_pm": self._format_pm(lor_mean, lor_std),
+            f"so2_{m}_folds": ";".join("nan" if math.isnan(v) else f"{v:.6f}" for v in so2_values),
+            f"so3_{m}_folds": ";".join("nan" if math.isnan(v) else f"{v:.6f}" for v in so3_values),
+            f"lorentz_{m}_folds": ";".join("nan" if math.isnan(v) else f"{v:.6f}" for v in lor_values),
+            **flip_breakdown_cols,
             "flops_mean": round(flops_mean, 3) if not math.isnan(flops_mean) else float("nan"),
             "test_acc_folds": ";".join(f"{v:.6f}" for v in test_folds),
             "selected_inv_folds": ";".join(
@@ -203,6 +244,10 @@ class ResultsTableCallback(L.Callback):
             f"lorentz_{m}_mean",
             f"lorentz_{m}_std",
             f"lorentz_{m}_pm",
+            f"so2_{m}_folds",
+            f"so3_{m}_folds",
+            f"lorentz_{m}_folds",
+            *flip_breakdown_cols.keys(),
             "flops_mean",
             "test_acc_folds",
             "selected_inv_folds",

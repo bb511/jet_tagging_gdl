@@ -228,9 +228,10 @@ class DeepSetsInvariant(LightningModule):
     def setup(self, stage: str) -> None:
         if hasattr(self.trainer, "datamodule") and self.trainer.datamodule is not None:
             dm = self.trainer.datamodule
-            if self.method == "symm_loss":
+            if self.method == "symm_loss" or getattr(dm, "keep_full_features_at_test", False):
                 # Full on-disk schema — x arrives at this width; build_symmetric_batch
-                # needs px/py/pz even when the model itself consumes fewer features.
+                # (symm_loss) and InvarianceMetricCallback (keep_full_features_at_test)
+                # need px/py/pz even when the model itself consumes fewer features.
                 self.feature_names = list(dm.feature_names)
                 if not self.feature_names:
                     raise RuntimeError(

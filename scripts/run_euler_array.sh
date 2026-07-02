@@ -6,21 +6,21 @@ export HLS4ML_DATA_DIR=/cluster/scratch/agogia/datasets/
 # BASELINE EXPERIMENTS FOR ALL MODELS
 # ==================================================
 
-python src/train.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=baseline/hls4ml_nconst8_none \
-    +experiment_name=hls4ml_nconst8_aug_none \
-    model=deepsets_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    hydra.sweep.dir="logs/slurm/baseline_mlp_nconst8" \
-    hydra.job.name="baseline_mlp_nconst8" \
-    trainer.max_epochs=200 &
+# python src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_euler \
+#     experiment=baseline/hls4ml_nconst8_none \
+#     +experiment_name=hls4ml_nconst8_aug_none \
+#     model=deepsets_8 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
+#     data.nconstituents=8 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     data.data_dir="$HLS4ML_DATA_DIR" \
+#     hydra.sweep.dir="logs/slurm/baseline_deepsets_nconst8" \
+#     hydra.job.name="baseline_deepsets_nconst8" \
+#     trainer.max_epochs=200 &
 
 
 # python src/train.py \
@@ -61,54 +61,54 @@ python src/train.py \
 # AUGMENTATION EXPERIMENTS FOR ALL MODELS
 # ==================================================
 
-# python src/train.py \
-#      -m \
-#      hydra/launcher=submitit_slurm_euler \
-#      experiment=augmentation/hls4ml_nconst8_aug_so3 \
-#      +experiment_name=hls4ml_nconst8_aug_so3 \
-#      model=deepsets_8 \
-#      model.nbr_feats=3 \
-#      data.features="[pt,etarel,phirel]" \
-#      data.nconstituents=8 \
-#      data.n_folds=5 \
-#      trainer=gpu \
-#      data.data_dir="$HLS4ML_DATA_DIR" \
-#      hydra.sweep.dir="logs/slurm/aug_so3_deepsets_nconst8" \
-#      hydra.job.name="aug_so3_deepsets_nconst8" \
-#      trainer.max_epochs=200 &
+python src/train.py \
+     -m \
+     hydra/launcher=submitit_slurm_euler \
+     experiment=augmentation/hls4ml_nconst8_aug_so3 \
+     +experiment_name=hls4ml_nconst8_aug_so3 \
+     model=mlp_8 \
+     model.nbr_feats=3 \
+     data.features="[pt,etarel,phirel]" \
+     data.nconstituents=8 \
+     data.n_folds=5 \
+     trainer=gpu \
+     data.data_dir="$HLS4ML_DATA_DIR" \
+     hydra.sweep.dir="logs/slurm/aug_so3_mlp_nconst8" \
+     hydra.job.name="aug_so3_mlp_nconst8" \
+     trainer.max_epochs=200 &
 
 
-# python src/train.py \
-#      -m \
-#      hydra/launcher=submitit_slurm_euler \
-#      experiment=augmentation/hls4ml_nconst16_aug_so3 \
-#      +experiment_name=hls4ml_nconst16_aug_so3 \
-#      model=deepsets_16 \
-#      model.nbr_feats=3 \
-#      data.features="[pt,etarel,phirel]" \
-#      data.nconstituents=16 \
-#      data.n_folds=5 \
-#      trainer=gpu \
-#      data.data_dir="$HLS4ML_DATA_DIR" \
-#      hydra.sweep.dir="logs/slurm/aug_so3_deepsets_nconst16" \
-#      hydra.job.name="aug_so3_deepsets_nconst16" \
-#      trainer.max_epochs=200 &
+python src/train.py \
+     -m \
+     hydra/launcher=submitit_slurm_euler \
+     experiment=augmentation/hls4ml_nconst16_aug_so3 \
+     +experiment_name=hls4ml_nconst16_aug_so3 \
+     model=mlp_16 \
+     model.nbr_feats=3 \
+     data.features="[pt,etarel,phirel]" \
+     data.nconstituents=16 \
+     data.n_folds=5 \
+     trainer=gpu \
+     data.data_dir="$HLS4ML_DATA_DIR" \
+     hydra.sweep.dir="logs/slurm/aug_so3_mlp_nconst16" \
+     hydra.job.name="aug_so3_mlp_nconst16" \
+     trainer.max_epochs=200 &
 
-# python src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst32_aug_so3 \
-#     +experiment_name=hls4ml_nconst32_aug_so3 \
-#     model=deepsets_32 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
-#     data.nconstituents=32 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     data.data_dir="$HLS4ML_DATA_DIR" \
-#     hydra.sweep.dir="logs/slurm/aug_so3_deepsets_nconst32" \
-#     hydra.job.name="aug_so3_deepsets_nconst32" \
-#     trainer.max_epochs=200 &
+python src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_euler \
+    experiment=augmentation/hls4ml_nconst32_aug_so3 \
+    +experiment_name=hls4ml_nconst32_aug_so3 \
+    model=mlp_32 \
+    model.nbr_feats=3 \
+    data.features="[pt,etarel,phirel]" \
+    data.nconstituents=32 \
+    data.n_folds=5 \
+    trainer=gpu \
+    data.data_dir="$HLS4ML_DATA_DIR" \
+    hydra.sweep.dir="logs/slurm/aug_so3_mlp_nconst32" \
+    hydra.job.name="aug_so3_mlp_nconst32" \
+    trainer.max_epochs=200 &
 
 
 
@@ -172,7 +172,7 @@ python src/train.py \
 #      experiment=augmentation/hls4ml_nconst8_aug_lorentz \
 #      +experiment_name=hls4ml_nconst8_aug_lorentz \
 #      model=jetformer \
-#      model.nbr_feat=3 \
+#      model.nbr_feats=3 \
 #      data.features="[pt,etarel,phirel]" \
 #      data.nconstituents=8 \
 #      data.n_folds=5 \
@@ -189,7 +189,7 @@ python src/train.py \
 #      experiment=augmentation/hls4ml_nconst16_aug_lorentz \
 #      +experiment_name=hls4ml_nconst16_aug_lorentz \
 #      model=jetformer \
-#      model.nbr_feat=3 \
+#      model.nbr_feats=3 \
 #      data.features="[pt,etarel,phirel]" \
 #      data.nconstituents=16 \
 #      data.n_folds=5 \
@@ -205,7 +205,7 @@ python src/train.py \
 #     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
 #     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=jetformer \
-#     model.nbr_feat=3 \
+#     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
@@ -226,7 +226,8 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
 #     model=mlp_8 \
-#     model.nbr_feats=5 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
@@ -242,7 +243,8 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
 #     model=mlp_16 \
-#     model.nbr_feats=5 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
@@ -257,7 +259,8 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
 #     model=mlp_32 \
-#     model.nbr_feats=5 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
@@ -269,13 +272,15 @@ python src/train.py \
 
 
 
+
 # python src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
 #     model=deepsets_8 \
-#     model.nbr_feats=5 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
@@ -291,7 +296,8 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
 #     model=deepsets_16 \
-#     model.nbr_feats=5 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
@@ -306,7 +312,8 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
 #     model=deepsets_32 \
-#     model.nbr_feats=5 \
+#     model.nbr_feats=3 \
+#     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
@@ -324,7 +331,7 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
 #     model=jetformer \
-#     model.nbr_feat=3 \
+#     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
@@ -341,7 +348,7 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
 #     model=jetformer \
-#     model.nbr_feat=3 \
+#     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
@@ -357,7 +364,7 @@ python src/train.py \
 #     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
 #     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
 #     model=jetformer \
-#     model.nbr_feat=3 \
+#     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \

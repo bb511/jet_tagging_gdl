@@ -118,8 +118,18 @@ def write_csv(rows: List[Dict], path: Path) -> None:
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Rows may come from CSVs with different schemas (e.g. a wasserstein-metric
+    # baseline concatenated with a flip-metric table) — union the keys instead
+    # of trusting rows[0] alone, or DictWriter raises on the extra columns.
+    fieldnames: List[str] = []
+    seen = set()
+    for row in rows:
+        for k in row.keys():
+            if k not in seen:
+                seen.add(k)
+                fieldnames.append(k)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=fieldnames, restval="")
         writer.writeheader()
         writer.writerows(rows)
     print(f"[write_csv] {len(rows)} rows → {path}")
@@ -139,6 +149,34 @@ def build_baseline_index(rows: List[Dict[str, str]]) -> Dict[Tuple[str, str], Li
         folds = _parse_folds(r.get("test_acc_folds", ""))
         if folds is not None:
             index[key] = folds
+    return index
+
+
+def _detect_inv_metric_suffix(rows: List[Dict[str, str]]) -> Optional[str]:
+    """Infer the invariance-metric suffix (e.g. 'wasserstein', 'flip') from a
+    'so2_<m>_folds' column present in the CSV header."""
+    if not rows:
+        return None
+    for col in rows[0]:
+        if col.startswith("so2_") and col.endswith("_folds"):
+            return col[len("so2_"):-len("_folds")]
+    return None
+
+
+def build_metric_baseline_index(
+    rows: List[Dict[str, str]], metric: str
+) -> Dict[Tuple[str, str, str], List[float]]:
+    """Return {(model, nconstituents, group): fold_values} for so2/so3/lorentz
+    per-fold <metric> columns of all none-augmentation rows."""
+    index: Dict[Tuple[str, str, str], List[float]] = {}
+    for r in rows:
+        if str(r.get("augmentation_scheme", "")).lower() != "none":
+            continue
+        model_key = (r.get("model", ""), str(r.get("nconstituents", "")))
+        for group in ("so2", "so3", "lorentz"):
+            folds = _parse_folds(r.get(f"{group}_{metric}_folds", ""))
+            if folds is not None:
+                index[(*model_key, group)] = folds
     return index
 
 
@@ -198,10 +236,73 @@ def bootstrap_pvalue(
     return count / n_boot
 
 
+def compute_delta_for_row(
+    row: Dict[str, str],
+    metric_baseline_index: Dict[Tuple[str, str, str], List[float]],
+    metric: str,
+    n_boot: int = 10_000,
+) -> Dict[str, str]:
+    """Compute delta_<metric> = baseline_value - augmented_value for the row's
+    own augmentation_scheme group, plus a bootstrap CI/p-value on the delta.
+
+    Sign convention: positive delta means the augmented/symm_loss-trained
+    model is MORE invariant (smaller metric value) than the baseline.
+    Scope: only rows with augmentation_scheme in {so2, so3, lorentz} get a
+    delta; none/permute rows get blank placeholders.
+    """
+    mean_key = f"delta_{metric}_mean"
+    std_key = f"delta_{metric}_std"
+    pm_key = f"delta_{metric}_pm"
+    ci_lo_key = f"delta_{metric}_ci_lower"
+    ci_hi_key = f"delta_{metric}_ci_upper"
+    pval_key = f"delta_{metric}_bootstrap_pvalue"
+    sig_key = f"delta_{metric}_significant_boot_005"
+
+    scheme = str(row.get("augmentation_scheme", "")).lower()
+    if scheme not in {"so2", "so3", "lorentz"}:
+        return {
+            mean_key: "nan", std_key: "nan", pm_key: "n/a",
+            ci_lo_key: "nan", ci_hi_key: "nan",
+            pval_key: "—", sig_key: "—",
+        }
+
+    model_key = (row.get("model", ""), str(row.get("nconstituents", "")))
+    baseline_folds = metric_baseline_index.get((*model_key, scheme))
+    aug_folds = _parse_folds(row.get(f"{scheme}_{metric}_folds", ""))
+
+    if baseline_folds is None or aug_folds is None or len(aug_folds) != len(baseline_folds):
+        return {
+            mean_key: "nan", std_key: "nan", pm_key: "nan",
+            ci_lo_key: "nan", ci_hi_key: "nan",
+            pval_key: "no_baseline" if baseline_folds is None else "no_folds",
+            sig_key: "—",
+        }
+
+    deltas = [b - a for b, a in zip(baseline_folds, aug_folds)]
+    n = len(deltas)
+    d_mean = sum(deltas) / n
+    d_std = math.sqrt(sum((d - d_mean) ** 2 for d in deltas) / (n - 1)) if n > 1 else 0.0
+    ci_lo, ci_hi = bootstrap_ci(deltas, n_boot=n_boot)
+    # H0: true mean delta = 0 -> bootstrap_pvalue's internal diffs = deltas - 0 = deltas
+    bpval = bootstrap_pvalue(deltas, [0.0] * n, n_boot=n_boot)
+
+    return {
+        mean_key: f"{d_mean:.6f}",
+        std_key: f"{d_std:.6f}",
+        pm_key: f"{d_mean:.4f} +/- {d_std:.4f}",
+        ci_lo_key: f"{ci_lo:.6f}" if not math.isnan(ci_lo) else "nan",
+        ci_hi_key: f"{ci_hi:.6f}" if not math.isnan(ci_hi) else "nan",
+        pval_key: f"{bpval:.4f}" if not math.isnan(bpval) else "nan",
+        sig_key: "yes" if (not math.isnan(bpval) and bpval < 0.05) else "no",
+    }
+
+
 def annotate_rows(
     rows: List[Dict[str, str]],
     baseline_index: Dict[Tuple[str, str], List[float]],
     n_boot: int = 10_000,
+    metric_baseline_index: Optional[Dict[Tuple[str, str, str], List[float]]] = None,
+    inv_metric: Optional[str] = None,
 ) -> List[Dict]:
     """Return new row dicts with p-value, bootstrap p-value, and CI columns added."""
     out = []
@@ -238,6 +339,9 @@ def annotate_rows(
                 row["significant_boot_005"] = (
                     "yes" if (not math.isnan(bpval) and bpval < 0.05) else "no"
                 )
+
+        if inv_metric is not None and metric_baseline_index is not None:
+            row.update(compute_delta_for_row(row, metric_baseline_index, inv_metric, n_boot=n_boot))
 
         out.append(row)
     return out
@@ -303,6 +407,39 @@ def _pval_cell(pval_str: str) -> str:
         return pval_str
 
 
+_METRIC_DISPLAY = {
+    "wasserstein": "Wasserstein",
+    "flip": "Flip rate",
+    "l2": "L2",
+    "cosine": "Cosine",
+    "js": "JS",
+    "orbit_var": "Orbit var",
+}
+
+
+def _metric_display(metric: Optional[str]) -> str:
+    if not metric:
+        return "Metric"
+    return _METRIC_DISPLAY.get(metric, metric.capitalize())
+
+
+def _fmt_delta_cell(r: Dict, metric: str, digits: int = 3) -> str:
+    """Format delta_<metric> as 'mean \\pm std' with a '*' marker if the
+    bootstrap p-value is significant at 0.05. '—' when out of scope (None/
+    permute rows) or no comparable baseline/fold data was found."""
+    mean_raw = r.get(f"delta_{metric}_mean", "")
+    if mean_raw in ("", "nan", None):
+        return "—"
+    try:
+        mean_v = float(mean_raw)
+        std_v = float(r.get(f"delta_{metric}_std", "nan") or "nan")
+    except (TypeError, ValueError):
+        return "N/A"
+    sig = r.get(f"delta_{metric}_significant_boot_005", "")
+    marker = r"^{*}" if sig == "yes" else ""
+    return f"${mean_v:.{digits}f} \\pm {std_v:.{digits}f}{marker}$"
+
+
 def _ci_cell(r: Dict, digits: int = 1) -> str:
     """Format bootstrap CI as '[lo, hi]' in percentage units."""
     lo_raw = r.get("ci_lower", "nan")
@@ -321,9 +458,14 @@ def _ci_cell(r: Dict, digits: int = 1) -> str:
         return "N/A"
 
 
-def write_latex_table(rows: List[Dict], output_path: Path) -> None:
+def write_latex_table(
+    rows: List[Dict], output_path: Path, inv_metric: Optional[str] = None
+) -> None:
     if not rows:
         return
+
+    metric_label = _metric_display(inv_metric)
+    metric_key = inv_metric or "flip"
 
     def _sort_key(x):
         try:
@@ -350,12 +492,18 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         r"\begin{document}",
         r"\setlength{\tabcolsep}{5pt}",
         r"\scriptsize",
-        r"\begin{tabular}{ll l c S[table-format=2.2(2)] l S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r}",
+        r"\begin{adjustbox}{max width=\textwidth}",
+        (
+            r"\begin{tabular}{ll l c S[table-format=2.2(2)] l l "
+            r"S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r}"
+        ),
         r"    \toprule",
         (
             r"    \textbf{Model} & \textbf{\# Const} & \textbf{Group} & \textbf{FLOPs} & "
-            r"{\textbf{Acc. (\%)}} & {\textbf{95\% CI}} & {\textbf{Lorentz flip}} & {\textbf{SO(2) flip}} & "
-            r"{\textbf{SO(3) flip}} & \textbf{$p$ (boot)} \\"
+            r"{\textbf{Acc. (\%)}} & {\textbf{95\% CI}} & "
+            f"\\textbf{{$\\Delta$ {metric_label}}} & "
+            r"{\textbf{Flip recover}} & {\textbf{Flip stable}} & {\textbf{Flip degrade}} & "
+            r"\textbf{$p$ (boot)} \\"
         ),
         r"    \midrule",
     ]
@@ -374,7 +522,7 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
         if new_model:
             lines.append(r"    \specialrule{.1em}{.5em}{.5em}")
         elif new_n:
-            lines.append(r"    \cmidrule{2-9}")
+            lines.append(r"    \cmidrule{2-10}")
 
         n_rows_model = model_span[model_raw]
         n_rows_nconst = nconst_span[(model_raw, n)]
@@ -413,14 +561,23 @@ def write_latex_table(rows: List[Dict], output_path: Path) -> None:
             f"    {model_str} & {n_str} & {aug_display} & {flops_str} & "
             f"{_safe_fmt(acc_mean, 2)} \\pm {_safe_fmt(acc_std, 2)} & "
             f"{_ci_cell(r)} & "
-            f"{_fmt_inv_cell(r, 'lorentz_flip_mean', 'lorentz_flip_std')} & "
-            f"{_fmt_inv_cell(r, 'so2_flip_mean', 'so2_flip_std')} & "
-            f"{_fmt_inv_cell(r, 'so3_flip_mean', 'so3_flip_std')} & "
+            f"{_fmt_delta_cell(r, metric_key)} & "
+            f"{_fmt_inv_cell(r, 'flip_recover_mean', 'flip_recover_std')} & "
+            f"{_fmt_inv_cell(r, 'flip_stable_mean', 'flip_stable_std')} & "
+            f"{_fmt_inv_cell(r, 'flip_degrade_mean', 'flip_degrade_std')} & "
             f"{_pval_cell(r.get('bootstrap_pvalue', '—'))} \\\\"
         )
         prev_model, prev_n = model_raw, n
 
-    lines += [r"    \bottomrule", r"\end{tabular}", r"\end{document}"]
+    lines += [
+        r"    \bottomrule",
+        r"\end{tabular}",
+        r"\end{adjustbox}",
+        r"",
+        r"\vspace{2pt}",
+        r"{\scriptsize $^{*}$ significant at bootstrap $p<0.05$ (baseline vs.\ this row's invariance metric).}",
+        r"\end{document}",
+    ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[write_latex] {len(sorted_rows)}-row table → {output_path}")
@@ -442,14 +599,25 @@ def main() -> None:
         "--n-boot", type=int, default=10_000,
         help="Number of bootstrap resamples for CI and p-value estimation (default: 10000).",
     )
+    parser.add_argument(
+        "--inv-metric", type=str, default=None,
+        help="Invariance metric suffix for delta computation (e.g. 'wasserstein', 'flip'). "
+             "Auto-detected from '<group>_<metric>_folds' columns when omitted.",
+    )
     args = parser.parse_args()
 
     # Build a shared baseline index if an external baseline CSV is provided
     external_baseline: Optional[Dict[Tuple[str, str], List[float]]] = None
+    external_metric_baseline: Optional[Dict[Tuple[str, str, str], List[float]]] = None
+    external_inv_metric: Optional[str] = None
     if args.baseline is not None:
         if not args.baseline.exists():
             sys.exit(f"Baseline CSV not found: {args.baseline}")
-        external_baseline = build_baseline_index(read_csv(args.baseline))
+        baseline_rows_raw = read_csv(args.baseline)
+        external_baseline = build_baseline_index(baseline_rows_raw)
+        external_inv_metric = args.inv_metric or _detect_inv_metric_suffix(baseline_rows_raw)
+        if external_inv_metric is not None:
+            external_metric_baseline = build_metric_baseline_index(baseline_rows_raw, external_inv_metric)
         print(f"[baseline] Loaded {len(external_baseline)} baseline entries from {args.baseline}")
 
     for csv_path in args.csvs:
@@ -470,7 +638,16 @@ def main() -> None:
                 "Pass --baseline <path> to provide an external baseline CSV."
             )
 
-        annotated = annotate_rows(rows, baseline_index, n_boot=args.n_boot)
+        if external_inv_metric is not None:
+            inv_metric, metric_baseline_index = external_inv_metric, external_metric_baseline
+        else:
+            inv_metric = args.inv_metric or _detect_inv_metric_suffix(rows)
+            metric_baseline_index = build_metric_baseline_index(rows, inv_metric) if inv_metric else None
+
+        annotated = annotate_rows(
+            rows, baseline_index, n_boot=args.n_boot,
+            metric_baseline_index=metric_baseline_index, inv_metric=inv_metric,
+        )
 
         # When using an external baseline, include its none rows in the output
         # so the LaTeX table has a reference row for each (model, nconstituents).
@@ -479,24 +656,34 @@ def main() -> None:
                 r for r in read_csv(args.baseline)
                 if str(r.get("augmentation_scheme", "")).lower() == "none"
             ]
-            baseline_annotated = annotate_rows(baseline_rows, baseline_index, n_boot=args.n_boot)
+            baseline_annotated = annotate_rows(
+                baseline_rows, baseline_index, n_boot=args.n_boot,
+                metric_baseline_index=metric_baseline_index, inv_metric=inv_metric,
+            )
             annotated = baseline_annotated + annotated
 
         out_csv = csv_path.parent / (csv_path.stem + "_pvalues.csv")
         out_tex = csv_path.parent / (csv_path.stem + "_pvalues.tex")
 
         write_csv(annotated, out_csv)
-        write_latex_table(annotated, out_tex)
+        write_latex_table(annotated, out_tex, inv_metric=inv_metric)
 
         # Print a quick summary to stdout
+        delta_mean_key = f"delta_{inv_metric}_mean" if inv_metric else None
+        delta_pval_key = f"delta_{inv_metric}_bootstrap_pvalue" if inv_metric else None
+        delta_header = f" {'delta_' + inv_metric:>14} {'delta p':>9}" if inv_metric else ""
         print(f"\n{'─' * 76}")
         print(f"Table: {csv_path.name}")
-        print(f"{'Model':<12} {'nconst':>7} {'Aug':<10} {'Acc (%)':>8} {'95% CI':>16} {'p (boot)':>10} {'sig*':>5}")
+        print(f"{'Model':<12} {'nconst':>7} {'Aug':<10} {'Acc (%)':>8} {'95% CI':>16} {'p (boot)':>10} {'sig*':>5}{delta_header}")
         print(f"{'─' * 76}")
         for r in annotated:
             acc = float(r.get("test_acc_mean", "nan") or "nan")
             if not math.isnan(acc) and acc < 2.0:
                 acc *= 100
+            delta_str = (
+                f" {r.get(delta_mean_key, ''):>14} {r.get(delta_pval_key, ''):>9}"
+                if inv_metric else ""
+            )
             print(
                 f"{_model_display(r.get('model', '')):<12} "
                 f"{r.get('nconstituents', ''):>7} "
@@ -505,6 +692,7 @@ def main() -> None:
                 f"{_ci_cell(r):>16} "
                 f"{r.get('bootstrap_pvalue', '—'):>10} "
                 f"{r.get('significant_boot_005', '—'):>5}"
+                f"{delta_str}"
             )
         print(f"{'─' * 76}")
         print("  * significant_boot_005: bootstrap p < 0.05")

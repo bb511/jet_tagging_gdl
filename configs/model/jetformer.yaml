@@ -5,7 +5,7 @@ _target_: src.models.jetformer_module.JetFormer
 # parameter count/computation graph (bias-free Q/K/V, pre-activation FFN, no
 # padding mask) rather than reusing nn.TransformerEncoderLayer.
 nbr_const: ${data.nconstituents}
-nbr_feat: 5
+nbr_feats: 5
 embed_dim: 64
 num_heads: 2
 num_transformers: 3
