@@ -7,7 +7,7 @@ defaults:
   - data: hls4ml
   - model: deepsets_32
   - callbacks: default
-  - logger: mlflow
+  - logger: csv
   - trainer: mps
   - paths: default
   - extras: default

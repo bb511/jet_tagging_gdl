@@ -60,6 +60,23 @@ def _math_label(feat_name: str) -> str:
     key = feat_name[len("j1_"):] if feat_name.startswith("j1_") else feat_name
     return FEATURE_LABELS.get(key.lower(), feat_name)
 
+
+def _feature_dir_name(features: list[str] | None) -> str:
+    """Return a filesystem-friendly directory name for the selected features."""
+    if not features:
+        return "all"
+
+    cleaned = []
+    for feat in features:
+        feat = feat.strip()
+        if not feat:
+            continue
+        if feat.startswith("j1_"):
+            feat = feat[len("j1_"):]
+        cleaned.append(feat.replace("/", "_").replace(" ", "_"))
+
+    return "_".join(cleaned) if cleaned else "all"
+
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.utils.augmentation import (
@@ -210,7 +227,7 @@ def main() -> None:
 
     real_mask_orig = _pt_real_mask(x_class, feat_names)
     nconst_tag = f"nconst_{args.nconst}"
-    save_dir   = Path(args.save_dir)
+    save_dir = Path(args.save_dir) / _feature_dir_name(args.features)
 
     # ---- Lorentz: plot both with and without SO(2) phi correction ----
     if args.scheme == "lorentz":
@@ -225,7 +242,7 @@ def main() -> None:
             augmented={"Augmented": x_no_so2},
             feat_names=feat_names,
             real_mask_orig=real_mask_orig,
-            output_path=save_dir / f"overlap_lorentz_comparison_{nconst_tag}_class_{args.class_idx}.png",
+            output_path=save_dir / f"overlap_lorentz_{nconst_tag}_class_{args.class_idx}.png",
             bins=args.bins,
             plot_features=args.features,
         )

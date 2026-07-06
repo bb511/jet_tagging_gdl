@@ -28,10 +28,13 @@ class ResultsTableCallback(L.Callback):
         nconstituents: int = 0,
         selected_metric_mode: str = "scheme",
         invariance_metric: str = "l2",
+        features: list = None,
     ):
         super().__init__()
-        self.output_path = Path(output_path)
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Results are split into a subdirectory named after the literal input
+        # feature list (e.g. "pt_etarel_phirel" vs "px_py_pz_etarel_phirel"),
+        # since that's the axis that varies across baseline/augmentation/symm_loss runs.
+        self.features_label = "_".join(str(f) for f in features) if features else None
 
         self.n_folds = int(n_folds)
         self.run_method_raw = method
@@ -49,10 +52,13 @@ class ResultsTableCallback(L.Callback):
             self.display_method = self.run_method_raw
             
         self.nconstituents = int(nconstituents)
-        
-        # Override output_path to include the method, e.g., results_table_baseline.csv
+
+        # Override output_path to include the feature-set subdir and the method,
+        # e.g., results/pt_etarel_phirel/results_table_baseline.csv
         base_path = Path(output_path)
-        self.output_path = base_path.parent / f"{base_path.stem}_{self.display_method}{base_path.suffix}"
+        out_dir = base_path.parent / self.features_label if self.features_label else base_path.parent
+        self.output_path = out_dir / f"{base_path.stem}_{self.display_method}{base_path.suffix}"
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.selected_metric_mode = selected_metric_mode
         self.invariance_metric = invariance_metric
         self.INVARIANCE_KEYS = (

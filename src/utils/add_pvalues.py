@@ -19,15 +19,26 @@ Interpret p-values qualitatively alongside effect sizes.
 
 Usage
 -----
-Single table (baseline rows must be present):
-    python src/utils/add_pvalues.py results/results_table_augmentation.csv
+Results tables live under results/<features>/ (e.g. results/pt_etarel_phirel/,
+results/px_py_pz_etarel_phirel/), split by the literal input feature list used
+for training. Baseline (augmentation_scheme=none) rows only ever exist in the
+pt_etarel_phirel bucket, so tables in other feature buckets have no "none"
+rows of their own. When --baseline is omitted, a sibling
+results_table_baseline.csv is auto-discovered (same directory first, then any
+results/*/results_table_baseline.csv) and used.
 
-Cross-table comparison (e.g. symm_loss vs augmentation baseline):
-    python src/utils/add_pvalues.py results/results_table_symm_loss.csv \
-        --baseline results/results_table_augmentation.csv
+Single table (baseline rows auto-discovered if not present in the file):
+    python src/utils/add_pvalues.py results/pt_etarel_phirel/results_table_augmentation.csv
+
+Cross-feature comparison (lorentz-trained models vs the 3-feature baseline):
+    python src/utils/add_pvalues.py results/px_py_pz_etarel_phirel/results_table_augmentation.csv
+
+Explicit/cross-table baseline override (e.g. symm_loss vs augmentation baseline):
+    python src/utils/add_pvalues.py results/pt_etarel_phirel/results_table_symm_loss.csv \
+        --baseline results/pt_etarel_phirel/results_table_augmentation.csv
 
 Multiple tables at once:
-    python src/utils/add_pvalues.py results/results_table_*.csv
+    python src/utils/add_pvalues.py results/*/results_table_*.csv
 
 Outputs are written next to each input CSV with a _pvalues suffix, and a
 corresponding _pvalues.tex LaTeX table is also written.
@@ -138,6 +149,23 @@ def write_csv(rows: List[Dict], path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Baseline index
 # ---------------------------------------------------------------------------
+
+def find_default_baseline(csv_path: Path) -> Optional[Path]:
+    """Locate a sibling results_table_baseline.csv for auto baseline lookup.
+
+    Checks the input's own directory first, then any results/<features>/
+    directory next to it — baseline (augmentation_scheme=none) rows only
+    ever live in the 3-feature (pt_etarel_phirel) bucket, so augmentation/
+    symm_loss tables in other feature buckets need to cross into it.
+    """
+    same_dir = csv_path.parent / "results_table_baseline.csv"
+    if same_dir.exists() and same_dir.resolve() != csv_path.resolve():
+        return same_dir
+    results_root = csv_path.parent.parent
+    for candidate in sorted(results_root.glob("*/results_table_baseline.csv")):
+        return candidate
+    return None
+
 
 def build_baseline_index(rows: List[Dict[str, str]]) -> Dict[Tuple[str, str], List[float]]:
     """Return {(model, nconstituents): fold_accs} for all none-augmentation rows."""
@@ -364,7 +392,7 @@ def _model_display(model_raw: str) -> str:
         return "DeepSets"
     if "MLP" in model_raw or model_raw == "mlp":
         return "MLP"
-    if "Transformer" in model_raw or model_raw == "transformer":
+    if "Transformer" in model_raw or "JetFormer" in model_raw or model_raw.lower() in ("transformer", "jetformer"):
         return "Transformer"
     if "Pelican" in model_raw or model_raw == "pelican":
         return "PELICAN"
@@ -630,7 +658,35 @@ def main() -> None:
             print(f"[skip] {csv_path} is empty")
             continue
 
-        baseline_index = external_baseline if external_baseline is not None else build_baseline_index(rows)
+        # baseline_path tracks whichever CSV supplied the none-rows used below,
+        # so they can be re-read and included in the output as reference rows.
+        baseline_path = args.baseline
+        inv_metric, metric_baseline_index = external_inv_metric, external_metric_baseline
+
+        if external_baseline is not None:
+            baseline_index = external_baseline
+        else:
+            baseline_index = build_baseline_index(rows)
+            if baseline_index:
+                inv_metric = args.inv_metric or _detect_inv_metric_suffix(rows)
+                metric_baseline_index = build_metric_baseline_index(rows, inv_metric) if inv_metric else None
+            else:
+                # This table has no augmentation_scheme=none rows of its own
+                # (e.g. a lorentz-only results/px_py_pz_etarel_phirel/ table) —
+                # auto-discover a sibling results_table_baseline.csv.
+                auto_baseline = find_default_baseline(csv_path)
+                if auto_baseline is not None:
+                    baseline_path = auto_baseline
+                    baseline_rows_raw = read_csv(auto_baseline)
+                    baseline_index = build_baseline_index(baseline_rows_raw)
+                    inv_metric = args.inv_metric or _detect_inv_metric_suffix(baseline_rows_raw)
+                    metric_baseline_index = (
+                        build_metric_baseline_index(baseline_rows_raw, inv_metric) if inv_metric else None
+                    )
+                    print(
+                        f"[baseline] Auto-detected baseline for {csv_path}: "
+                        f"{auto_baseline} ({len(baseline_index)} entries)"
+                    )
 
         if not baseline_index:
             print(
@@ -638,22 +694,17 @@ def main() -> None:
                 "Pass --baseline <path> to provide an external baseline CSV."
             )
 
-        if external_inv_metric is not None:
-            inv_metric, metric_baseline_index = external_inv_metric, external_metric_baseline
-        else:
-            inv_metric = args.inv_metric or _detect_inv_metric_suffix(rows)
-            metric_baseline_index = build_metric_baseline_index(rows, inv_metric) if inv_metric else None
-
         annotated = annotate_rows(
             rows, baseline_index, n_boot=args.n_boot,
             metric_baseline_index=metric_baseline_index, inv_metric=inv_metric,
         )
 
-        # When using an external baseline, include its none rows in the output
-        # so the LaTeX table has a reference row for each (model, nconstituents).
-        if args.baseline is not None:
+        # When the baseline came from another file (explicit --baseline or
+        # auto-discovered), include its none rows in the output so the LaTeX
+        # table has a reference row for each (model, nconstituents).
+        if baseline_path is not None:
             baseline_rows = [
-                r for r in read_csv(args.baseline)
+                r for r in read_csv(baseline_path)
                 if str(r.get("augmentation_scheme", "")).lower() == "none"
             ]
             baseline_annotated = annotate_rows(

@@ -31,10 +31,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_mlp_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/baseline_mlp_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_mlp_nconst8" \
-#     hydra.job.name="eval_baseline_mlp_nconst8"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_baseline_mlp_nconst8" \
+#     hydra.job.name="eval_baseline_mlp_nconst8" &
 
 # python src/eval.py \
 #     -m \
@@ -49,10 +49,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_mlp_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/baseline_mlp_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_mlp_nconst16" \
-#     hydra.job.name="eval_baseline_mlp_nconst16"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_baseline_mlp_nconst16" \
+#     hydra.job.name="eval_baseline_mlp_nconst16" & 
 
 # python src/eval.py \
 #     -m \
@@ -67,10 +67,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_mlp_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/baseline_mlp_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_mlp_nconst32" \
-#     hydra.job.name="eval_baseline_mlp_nconst32"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_baseline_mlp_nconst32" \
+#     hydra.job.name="eval_baseline_mlp_nconst32" &
 
 
 
@@ -90,10 +90,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_deepsets_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/baseline_deepsets_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_deepsets_nconst8" \
-#     hydra.job.name="eval_baseline_deepsets_nconst8"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_baseline_deepsets_nconst8" \
+#     hydra.job.name="eval_baseline_deepsets_nconst8" &
 
 # python src/eval.py \
 #     -m \
@@ -108,10 +108,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_deepsets_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/baseline_deepsets_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_deepsets_nconst16" \
-#     hydra.job.name="eval_baseline_deepsets_nconst16"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_baseline_deepsets_nconst16" \
+#     hydra.job.name="eval_baseline_deepsets_nconst16" &
 
 # python src/eval.py \
 #     -m \
@@ -126,10 +126,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_deepsets_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/baseline_deepsets_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_deepsets_nconst32" \
-#     hydra.job.name="eval_baseline_deepsets_nconst32"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_baseline_deepsets_nconst32" \
+#     hydra.job.name="eval_baseline_deepsets_nconst32" &
 
 
 
@@ -148,10 +148,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_jetformer_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/baseline_jetformer_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_jetformer_nconst8" \
-#     hydra.job.name="eval_baseline_jetformer_nconst8"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_baseline_jetformer_nconst8" \
+#     hydra.job.name="eval_baseline_jetformer_nconst8" &
 
 # python src/eval.py \
 #     -m \
@@ -166,10 +166,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_jetformer_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/baseline_jetformer_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_jetformer_nconst16" \
-#     hydra.job.name="eval_baseline_jetformer_nconst16"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_baseline_jetformer_nconst16" \
+#     hydra.job.name="eval_baseline_jetformer_nconst16" &
 
 # python src/eval.py \
 #     -m \
@@ -184,10 +184,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/baseline_jetformer_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/baseline_jetformer_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_baseline_jetformer_nconst32" \
-#     hydra.job.name="eval_baseline_jetformer_nconst32"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_baseline_jetformer_nconst32" \
+#     hydra.job.name="eval_baseline_jetformer_nconst32" &
 
 
 # ==================================================
@@ -197,8 +197,8 @@ export MLFLOW_ALLOW_FILE_STORE=true
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst8_aug_so3 \
-#     +experiment_name=hls4ml_nconst8_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst8_aug_lorentz \
+#     +experiment_name=hls4ml_nconst8_aug_lorentz \
 #     model=mlp_8 \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -207,16 +207,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_mlp_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/aug_lorentz_mlp_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_mlp_nconst8" \
-#     hydra.job.name="eval_aug_so3_mlp_nconst8"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_aug_lorentz_mlp_nconst8" \
+#     hydra.job.name="eval_aug_lorentz_mlp_nconst8" &
 
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst16_aug_so3 \
-#     +experiment_name=hls4ml_nconst16_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst16_aug_lorentz \
+#     +experiment_name=hls4ml_nconst16_aug_lorentz \
 #     model=mlp_16 \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -225,16 +225,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_mlp_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/aug_lorentz_mlp_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_mlp_nconst16" \
-#     hydra.job.name="eval_aug_so3_mlp_nconst16"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_aug_lorentz_mlp_nconst16" \
+#     hydra.job.name="eval_aug_lorentz_mlp_nconst16" &
 
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst32_aug_so3 \
-#     +experiment_name=hls4ml_nconst32_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
+#     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=mlp_32 \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -243,10 +243,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_mlp_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/aug_lorentz_mlp_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_mlp_nconst32" \
-#     hydra.job.name="eval_aug_so3_mlp_nconst32"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_aug_lorentz_mlp_nconst32" \
+#     hydra.job.name="eval_aug_lorentz_mlp_nconst32" &
 
 
 
@@ -255,8 +255,8 @@ export MLFLOW_ALLOW_FILE_STORE=true
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst8_aug_so3 \
-#     +experiment_name=hls4ml_nconst8_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst8_aug_lorentz \
+#     +experiment_name=hls4ml_nconst8_aug_lorentz \
 #     model=deepsets_8 \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -265,16 +265,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_deepsets_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/aug_lorentz_deepsets_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_deepsets_nconst8" \
-#     hydra.job.name="eval_aug_so3_deepsets_nconst8"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_aug_lorentz_deepsets_nconst8" \
+#     hydra.job.name="eval_aug_lorentz_deepsets_nconst8" &
 
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst16_aug_so3 \
-#     +experiment_name=hls4ml_nconst16_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst16_aug_lorentz \
+#     +experiment_name=hls4ml_nconst16_aug_lorentz \
 #     model=deepsets_16 \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -283,16 +283,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_deepsets_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/aug_lorentz_deepsets_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_deepsets_nconst16" \
-#     hydra.job.name="eval_aug_so3_deepsets_nconst16"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_aug_lorentz_deepsets_nconst16" \
+#     hydra.job.name="eval_aug_lorentz_deepsets_nconst16" &
 
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst32_aug_so3 \
-#     +experiment_name=hls4ml_nconst32_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
+#     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=deepsets_32 \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -301,10 +301,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_deepsets_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/aug_lorentz_deepsets_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_deepsets_nconst32" \
-#     hydra.job.name="eval_aug_so3_deepsets_nconst32"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_aug_lorentz_deepsets_nconst32" \
+#     hydra.job.name="eval_aug_lorentz_deepsets_nconst32" &
 
 
 
@@ -312,8 +312,8 @@ export MLFLOW_ALLOW_FILE_STORE=true
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst8_aug_so3 \
-#     +experiment_name=hls4ml_nconst8_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst8_aug_lorentz \
+#     +experiment_name=hls4ml_nconst8_aug_lorentz \
 #     model=jetformer \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -322,16 +322,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_jetformer_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/aug_lorentz_jetformer_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_jetformer_nconst8" \
-#     hydra.job.name="eval_aug_so3_jetformer_nconst8"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_aug_lorentz_jetformer_nconst8" \
+#     hydra.job.name="eval_aug_lorentz_jetformer_nconst8" &
 
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst16_aug_so3 \
-#     +experiment_name=hls4ml_nconst16_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst16_aug_lorentz \
+#     +experiment_name=hls4ml_nconst16_aug_lorentz \
 #     model=jetformer \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -340,16 +340,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_jetformer_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/aug_lorentz_jetformer_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_jetformer_nconst16" \
-#     hydra.job.name="eval_aug_so3_jetformer_nconst16"
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_aug_lorentz_jetformer_nconst16" \
+#     hydra.job.name="eval_aug_lorentz_jetformer_nconst16" &
 
 # python src/eval.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_euler \
-#     experiment=augmentation/hls4ml_nconst32_aug_so3 \
-#     +experiment_name=hls4ml_nconst32_aug_so3 \
+#     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
+#     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=jetformer \
 #     model.nbr_feats=3 \
 #     data.features="[pt,etarel,phirel]" \
@@ -358,11 +358,10 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/aug_so3_jetformer_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/aug_lorentz_jetformer_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/eval_aug_so3_jetformer_nconst32" \
-#     hydra.job.name="eval_aug_so3_jetformer_nconst32"
-
+#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_aug_lorentz_jetformer_nconst32" \
+#     hydra.job.name="eval_aug_lorentz_jetformer_nconst32" &
 
 # ==================================================
 # SYMM_LOSS EVAL FOR ALL MODELS
@@ -371,370 +370,20 @@ export MLFLOW_ALLOW_FILE_STORE=true
 python src/eval.py \
     -m \
     hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst8_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst8_so2 \
-    model=mlp_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_mlp_nconst8/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_mlp_nconst8" \
-    hydra.job.name="eval_symm_loss_so2_mlp_nconst8"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst16_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst16_so2 \
-    model=mlp_16 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=16 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_mlp_nconst16/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_mlp_nconst16" \
-    hydra.job.name="eval_symm_loss_so2_mlp_nconst16"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst32_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst32_so2 \
-    model=mlp_32 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_mlp_nconst32/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_mlp_nconst32" \
-    hydra.job.name="eval_symm_loss_so2_mlp_nconst32"
-
-
-
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst8_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst8_so2 \
-    model=deepsets_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_deepsets_nconst8/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_deepsets_nconst8" \
-    hydra.job.name="eval_symm_loss_so2_deepsets_nconst8"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst16_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst16_so2 \
-    model=deepsets_16 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=16 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_deepsets_nconst16/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_deepsets_nconst16" \
-    hydra.job.name="eval_symm_loss_so2_deepsets_nconst16"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst32_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst32_so2 \
-    model=deepsets_32 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_deepsets_nconst32/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_deepsets_nconst32" \
-    hydra.job.name="eval_symm_loss_so2_deepsets_nconst32"
-
-
-
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst8_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst8_so2 \
-    model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_jetformer_nconst8/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_jetformer_nconst8" \
-    hydra.job.name="eval_symm_loss_so2_jetformer_nconst8"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst16_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst16_so2 \
-    model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=16 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_jetformer_nconst16/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_jetformer_nconst16" \
-    hydra.job.name="eval_symm_loss_so2_jetformer_nconst16"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst32_so2 \
-    +experiment_name=hls4ml_symm_loss_nconst32_so2 \
-    model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so2_jetformer_nconst32/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so2_jetformer_nconst32" \
-    hydra.job.name="eval_symm_loss_so2_jetformer_nconst32"
-
-
-
-
-
-
-
-
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst8_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst8_so3 \
-    model=mlp_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_mlp_nconst8/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_mlp_nconst8" \
-    hydra.job.name="eval_symm_loss_so3_mlp_nconst8"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst16_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst16_so3 \
-    model=mlp_16 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=16 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_mlp_nconst16/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_mlp_nconst16" \
-    hydra.job.name="eval_symm_loss_so3_mlp_nconst16" 
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst32_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst32_so3 \
-    model=mlp_32 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_mlp_nconst32/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_mlp_nconst32" \
-    hydra.job.name="eval_symm_loss_so3_mlp_nconst32"
-
-
-
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst8_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst8_so3 \
-    model=deepsets_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_deepsets_nconst8/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_deepsets_nconst8" \
-    hydra.job.name="eval_symm_loss_so3_deepsets_nconst8"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst16_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst16_so3 \
-    model=deepsets_16 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=16 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_deepsets_nconst16/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_deepsets_nconst16" \
-    hydra.job.name="eval_symm_loss_so3_deepsets_nconst16"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst32_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst32_so3 \
-    model=deepsets_32 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_deepsets_nconst32/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_deepsets_nconst32" \
-    hydra.job.name="eval_symm_loss_so3_deepsets_nconst32"
-
-
-
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst8_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst8_so3 \
-    model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=8 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_jetformer_nconst8/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_jetformer_nconst8" \
-    hydra.job.name="eval_symm_loss_so3_jetformer_nconst8"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst16_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst16_so3 \
-    model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=16 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_jetformer_nconst16/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_jetformer_nconst16" \
-    hydra.job.name="eval_symm_loss_so3_jetformer_nconst16"
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
-    experiment=symm_loss/hls4ml_symm_loss_nconst32_so3 \
-    +experiment_name=hls4ml_symm_loss_nconst32_so3 \
-    model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
-    data.keep_full_features_at_test=true \
-    data.nconstituents=32 \
-    data.n_folds=5 \
-    trainer=gpu \
-    data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_so3_jetformer_nconst32/0/checkpoint_manifest.json" \
-    callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_so3_jetformer_nconst32" \
-    hydra.job.name="eval_symm_loss_so3_jetformer_nconst32"
-
-
-
-
-
-
-
-python src/eval.py \
-    -m \
-    hydra/launcher=submitit_slurm_euler \
     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
     model=mlp_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=8 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_mlp_nconst8/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/symm_loss_lorentz_mlp_nconst8/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_mlp_nconst8" \
-    hydra.job.name="eval_symm_loss_lorentz_mlp_nconst8"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_symm_loss_lorentz_mlp_nconst8" \
+    hydra.job.name="eval_symm_loss_lorentz_mlp_nconst8" &
 
 python src/eval.py \
     -m \
@@ -742,17 +391,17 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
     model=mlp_16 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=16 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_mlp_nconst16/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/symm_loss_lorentz_mlp_nconst16/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_mlp_nconst16" \
-    hydra.job.name="eval_symm_loss_lorentz_mlp_nconst16" 
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_symm_loss_lorentz_mlp_nconst16" \
+    hydra.job.name="eval_symm_loss_lorentz_mlp_nconst16" &
 
 python src/eval.py \
     -m \
@@ -760,17 +409,17 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
     model=mlp_32 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=32 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_mlp_nconst32/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/symm_loss_lorentz_mlp_nconst32/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_mlp_nconst32" \
-    hydra.job.name="eval_symm_loss_lorentz_mlp_nconst32"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_symm_loss_lorentz_mlp_nconst32" \
+    hydra.job.name="eval_symm_loss_lorentz_mlp_nconst32" &
 
 
 
@@ -781,17 +430,17 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
     model=deepsets_8 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=8 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_deepsets_nconst8/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/symm_loss_lorentz_deepsets_nconst8/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_deepsets_nconst8" \
-    hydra.job.name="eval_symm_loss_lorentz_deepsets_nconst8"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_symm_loss_lorentz_deepsets_nconst8" \
+    hydra.job.name="eval_symm_loss_lorentz_deepsets_nconst8" &
 
 python src/eval.py \
     -m \
@@ -799,17 +448,17 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
     model=deepsets_16 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=16 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_deepsets_nconst16/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/symm_loss_lorentz_deepsets_nconst16/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_deepsets_nconst16" \
-    hydra.job.name="eval_symm_loss_lorentz_deepsets_nconst16"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_symm_loss_lorentz_deepsets_nconst16" \
+    hydra.job.name="eval_symm_loss_lorentz_deepsets_nconst16" &
 
 python src/eval.py \
     -m \
@@ -817,17 +466,17 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
     model=deepsets_32 \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=32 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_deepsets_nconst32/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/symm_loss_lorentz_deepsets_nconst32/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_deepsets_nconst32" \
-    hydra.job.name="eval_symm_loss_lorentz_deepsets_nconst32"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_symm_loss_lorentz_deepsets_nconst32" \
+    hydra.job.name="eval_symm_loss_lorentz_deepsets_nconst32" &
 
 
 
@@ -838,17 +487,18 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst8_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst8_lorentz \
     model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    model.normalization=layer \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=8 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_jetformer_nconst8/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/symm_loss_lorentz_jetformer_nconst8/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_jetformer_nconst8" \
-    hydra.job.name="eval_symm_loss_lorentz_jetformer_nconst8"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_symm_loss_lorentz_jetformer_nconst8" \
+    hydra.job.name="eval_symm_loss_lorentz_jetformer_nconst8" &
 
 python src/eval.py \
     -m \
@@ -856,17 +506,18 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst16_lorentz \
     model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    model.normalization=layer \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=16 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_jetformer_nconst16/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/symm_loss_lorentz_jetformer_nconst16/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_jetformer_nconst16" \
-    hydra.job.name="eval_symm_loss_lorentz_jetformer_nconst16"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_symm_loss_lorentz_jetformer_nconst16" \
+    hydra.job.name="eval_symm_loss_lorentz_jetformer_nconst16" &
 
 python src/eval.py \
     -m \
@@ -874,17 +525,20 @@ python src/eval.py \
     experiment=symm_loss/hls4ml_symm_loss_nconst32_lorentz \
     +experiment_name=hls4ml_symm_loss_nconst32_lorentz \
     model=jetformer \
-    model.nbr_feats=3 \
-    data.features="[pt,etarel,phirel]" \
+    model.nbr_feats=4 \
+    model.normalization=layer \
+    data.features="[px,py,pz,e]" \
     data.keep_full_features_at_test=true \
     data.nconstituents=32 \
     data.n_folds=5 \
     trainer=gpu \
     data.data_dir="$HLS4ML_DATA_DIR" \
-    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/symm_loss_lorentz_jetformer_nconst32/0/checkpoint_manifest.json" \
+    checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/symm_loss_lorentz_jetformer_nconst32/0/checkpoint_manifest.json" \
     callbacks.results_table.invariance_metric=wasserstein \
-    hydra.sweep.dir="logs/slurm/eval_symm_loss_lorentz_jetformer_nconst32" \
-    hydra.job.name="eval_symm_loss_lorentz_jetformer_nconst32"
+    hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_symm_loss_lorentz_jetformer_nconst32" \
+    hydra.job.name="eval_symm_loss_lorentz_jetformer_nconst32" &
+
+
 
 # ==================================================
 # PERMUTATION EVAL FOR DEEPSETS
@@ -903,7 +557,7 @@ python src/eval.py \
 #     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/permutation_deepsets_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst8" \
-#     hydra.job.name="eval_permutation_deepsets_nconst8"
+#     hydra.job.name="eval_permutation_deepsets_nconst8" &
 
 # python src/eval.py \
 #     -m \
@@ -918,7 +572,7 @@ python src/eval.py \
 #     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/permutation_deepsets_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst16" \
-#     hydra.job.name="eval_permutation_deepsets_nconst16"
+#     hydra.job.name="eval_permutation_deepsets_nconst16" &
 
 # python src/eval.py \
 #     -m \
@@ -933,4 +587,4 @@ python src/eval.py \
 #     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/permutation_deepsets_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst32" \
-#     hydra.job.name="eval_permutation_deepsets_nconst32"
+#     hydra.job.name="eval_permutation_deepsets_nconst32" &

@@ -6,5 +6,6 @@ results_table:
   model_name: ${model._target_}
   augmentation_scheme: ${data.augmentation_scheme}
   nconstituents: ${data.nconstituents}
+  features: ${data.features}
   selected_metric_mode: "scheme"
   invariance_metric: "l2"  # l2 | flip | cosine | js | wasserstein
