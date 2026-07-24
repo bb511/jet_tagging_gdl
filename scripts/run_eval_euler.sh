@@ -24,17 +24,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst8_none \
 #     +experiment_name=hls4ml_nconst8_aug_none \
 #     model=mlp_8 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/baseline_mlp_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/baseline_mlp_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_baseline_mlp_nconst8" \
-#     hydra.job.name="eval_baseline_mlp_nconst8" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_baseline_mlp_nconst8" \
+#     hydra.job.name="eval_baseline_mlp_nconst8"
 
 # python src/eval.py \
 #     -m \
@@ -42,17 +42,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst16_none \
 #     +experiment_name=hls4ml_nconst16_aug_none \
 #     model=mlp_16 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/baseline_mlp_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/baseline_mlp_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_baseline_mlp_nconst16" \
-#     hydra.job.name="eval_baseline_mlp_nconst16" & 
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_baseline_mlp_nconst16" \
+#     hydra.job.name="eval_baseline_mlp_nconst16"
 
 # python src/eval.py \
 #     -m \
@@ -60,17 +60,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst32_none \
 #     +experiment_name=hls4ml_nconst32_aug_none \
 #     model=mlp_32 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/baseline_mlp_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/baseline_mlp_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_baseline_mlp_nconst32" \
-#     hydra.job.name="eval_baseline_mlp_nconst32" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_baseline_mlp_nconst32" \
+#     hydra.job.name="eval_baseline_mlp_nconst32"
 
 
 
@@ -83,17 +83,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst8_none \
 #     +experiment_name=hls4ml_nconst8_aug_none \
 #     model=deepsets_8 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/baseline_deepsets_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/baseline_deepsets_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_baseline_deepsets_nconst8" \
-#     hydra.job.name="eval_baseline_deepsets_nconst8" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_baseline_deepsets_nconst8" \
+#     hydra.job.name="eval_baseline_deepsets_nconst8"
 
 # python src/eval.py \
 #     -m \
@@ -101,17 +101,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst16_none \
 #     +experiment_name=hls4ml_nconst16_aug_none \
 #     model=deepsets_16 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/baseline_deepsets_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/baseline_deepsets_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_baseline_deepsets_nconst16" \
-#     hydra.job.name="eval_baseline_deepsets_nconst16" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_baseline_deepsets_nconst16" \
+#     hydra.job.name="eval_baseline_deepsets_nconst16"
 
 # python src/eval.py \
 #     -m \
@@ -119,17 +119,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst32_none \
 #     +experiment_name=hls4ml_nconst32_aug_none \
 #     model=deepsets_32 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/baseline_deepsets_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/baseline_deepsets_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_baseline_deepsets_nconst32" \
-#     hydra.job.name="eval_baseline_deepsets_nconst32" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_baseline_deepsets_nconst32" \
+#     hydra.job.name="eval_baseline_deepsets_nconst32"
 
 
 
@@ -141,17 +141,18 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst8_none \
 #     +experiment_name=hls4ml_nconst8_aug_none \
 #     model=jetformer \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     model.normalization=layer \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/baseline_jetformer_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/baseline_jetformer_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_baseline_jetformer_nconst8" \
-#     hydra.job.name="eval_baseline_jetformer_nconst8" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_baseline_jetformer_nconst8" \
+#     hydra.job.name="eval_baseline_jetformer_nconst8"
 
 # python src/eval.py \
 #     -m \
@@ -159,17 +160,18 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst16_none \
 #     +experiment_name=hls4ml_nconst16_aug_none \
 #     model=jetformer \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     model.normalization=layer \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/baseline_jetformer_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/baseline_jetformer_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_baseline_jetformer_nconst16" \
-#     hydra.job.name="eval_baseline_jetformer_nconst16" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_baseline_jetformer_nconst16" \
+#     hydra.job.name="eval_baseline_jetformer_nconst16"
 
 # python src/eval.py \
 #     -m \
@@ -177,17 +179,20 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=baseline/hls4ml_nconst32_none \
 #     +experiment_name=hls4ml_nconst32_aug_none \
 #     model=jetformer \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     model.normalization=layer \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/baseline_jetformer_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/baseline_jetformer_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_baseline_jetformer_nconst32" \
-#     hydra.job.name="eval_baseline_jetformer_nconst32" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_baseline_jetformer_nconst32" \
+#     hydra.job.name="eval_baseline_jetformer_nconst32"
+
+
 
 
 # ==================================================
@@ -200,17 +205,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst8_aug_lorentz \
 #     +experiment_name=hls4ml_nconst8_aug_lorentz \
 #     model=mlp_8 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/aug_lorentz_mlp_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/aug_lorentz_mlp_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_aug_lorentz_mlp_nconst8" \
-#     hydra.job.name="eval_aug_lorentz_mlp_nconst8" &
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_aug_lorentz_mlp_nconst8" \
+#     hydra.job.name="eval_aug_lorentz_mlp_nconst8" & 
 
 # python src/eval.py \
 #     -m \
@@ -218,16 +223,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst16_aug_lorentz \
 #     +experiment_name=hls4ml_nconst16_aug_lorentz \
 #     model=mlp_16 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/aug_lorentz_mlp_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/aug_lorentz_mlp_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_aug_lorentz_mlp_nconst16" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_aug_lorentz_mlp_nconst16" \
 #     hydra.job.name="eval_aug_lorentz_mlp_nconst16" &
 
 # python src/eval.py \
@@ -236,16 +241,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
 #     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=mlp_32 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/mlp/aug_lorentz_mlp_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/mlp/aug_lorentz_mlp_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/mlp/eval_aug_lorentz_mlp_nconst32" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/mlp/eval_aug_lorentz_mlp_nconst32" \
 #     hydra.job.name="eval_aug_lorentz_mlp_nconst32" &
 
 
@@ -258,16 +263,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst8_aug_lorentz \
 #     +experiment_name=hls4ml_nconst8_aug_lorentz \
 #     model=deepsets_8 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/aug_lorentz_deepsets_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/aug_lorentz_deepsets_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_aug_lorentz_deepsets_nconst8" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_aug_lorentz_deepsets_nconst8" \
 #     hydra.job.name="eval_aug_lorentz_deepsets_nconst8" &
 
 # python src/eval.py \
@@ -276,16 +281,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst16_aug_lorentz \
 #     +experiment_name=hls4ml_nconst16_aug_lorentz \
 #     model=deepsets_16 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/aug_lorentz_deepsets_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/aug_lorentz_deepsets_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_aug_lorentz_deepsets_nconst16" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_aug_lorentz_deepsets_nconst16" \
 #     hydra.job.name="eval_aug_lorentz_deepsets_nconst16" &
 
 # python src/eval.py \
@@ -294,16 +299,16 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
 #     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=deepsets_32 \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/deepsets/aug_lorentz_deepsets_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/deepsets/aug_lorentz_deepsets_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/eval_aug_lorentz_deepsets_nconst32" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/deepsets/eval_aug_lorentz_deepsets_nconst32" \
 #     hydra.job.name="eval_aug_lorentz_deepsets_nconst32" &
 
 
@@ -315,16 +320,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst8_aug_lorentz \
 #     +experiment_name=hls4ml_nconst8_aug_lorentz \
 #     model=jetformer \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     model.normalization=layer \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=8 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/aug_lorentz_jetformer_nconst8/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/aug_lorentz_jetformer_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_aug_lorentz_jetformer_nconst8" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_aug_lorentz_jetformer_nconst8" \
 #     hydra.job.name="eval_aug_lorentz_jetformer_nconst8" &
 
 # python src/eval.py \
@@ -333,16 +339,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst16_aug_lorentz \
 #     +experiment_name=hls4ml_nconst16_aug_lorentz \
 #     model=jetformer \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     model.normalization=layer \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=16 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/aug_lorentz_jetformer_nconst16/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/aug_lorentz_jetformer_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_aug_lorentz_jetformer_nconst16" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_aug_lorentz_jetformer_nconst16" \
 #     hydra.job.name="eval_aug_lorentz_jetformer_nconst16" &
 
 # python src/eval.py \
@@ -351,21 +358,22 @@ export MLFLOW_ALLOW_FILE_STORE=true
 #     experiment=augmentation/hls4ml_nconst32_aug_lorentz \
 #     +experiment_name=hls4ml_nconst32_aug_lorentz \
 #     model=jetformer \
-#     model.nbr_feats=3 \
-#     data.features="[pt,etarel,phirel]" \
+#     model.nbr_feats=4 \
+#     model.normalization=layer \
+#     data.features="[px,py,pz,e]" \
 #     data.keep_full_features_at_test=true \
 #     data.nconstituents=32 \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     data.data_dir="$HLS4ML_DATA_DIR" \
-#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/pt_etarel_phirel/jetformer/aug_lorentz_jetformer_nconst32/0/checkpoint_manifest.json" \
+#     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/px_py_pz_e/jetformer/aug_lorentz_jetformer_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
-#     hydra.sweep.dir="logs/slurm/pt_etarel_phirel/jetformer/eval_aug_lorentz_jetformer_nconst32" \
+#     hydra.sweep.dir="logs/slurm/px_py_pz_e/jetformer/eval_aug_lorentz_jetformer_nconst32" \
 #     hydra.job.name="eval_aug_lorentz_jetformer_nconst32" &
 
-# ==================================================
-# SYMM_LOSS EVAL FOR ALL MODELS
-# ==================================================
+# # ==================================================
+# # SYMM_LOSS EVAL FOR ALL MODELS
+# # ==================================================
 
 python src/eval.py \
     -m \
@@ -557,7 +565,7 @@ python src/eval.py \
 #     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/permutation_deepsets_nconst8/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst8" \
-#     hydra.job.name="eval_permutation_deepsets_nconst8" &
+#     hydra.job.name="eval_permutation_deepsets_nconst8"
 
 # python src/eval.py \
 #     -m \
@@ -572,7 +580,7 @@ python src/eval.py \
 #     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/permutation_deepsets_nconst16/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst16" \
-#     hydra.job.name="eval_permutation_deepsets_nconst16" &
+#     hydra.job.name="eval_permutation_deepsets_nconst16"
 
 # python src/eval.py \
 #     -m \
@@ -587,4 +595,4 @@ python src/eval.py \
 #     checkpoint_manifest_path="${REPO_ROOT}/logs/slurm/permutation_deepsets_nconst32/0/checkpoint_manifest.json" \
 #     callbacks.results_table.invariance_metric=wasserstein \
 #     hydra.sweep.dir="logs/slurm/eval_permutation_deepsets_nconst32" \
-#     hydra.job.name="eval_permutation_deepsets_nconst32" &
+#     hydra.job.name="eval_permutation_deepsets_nconst32"

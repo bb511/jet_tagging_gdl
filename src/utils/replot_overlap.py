@@ -166,7 +166,7 @@ def _plot(
 
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved → {output_path.resolve()}")
     return bounds_summary
@@ -242,7 +242,7 @@ def main() -> None:
             augmented={"Augmented": x_no_so2},
             feat_names=feat_names,
             real_mask_orig=real_mask_orig,
-            output_path=save_dir / f"overlap_lorentz_{nconst_tag}_class_{args.class_idx}.png",
+            output_path=save_dir / f"overlap_lorentz_{nconst_tag}_class_{args.class_idx}.svg",
             bins=args.bins,
             plot_features=args.features,
         )
@@ -256,7 +256,7 @@ def main() -> None:
             augmented={"SO(2) augmented": x_aug},
             feat_names=feat_names,
             real_mask_orig=real_mask_orig,
-            output_path=save_dir / f"overlap_so2_{nconst_tag}_class_{args.class_idx}.png",
+            output_path=save_dir / f"overlap_so2_{nconst_tag}_class_{args.class_idx}.svg",
             bins=args.bins,
             plot_features=args.features,
         )
@@ -270,7 +270,7 @@ def main() -> None:
             augmented={"SO(3) augmented": x_aug},
             feat_names=feat_names,
             real_mask_orig=real_mask_orig,
-            output_path=save_dir / f"overlap_so3_{nconst_tag}_class_{args.class_idx}.png",
+            output_path=save_dir / f"overlap_so3_{nconst_tag}_class_{args.class_idx}.svg",
             bins=args.bins,
             plot_features=args.features,
         )

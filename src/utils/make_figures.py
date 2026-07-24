@@ -35,7 +35,7 @@ random_state, so fold i is identical data across conditions) directly from the
 test_acc_folds / flip_stable_folds columns already in the _pvalues.csv files --
 same mean-of-paired-differences approach add_pvalues.py uses for delta_<metric>.
 
-Figures are written as PNGs (fig_augmentation.png / fig_symm_loss.png) under
+Figures are written as PNGs (fig_augmentation.svg / fig_symm_loss.svg) under
 results/<features>/ when --features is given, else under results/ (default).
 PNG, not PDF, because matplotlib's PDF backend renders mathtext as Type 3
 fonts, which PDF.js (and so every VSCode PDF-viewer extension) tends to
@@ -195,10 +195,30 @@ def _fmt_flops(v: Optional[float]) -> str:
 def _extract_entry(row: Dict[str, str], inv_metric: str) -> Dict[str, Optional[float]]:
     scheme = str(row.get("augmentation_scheme", "")).lower()
     trained = scheme in {"so2", "so3", "lorentz"}
+    # Per-group flip folds (so2_flip_stable_folds etc.), unconditional on this
+    # row's own augmentation_scheme -- lets a baseline row be paired against an
+    # SO(2)-trained row on the SO(2) value specifically. Only present once
+    # results_table_callback.py has been re-run with the group_flip_cols change;
+    # entries missing here fall back to the legacy "selected" columns below.
+    stabfolds_by_group: Dict[str, List[float]] = {}
+    recfolds_by_group: Dict[str, List[float]] = {}
+    for g in ("so2", "so3", "lorentz"):
+        sf = _parse_folds(row.get(f"{g}_flip_stable_folds", ""))
+        rf = _parse_folds(row.get(f"{g}_flip_recover_folds", ""))
+        if sf is not None:
+            stabfolds_by_group[g] = sf
+        if rf is not None:
+            recfolds_by_group[g] = rf
     return {
         "accfolds": _acc_folds_pct(row),
+        # Legacy columns: for a trained row these already equal the matching
+        # group's value; for the baseline row they're a mean over so2/so3/lorentz
+        # (see ResultsTableCallback._selected_group_value) -- kept only as a
+        # fallback for CSVs predating the per-group columns above.
         "stabfolds": _parse_folds(row.get("flip_stable_folds", "")),
         "recfolds": _parse_folds(row.get("flip_recover_folds", "")),
+        "stabfolds_by_group": stabfolds_by_group,
+        "recfolds_by_group": recfolds_by_group,
         "flops": _opt_float(row, "flops_mean"),
         "dW": _opt_float(row, f"delta_{inv_metric}_mean") if trained else None,
         "dWsd": _opt_float(row, f"delta_{inv_metric}_std") if trained else None,
@@ -279,6 +299,7 @@ def build_dataset(results_dir: Path, features: Optional[str] = None):
 
     # Delta accuracy / delta stable-fraction against the None baseline for the
     # same (regime, model, n), paired per fold.
+    scheme_of = {v: k for k, v in AUG_DISPLAY.items()}  # "SO(2)" -> "so2", etc.
     for (regime_label, model, n, group), entry in D.items():
         if group == "None":
             continue
@@ -286,8 +307,21 @@ def build_dataset(results_dir: Path, features: Optional[str] = None):
         if base is None:
             continue
         entry["dAcc"], entry["dAccSd"] = _paired_delta(entry["accfolds"], base["accfolds"])
-        entry["dStab"], entry["dStabSd"] = _paired_delta(entry["stabfolds"], base["stabfolds"])
-        entry["dRec"], entry["dRecSd"] = _paired_delta(entry["recfolds"], base["recfolds"])
+
+        scheme = scheme_of.get(group)
+        entry_stab = entry["stabfolds_by_group"].get(scheme) if scheme else None
+        base_stab = base["stabfolds_by_group"].get(scheme) if scheme else None
+        entry["dStab"], entry["dStabSd"] = _paired_delta(
+            entry_stab if entry_stab is not None else entry["stabfolds"],
+            base_stab if base_stab is not None else base["stabfolds"],
+        )
+
+        entry_rec = entry["recfolds_by_group"].get(scheme) if scheme else None
+        base_rec = base["recfolds_by_group"].get(scheme) if scheme else None
+        entry["dRec"], entry["dRecSd"] = _paired_delta(
+            entry_rec if entry_rec is not None else entry["recfolds"],
+            base_rec if base_rec is not None else base["recfolds"],
+        )
 
     models = [m for m in MODEL_ORDER if m in models_seen] + sorted(models_seen - set(MODEL_ORDER))
     ns = sorted(ns_seen)
@@ -299,9 +333,10 @@ def build_dataset(results_dir: Path, features: Optional[str] = None):
 # scaffold shared by the per-regime figure: R x C grid + row/col labels
 # ---------------------------------------------------------------------------
 
-def scaffold(row_labels: List[str], models: List[str], figsize, sharey="row"):
+def scaffold(row_labels: List[str], models: List[str], figsize, sharey="row", height_ratios=None):
+    gridspec_kw = {"height_ratios": height_ratios} if height_ratios else None
     fig, axes = plt.subplots(len(row_labels), len(models), figsize=figsize,
-                              sharey=sharey, squeeze=False)
+                              sharey=sharey, squeeze=False, gridspec_kw=gridspec_kw)
     for j, mod in enumerate(models):
         axes[0, j].set_title(mod, fontweight="bold", pad=8)
     for ax in axes.flat:
@@ -310,19 +345,6 @@ def scaffold(row_labels: List[str], models: List[str], figsize, sharey="row"):
         ax.set_axisbelow(True)
         ax.tick_params(length=3)
     return fig, axes
-
-
-def row_labels_aligned(fig, axes, row_labels: List[str], x=0.015):
-    """Bold row-category labels (Accuracy / Wasserstein / ... / FLOPs), all on
-    the same vertical line -- anchoring to each row's own yaxis.label (as a
-    plain annotate would) drifts left/right with that row's tick-label width,
-    so this places them at one fixed figure-fraction x instead, using each
-    row's actual (post-layout) vertical center."""
-    for i, label in enumerate(row_labels):
-        y0, y1 = axes[i, 0].get_position().y0, axes[i, 0].get_position().y1
-        fig.text(x, (y0 + y1) / 2, label, transform=fig.transFigure,
-                  rotation=90, va="center", ha="center",
-                  fontweight="bold", fontsize=12)
 
 
 def group_legend(fig, groups, ncol, y=0.005, fontsize=10):
@@ -337,7 +359,7 @@ def _save(fig, out_dir: Path, name: str, missing: List[Tuple]) -> None:
     # labels) as Type 3 fonts, which PDF.js -- and so every VSCode PDF-viewer
     # extension -- has long-standing bugs rendering, showing garbled glyphs.
     # A raster PNG sidesteps that entirely and just works everywhere.
-    fig.savefig(out_dir / f"{name}.png", dpi=200, bbox_inches="tight", pad_inches=0.03)
+    fig.savefig(out_dir / f"{name}.svg", dpi=200, bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
     if missing:
         print(f"[warn] {name}: {len(missing)} (regime, model, n, group) combos missing from the results tables, left blank:")
@@ -368,10 +390,19 @@ def fig_regime(D, models, ns, regime: str, out_dir: Path, inv_metric: str, featu
     specs = _row_specs(inv_metric)
     row_labels = [label for _, _, label, _ in specs] + ["FLOPs"]
     n_bar_rows = len(specs)
-    fig, axes = scaffold(row_labels, models, (3.8 * len(models), 2.7 * n_bar_rows + 1.0))
+    # FLOPs row only holds a centered text annotation (no bars), so it's given
+    # a much shorter height than the bar rows -- otherwise a plain subplots
+    # grid gives it equal height, leaving it mostly empty and pushing the
+    # legend far below the actual plots.
+    flops_ratio = 0.16
+    height_ratios = [1.0] * n_bar_rows + [flops_ratio]
+    fig, axes = scaffold(row_labels, models,
+                          (3.8 * len(models), 2.7 * n_bar_rows + 2.7 * flops_ratio + 0.5),
+                          height_ratios=height_ratios)
 
     wgroups = ["SO(2)", "SO(3)", "Lorentz"]
-    x = np.arange(len(ns)); w = 0.26
+    x = np.arange(len(ns))
+    w = 0.26
     off = {"SO(2)": -w, "SO(3)": 0.0, "Lorentz": w}
     missing = []
 
@@ -411,7 +442,7 @@ def fig_regime(D, models, ns, regime: str, out_dir: Path, inv_metric: str, featu
                                 patheffects.withStroke(linewidth=8.0, foreground="white")
                             ])
             ax.axhline(0, color="#444444", lw=0.8, zorder=1)
-            ax.set_xticks(x); ax.set_xticklabels(ns)
+            ax.set_xticks(x), ax.set_xticklabels(ns)
             ax.set_xlim(-0.6, len(ns) - 0.4)
             if i == n_bar_rows - 1:
                 ax.set_xlabel("constituents $N$")
@@ -431,7 +462,7 @@ def fig_regime(D, models, ns, regime: str, out_dir: Path, inv_metric: str, featu
             flops = entry.get("flops") if entry else None
             ax.text(x[k], 0.5, _fmt_flops(flops), transform=ax.get_xaxis_transform(),
                      ha="center", va="center", fontsize=10,
-                     bbox=dict(boxstyle="round,pad=0.32", facecolor="#f0f0f0",
+                     bbox=dict(boxstyle="round,pad=0.25", facecolor="#f0f0f0",
                                 edgecolor="#bbbbbb", linewidth=0.6))
         ax.set_ylim(0, 1)
         ax.set_yticks([])
@@ -440,15 +471,14 @@ def fig_regime(D, models, ns, regime: str, out_dir: Path, inv_metric: str, featu
         for spine in ax.spines.values():
             spine.set_visible(False)
         ax.set_xlim(-0.6, len(ns) - 0.4)
+    flops_axes[0].set_ylabel("FLOPs")
 
     handles = [Patch(facecolor=COL[g], edgecolor="none", label=g) for g in wgroups]
     handles.append(Line2D([0], [0], color=RECOVER_COLOR, lw=5, label="recover rate"))
     fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
                bbox_to_anchor=(0.5, 0.005), handlelength=1.5, columnspacing=1.8,
                handletextpad=0.6, fontsize=13)
-    fig.suptitle(regime, fontweight="bold", fontsize=13, y=0.995)
-    fig.tight_layout(rect=[0.05, 0.06, 1, 0.965])
-    row_labels_aligned(fig, axes, row_labels)
+    fig.tight_layout(rect=[0.0, 0.035, 1, 0.975], h_pad=0.4)
     name = f"fig_{REGIME_FILE_STEM[regime]}" + (f"_{features}" if features else "")
     _save(fig, out_dir, name, missing)
 

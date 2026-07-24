@@ -195,6 +195,24 @@ class ResultsTableCallback(L.Callback):
                 "nan" if math.isnan(v) else f"{v:.6f}" for v in vals
             )
 
+        # Per-group flip breakdown, unconditional on augmentation_scheme -- unlike
+        # the "selected" columns above (which collapse to a mean-of-3-groups for
+        # the baseline row), this always reports so2/so3/lorentz separately, the
+        # same way the so2/so3/lorentz_{m} invariance columns already do. Lets a
+        # baseline row be compared against an SO(2)-trained row on the SO(2)
+        # value specifically, rather than against a 3-group average.
+        group_flip_cols: Dict[str, object] = {}
+        for suffix in self.FLIP_BREAKDOWN_SUFFIXES:
+            for group in ("so2", "so3", "lorentz"):
+                vals = [inv.get(f"invariance/{group}_{suffix}", float("nan")) for inv in inv_folds]
+                v_mean, v_std = self._safe_mean(vals), self._safe_std(vals)
+                group_flip_cols[f"{group}_{suffix}_mean"] = round(v_mean, 6)
+                group_flip_cols[f"{group}_{suffix}_std"] = round(v_std, 6)
+                group_flip_cols[f"{group}_{suffix}_pm"] = self._format_pm(v_mean, v_std)
+                group_flip_cols[f"{group}_{suffix}_folds"] = ";".join(
+                    "nan" if math.isnan(v) else f"{v:.6f}" for v in vals
+                )
+
         row = {
             "method": self.display_method,
             "model": self.model_name,
@@ -221,6 +239,7 @@ class ResultsTableCallback(L.Callback):
             f"so3_{m}_folds": ";".join("nan" if math.isnan(v) else f"{v:.6f}" for v in so3_values),
             f"lorentz_{m}_folds": ";".join("nan" if math.isnan(v) else f"{v:.6f}" for v in lor_values),
             **flip_breakdown_cols,
+            **group_flip_cols,
             "flops_mean": round(flops_mean, 3) if not math.isnan(flops_mean) else float("nan"),
             "test_acc_folds": ";".join(f"{v:.6f}" for v in test_folds),
             "selected_inv_folds": ";".join(
@@ -254,6 +273,7 @@ class ResultsTableCallback(L.Callback):
             f"so3_{m}_folds",
             f"lorentz_{m}_folds",
             *flip_breakdown_cols.keys(),
+            *group_flip_cols.keys(),
             "flops_mean",
             "test_acc_folds",
             "selected_inv_folds",

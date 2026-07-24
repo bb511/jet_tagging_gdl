@@ -119,7 +119,8 @@ def symmetry_distance(
     """Compute discrepancy between model outputs on ``x`` and ``T(x)``.
 
     Supported metrics:
-        - ``l2``: mean normalised L2 on logits
+        - ``l1``: mean L1 norm on logits (sum of absolute differences per sample)
+        - ``l2``: mean L2 norm on logits
         - ``mse``: mean squared error on logits
         - ``cosine``: mean cosine distance
         - ``js``: mean Jensen-Shannon divergence
@@ -132,6 +133,9 @@ def symmetry_distance(
         )
 
     m = metric.lower()
+
+    if m == "l1":
+        return (logits - logits_sym).abs().sum(dim=1).mean()
 
     if m == "l2":
         return (logits - logits_sym).norm(dim=1).mean()
@@ -162,7 +166,7 @@ def symmetry_distance(
 
     raise ValueError(
         f"Unknown symmetry metric '{metric}'. "
-        "Choose one of ['l2', 'mse', 'cosine', 'js', 'kl']."
+        "Choose one of ['l1', 'l2', 'mse', 'cosine', 'js', 'kl']."
     )
 
 
