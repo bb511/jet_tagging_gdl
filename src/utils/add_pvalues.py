@@ -208,6 +208,50 @@ def build_metric_baseline_index(
     return index
 
 
+def _acc_after_transform_folds(
+    acc_folds: Optional[List[float]],
+    stab_folds: Optional[List[float]],
+    rec_folds: Optional[List[float]],
+) -> Optional[List[float]]:
+    """Per-fold accuracy on the *transformed* test set, reconstructed from the
+    flip breakdown via total probability over correct/wrong-before:
+
+        acc_after = acc_before * stable_frac + (1 - acc_before) * recover_frac
+
+    acc_before is P(correct before transform) = test_acc_folds; stable_frac
+    and recover_frac are the model's own P(correct after | correct before)
+    and P(correct after | wrong before) for that group. All three are
+    proportions (0-1) here, matching this module's own units for
+    test_acc_folds/flip_*_folds.
+    """
+    if acc_folds is None or stab_folds is None or rec_folds is None:
+        return None
+    if not (len(acc_folds) == len(stab_folds) == len(rec_folds)):
+        return None
+    return [a * s + (1.0 - a) * r for a, s, r in zip(acc_folds, stab_folds, rec_folds)]
+
+
+def build_transformed_acc_baseline_index(
+    rows: List[Dict[str, str]]
+) -> Dict[Tuple[str, str, str], List[float]]:
+    """Return {(model, nconstituents, group): fold_values} of the *baseline*
+    ("none") model's own accuracy on the so2/so3/lorentz-transformed test
+    set, reconstructed per group from its test_acc_folds + flip breakdown."""
+    index: Dict[Tuple[str, str, str], List[float]] = {}
+    for r in rows:
+        if str(r.get("augmentation_scheme", "")).lower() != "none":
+            continue
+        model_key = (r.get("model", ""), str(r.get("nconstituents", "")))
+        acc_folds = _parse_folds(r.get("test_acc_folds", ""))
+        for group in ("so2", "so3", "lorentz"):
+            stab_folds = _parse_folds(r.get(f"{group}_flip_stable_folds", ""))
+            rec_folds = _parse_folds(r.get(f"{group}_flip_recover_folds", ""))
+            folds = _acc_after_transform_folds(acc_folds, stab_folds, rec_folds)
+            if folds is not None:
+                index[(*model_key, group)] = folds
+    return index
+
+
 # ---------------------------------------------------------------------------
 # p-value computation
 # ---------------------------------------------------------------------------
@@ -325,12 +369,81 @@ def compute_delta_for_row(
     }
 
 
+def compute_delta_acc_transformed_for_row(
+    row: Dict[str, str],
+    transformed_acc_baseline_index: Dict[Tuple[str, str, str], List[float]],
+    n_boot: int = 10_000,
+) -> Dict[str, str]:
+    """Compute delta_accuracy_transformed = augmented_acc_on_T(x) minus
+    baseline_acc_on_T(x), for the row's own augmentation_scheme group, both
+    reconstructed via _acc_after_transform_folds so this compares the trained
+    and baseline models under the *same* transform -- apples to apples with
+    delta_<inv_metric> and the flip-breakdown deltas, unlike plain delta
+    accuracy (which compares clean-data accuracy and usually reads as the
+    *cost* of invariance training rather than its benefit).
+
+    Sign convention: positive delta means the trained model is MORE accurate
+    on transformed inputs than the baseline (accuracy is "higher is better",
+    the opposite convention from delta_<inv_metric>'s "baseline - augmented").
+    Scope: only rows with augmentation_scheme in {so2, so3, lorentz} get a
+    delta; none/permute rows get blank placeholders.
+    """
+    mean_key = "delta_accuracy_transformed_mean"
+    std_key = "delta_accuracy_transformed_std"
+    pm_key = "delta_accuracy_transformed_pm"
+    ci_lo_key = "delta_accuracy_transformed_ci_lower"
+    ci_hi_key = "delta_accuracy_transformed_ci_upper"
+    pval_key = "delta_accuracy_transformed_bootstrap_pvalue"
+    sig_key = "delta_accuracy_transformed_significant_boot_005"
+
+    scheme = str(row.get("augmentation_scheme", "")).lower()
+    if scheme not in {"so2", "so3", "lorentz"}:
+        return {
+            mean_key: "nan", std_key: "nan", pm_key: "n/a",
+            ci_lo_key: "nan", ci_hi_key: "nan",
+            pval_key: "—", sig_key: "—",
+        }
+
+    model_key = (row.get("model", ""), str(row.get("nconstituents", "")))
+    baseline_folds = transformed_acc_baseline_index.get((*model_key, scheme))
+    acc_folds = _parse_folds(row.get("test_acc_folds", ""))
+    stab_folds = _parse_folds(row.get(f"{scheme}_flip_stable_folds", ""))
+    rec_folds = _parse_folds(row.get(f"{scheme}_flip_recover_folds", ""))
+    aug_folds = _acc_after_transform_folds(acc_folds, stab_folds, rec_folds)
+
+    if baseline_folds is None or aug_folds is None or len(aug_folds) != len(baseline_folds):
+        return {
+            mean_key: "nan", std_key: "nan", pm_key: "nan",
+            ci_lo_key: "nan", ci_hi_key: "nan",
+            pval_key: "no_baseline" if baseline_folds is None else "no_folds",
+            sig_key: "—",
+        }
+
+    deltas = [a - b for a, b in zip(aug_folds, baseline_folds)]
+    n = len(deltas)
+    d_mean = sum(deltas) / n
+    d_std = math.sqrt(sum((d - d_mean) ** 2 for d in deltas) / (n - 1)) if n > 1 else 0.0
+    ci_lo, ci_hi = bootstrap_ci(deltas, n_boot=n_boot)
+    bpval = bootstrap_pvalue(deltas, [0.0] * n, n_boot=n_boot)
+
+    return {
+        mean_key: f"{d_mean:.6f}",
+        std_key: f"{d_std:.6f}",
+        pm_key: f"{d_mean:.4f} +/- {d_std:.4f}",
+        ci_lo_key: f"{ci_lo:.6f}" if not math.isnan(ci_lo) else "nan",
+        ci_hi_key: f"{ci_hi:.6f}" if not math.isnan(ci_hi) else "nan",
+        pval_key: f"{bpval:.4f}" if not math.isnan(bpval) else "nan",
+        sig_key: "yes" if (not math.isnan(bpval) and bpval < 0.05) else "no",
+    }
+
+
 def annotate_rows(
     rows: List[Dict[str, str]],
     baseline_index: Dict[Tuple[str, str], List[float]],
     n_boot: int = 10_000,
     metric_baseline_index: Optional[Dict[Tuple[str, str, str], List[float]]] = None,
     inv_metric: Optional[str] = None,
+    transformed_acc_baseline_index: Optional[Dict[Tuple[str, str, str], List[float]]] = None,
 ) -> List[Dict]:
     """Return new row dicts with p-value, bootstrap p-value, and CI columns added."""
     out = []
@@ -370,6 +483,9 @@ def annotate_rows(
 
         if inv_metric is not None and metric_baseline_index is not None:
             row.update(compute_delta_for_row(row, metric_baseline_index, inv_metric, n_boot=n_boot))
+
+        if transformed_acc_baseline_index is not None:
+            row.update(compute_delta_acc_transformed_for_row(row, transformed_acc_baseline_index, n_boot=n_boot))
 
         out.append(row)
     return out
@@ -637,6 +753,7 @@ def main() -> None:
     # Build a shared baseline index if an external baseline CSV is provided
     external_baseline: Optional[Dict[Tuple[str, str], List[float]]] = None
     external_metric_baseline: Optional[Dict[Tuple[str, str, str], List[float]]] = None
+    external_transformed_acc_baseline: Optional[Dict[Tuple[str, str, str], List[float]]] = None
     external_inv_metric: Optional[str] = None
     if args.baseline is not None:
         if not args.baseline.exists():
@@ -646,6 +763,7 @@ def main() -> None:
         external_inv_metric = args.inv_metric or _detect_inv_metric_suffix(baseline_rows_raw)
         if external_inv_metric is not None:
             external_metric_baseline = build_metric_baseline_index(baseline_rows_raw, external_inv_metric)
+        external_transformed_acc_baseline = build_transformed_acc_baseline_index(baseline_rows_raw)
         print(f"[baseline] Loaded {len(external_baseline)} baseline entries from {args.baseline}")
 
     for csv_path in args.csvs:
@@ -662,6 +780,7 @@ def main() -> None:
         # so they can be re-read and included in the output as reference rows.
         baseline_path = args.baseline
         inv_metric, metric_baseline_index = external_inv_metric, external_metric_baseline
+        transformed_acc_baseline_index = external_transformed_acc_baseline
 
         if external_baseline is not None:
             baseline_index = external_baseline
@@ -670,6 +789,7 @@ def main() -> None:
             if baseline_index:
                 inv_metric = args.inv_metric or _detect_inv_metric_suffix(rows)
                 metric_baseline_index = build_metric_baseline_index(rows, inv_metric) if inv_metric else None
+                transformed_acc_baseline_index = build_transformed_acc_baseline_index(rows)
             else:
                 # This table has no augmentation_scheme=none rows of its own
                 # (e.g. a lorentz-only results/px_py_pz_etarel_phirel/ table) —
@@ -683,6 +803,7 @@ def main() -> None:
                     metric_baseline_index = (
                         build_metric_baseline_index(baseline_rows_raw, inv_metric) if inv_metric else None
                     )
+                    transformed_acc_baseline_index = build_transformed_acc_baseline_index(baseline_rows_raw)
                     print(
                         f"[baseline] Auto-detected baseline for {csv_path}: "
                         f"{auto_baseline} ({len(baseline_index)} entries)"
@@ -697,6 +818,7 @@ def main() -> None:
         annotated = annotate_rows(
             rows, baseline_index, n_boot=args.n_boot,
             metric_baseline_index=metric_baseline_index, inv_metric=inv_metric,
+            transformed_acc_baseline_index=transformed_acc_baseline_index,
         )
 
         # When the baseline came from another file (explicit --baseline or
@@ -710,6 +832,7 @@ def main() -> None:
             baseline_annotated = annotate_rows(
                 baseline_rows, baseline_index, n_boot=args.n_boot,
                 metric_baseline_index=metric_baseline_index, inv_metric=inv_metric,
+                transformed_acc_baseline_index=transformed_acc_baseline_index,
             )
             annotated = baseline_annotated + annotated
 

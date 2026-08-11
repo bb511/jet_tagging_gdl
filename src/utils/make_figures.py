@@ -222,6 +222,16 @@ def _extract_entry(row: Dict[str, str], inv_metric: str) -> Dict[str, Optional[f
         "flops": _opt_float(row, "flops_mean"),
         "dW": _opt_float(row, f"delta_{inv_metric}_mean") if trained else None,
         "dWsd": _opt_float(row, f"delta_{inv_metric}_std") if trained else None,
+        # delta_accuracy_transformed_* comes from add_pvalues.py (proportion
+        # units) -- scale to pp to match dAcc/the plot's y-axis units.
+        "dAccTrans": (
+            _opt_float(row, "delta_accuracy_transformed_mean") * 100.0
+            if trained and _opt_float(row, "delta_accuracy_transformed_mean") is not None else None
+        ),
+        "dAccTransSd": (
+            _opt_float(row, "delta_accuracy_transformed_std") * 100.0
+            if trained and _opt_float(row, "delta_accuracy_transformed_std") is not None else None
+        ),
         # filled in by build_dataset() once the None-baseline entry for the
         # same (regime, model, n) is known: dAcc/dStab/dRec = group - baseline,
         # paired per fold (see _paired_delta)
@@ -322,6 +332,8 @@ def build_dataset(results_dir: Path, features: Optional[str] = None):
             entry_rec if entry_rec is not None else entry["recfolds"],
             base_rec if base_rec is not None else base["recfolds"],
         )
+        # dAccTrans/dAccTransSd are read directly from delta_accuracy_transformed_*
+        # (add_pvalues.py) in _extract_entry -- no need to recompute here.
 
     models = [m for m in MODEL_ORDER if m in models_seen] + sorted(models_seen - set(MODEL_ORDER))
     ns = sorted(ns_seen)
@@ -368,16 +380,18 @@ def _save(fig, out_dir: Path, name: str, missing: List[Tuple]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# per-regime figure: 3 stacked delta-bar rows (accuracy / invariance / self-
-# consistency) x one column per architecture. Every row is a diverging bar
-# chart against the None baseline, so bars can extend below zero -- higher is
-# always better here (more accurate, more invariant, more self-consistent).
+# per-regime figure: 4 stacked delta-bar rows (clean accuracy / transformed
+# accuracy / invariance / self-consistency) x one column per architecture.
+# Every row is a diverging bar chart against the None baseline, so bars can
+# extend below zero -- higher is always better here (more accurate, more
+# invariant, more self-consistent).
 # ---------------------------------------------------------------------------
 
-# (data key, std key, row label, y-axis label) for the 3 stacked delta-bar rows
+# (data key, std key, row label, y-axis label) for the stacked delta-bar rows
 def _row_specs(inv_metric: str):
     return [
-        ("dAcc", "dAccSd", "Accuracy", "$\\Delta$ accuracy (pp)"),
+        ("dAcc", "dAccSd", "Accuracy (clean)", "$\\Delta$ accuracy, clean (pp)"),
+        ("dAccTrans", "dAccTransSd", "Accuracy (transformed)", "$\\Delta$ accuracy, transformed (pp)"),
         ("dW", "dWsd", _metric_display(inv_metric), f"$\\Delta$ {_metric_display(inv_metric)}"),
         ("dStab", "dStabSd", "Self-consistency", "$\\Delta$ stable fraction $1-\\mathrm{FR}$"),
     ]
@@ -418,11 +432,16 @@ def fig_regime(D, models, ns, regime: str, out_dir: Path, inv_metric: str, featu
                     if entry is None or val is None:
                         missing.append((regime, mod, n, g, key))
                         continue
+                    err = entry.get(sdkey) or 0.0
                     xs.append(x[k] + off[g])
                     ys.append(val)
-                    es.append(entry.get(sdkey) or 0.0)
+                    es.append(err)
                     recs.append(entry.get("dRec"))
-                    row_vals.append(val)
+                    # ylim below is fit from row_vals -- include the error-bar
+                    # extent (not just the bar height) or whiskers on
+                    # high-variance bars get clipped at the axes edge.
+                    row_vals.append(val + err)
+                    row_vals.append(val - err)
                     if key == "dStab" and entry.get("dRec") is not None:
                         row_vals.append(entry["dRec"])
                 if xs:
