@@ -46,13 +46,20 @@ results/<features>/           <- results_table_*.csv, *_pvalues.csv, fig_*.svg p
 
 ## Setup
 
+**1. Install dependencies** — Python 3.11 venv (matches the `HYDRA` venv the SLURM launcher
+activates, see `configs/hydra/launcher/submitit_slurm_euler.yaml`):
+
 ```bash
-conda env create -f environment.yaml -n jet_tagging
-conda activate jet_tagging
-# or: pip install -r requirements.txt
+python3.11 -m venv HYDRA
+source HYDRA/bin/activate
+pip install -r requirements.txt
 ```
 
-Set the dataset path in `configs/data/hls4ml.yaml` (`data_dir`), or override on the CLI.
+(`requirements.txt` pins CUDA 12.6 PyTorch wheels — swap the `--extra-index-url` line at the top
+if your cluster needs a different CUDA version. Alternatively, `conda env create -f environment.yaml`.)
+
+**2. Set the dataset path** in `configs/data/hls4ml.yaml` (`data_dir`), or override on the CLI
+with `data.data_dir=...` / `$HLS4ML_DATA_DIR` as used in the SLURM scripts.
 
 ## Order of running things
 
