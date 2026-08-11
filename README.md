@@ -56,20 +56,37 @@ Set the dataset path in `configs/data/hls4ml.yaml` (`data_dir`), or override on 
 
 ## Order of running things
 
-**1. Train a model.** Pick one of the experiment configs (these set the model, `nconstituents`,
-training method, and symmetry group for you):
+**1. Train — submit jobs to SLURM.** Every run goes through Hydra's
+submitit launcher (`hydra/launcher=submitit_slurm_euler` or `..._clariden`), which submits an
+`sbatch` job and returns immediately — the `python src/train.py ...` call is just the *submission*
+command, the actual training happens later on a GPU node.
+
+Edit `scripts/run_euler_array.sh` (or `run_clariden_array.sh` on Clariden) to uncomment the
+experiment blocks you want — one block per model x `nconstituents` x symmetry group x method —
+then submit them all from a login node:
 
 ```bash
-python src/train.py experiment=baseline/hls4ml_nconst16_none model=deepsets_16
-python src/train.py experiment=augmentation/hls4ml_nconst16_aug_lorentz model=deepsets_16
-python src/train.py experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz model=deepsets_16
+bash scripts/run_euler_array.sh
 ```
 
-Any parameter can be overridden from the CLI, e.g. `data.features=[pt,etarel,phirel]`. To launch
-the full sweep (all models x all nconstituents x all groups x both methods) on a SLURM cluster,
-use `scripts/run_euler_array.sh` (or `run_clariden_array.sh`).
+Each block looks like this (model, `nconstituents`, features, and log dir change per run):
 
-Each run appends one row to `results/<features>/results_table_{baseline,augmentation,symm_loss}.csv`
+```bash
+python src/train.py -m \
+    hydra/launcher=submitit_slurm_euler \
+    experiment=symm_loss/hls4ml_symm_loss_nconst16_lorentz \
+    model=deepsets_16 \
+    trainer=gpu \
+    data.data_dir="$HLS4ML_DATA_DIR" \
+    hydra.sweep.dir="logs/slurm/pt_etarel_phirel/deepsets/symm_loss_lorentz_nconst16" \
+    hydra.job.name="symm_loss_lorentz_deepsets_nconst16"
+```
+
+SLURM settings (partition, GPUs, timeout, venv activation) live in
+`configs/hydra/launcher/submitit_slurm_euler.yaml`. Check queued/running jobs with
+`squeue -u $USER`.
+
+Each finished run appends one row to `results/<features>/results_table_{baseline,augmentation,symm_loss}.csv`
 (via `results_table_callback.py`), with per-fold accuracy and per-group invariance metrics
 (Wasserstein distance, stable fraction, recovery rate) already computed at test time.
 
