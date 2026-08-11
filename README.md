@@ -56,7 +56,7 @@ pip install -r requirements.txt
 ```
 
 (`requirements.txt` pins CUDA 12.6 PyTorch wheels — swap the `--extra-index-url` line at the top
-if your cluster needs a different CUDA version. Alternatively, `conda env create -f environment.yaml`.)
+if your cluster needs a different CUDA version.)
 
 **2. Set the dataset path** in `configs/data/hls4ml.yaml` (`data_dir`), or override on the CLI
 with `data.data_dir=...` / `$HLS4ML_DATA_DIR` as used in the SLURM scripts.
