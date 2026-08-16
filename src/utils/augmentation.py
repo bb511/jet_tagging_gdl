@@ -3,15 +3,22 @@
 Provides SO(2), SO(3) rotation and Lorentz-boost augmentation schemes
 applied to particle-level 4-vectors.  All functions operate on torch
 tensors and keep all computation on the input device (GPU or CPU).
+
+Sampling is torch-native throughout: there is a single implementation per
+group, used on whatever device ``x`` lives on. Matrices are built in float32
+and cast to the input dtype at the end.
+
+Note: transform sampling currently draws from the *global* torch RNG and is
+therefore not independently seedable. Making it reproducible means threading a
+device-matched ``torch.Generator`` through the three samplers below — a
+single-point change now that the duplicate numpy path is gone.
 """
 
 import math
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
-
-GeneratorLike = Union[np.random.Generator, torch.Generator]
 
 
 # ── Numeric helpers (torch) ──────────────────────────────────────────
@@ -70,25 +77,35 @@ def get_norm_scale(norm_scales: Optional[dict], name: str) -> float:
 # ── Rotation matrix generators (vectorized, torch) ──────────────────
 
 
-def create_so2_rot_matrices(
+def sample_so2_rot_matrices(
     nbr_rot: int,
-    rng: np.random.Generator,
+    min_angle: float = 0.0,
+    max_angle: float = 2.0 * math.pi,
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """Create *nbr_rot* random SO(2) rotation matrices (3×3) on *device*."""
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Sample *nbr_rot* SO(2) rotation matrices (3×3) about the beam (z) axis.
+
+    Returns ``(mats, thetas)``; angles are drawn uniformly on
+    ``[min_angle, max_angle)``.
+    """
     if nbr_rot <= 0:
-        return torch.empty((0, 3, 3), dtype=dtype, device=device)
-    thetas = torch.as_tensor(
-        rng.uniform(0.0, 2.0 * math.pi, nbr_rot), dtype=dtype, device=device
+        return (
+            torch.empty((0, 3, 3), dtype=dtype, device=device),
+            torch.empty((0,), dtype=dtype, device=device),
+        )
+    thetas = (
+        torch.rand(nbr_rot, device=device, dtype=torch.float32)
+        * (max_angle - min_angle)
+        + min_angle
     )
-    mats = torch.zeros(nbr_rot, 3, 3, dtype=dtype, device=device)
+    mats = torch.zeros(nbr_rot, 3, 3, dtype=torch.float32, device=device)
     mats[:, 0, 0] = torch.cos(thetas)
     mats[:, 0, 1] = -torch.sin(thetas)
     mats[:, 1, 0] = torch.sin(thetas)
     mats[:, 1, 1] = torch.cos(thetas)
     mats[:, 2, 2] = 1.0
-    return mats
+    return mats.to(dtype), thetas.to(dtype)
 
 
 def sample_haar_so3_rot_matrices(
@@ -123,17 +140,6 @@ def sample_haar_so3_rot_matrices(
     mats[:, 2, 1] = 2.0 * (yz + wx)
     mats[:, 2, 2] = 1.0 - 2.0 * (xx + yy)
     return mats.to(dtype)
-
-
-def create_so3_rot_matrices(
-    num_rotations: int,
-    rng: np.random.Generator,
-    device: torch.device = torch.device("cpu"),
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """Create *num_rotations* Haar-random SO(3) matrices on *device*."""
-    _ = rng
-    return sample_haar_so3_rot_matrices(num_rotations, device=device, dtype=dtype)
 
 
 # ── SO(3) physical acceptance filter ────────────────────────────────
@@ -189,16 +195,20 @@ def so3_jet_filter(
 # ── Lorentz boost generation (vectorized, torch) ────────────────────
 
 
-def create_lorentz_boosts(
+def sample_lorentz_boosts(
     nbr_rot: int,
     eta_max: float,
-    rng: np.random.Generator,
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
-    """Generate *nbr_rot* random Lorentz boost matrices (4×4) on *device*.
+    """Sample *nbr_rot* random Lorentz boost matrices (4×4) on *device*.
 
-    Fully vectorized — no Python loop over individual boosts.
+    The boost direction is isotropic in 3D and the rapidity is uniform on
+    ``[-eta_max, eta_max]``. Fully vectorized — no Python loop over boosts.
+
+    Note: an isotropic 3D boost is not a symmetry of a pp collision (only
+    longitudinal boosts along the beam are). This is a deliberate probe of a
+    *model* property, not a physical symmetry of the data.
     """
     if nbr_rot <= 0:
         return torch.empty((0, 4, 4), dtype=dtype, device=device)
@@ -206,9 +216,7 @@ def create_lorentz_boosts(
     direction = torch.randn(nbr_rot, 3, dtype=torch.float32, device=device)
     direction = direction / direction.norm(dim=1, keepdim=True).clamp(min=1e-8)
 
-    eta  = torch.as_tensor(
-        rng.uniform(-eta_max, eta_max, nbr_rot), dtype=torch.float32, device=device
-    )
+    eta   = (torch.rand(nbr_rot, dtype=torch.float32, device=device) * 2.0 - 1.0) * eta_max
     beta  = torch.tanh(eta).unsqueeze(1) * direction      # (B, 3)
     beta2 = (beta ** 2).sum(dim=1)                        # (B,)
     gamma = 1.0 / torch.sqrt((1.0 - beta2).clamp(min=1e-8))
@@ -225,26 +233,6 @@ def create_lorentz_boosts(
         L[near_zero] = torch.eye(4, dtype=torch.float32, device=device)
 
     return L.to(dtype)
-
-
-# ── RNG helpers ──────────────────────────────────────────────────────
-
-
-def _as_numpy_rng(generator: Optional[GeneratorLike] = None) -> np.random.Generator:
-    """Normalise RNG input to a numpy Generator."""
-    if generator is None:
-        return np.random.default_rng()
-    if isinstance(generator, np.random.Generator):
-        return generator
-    if isinstance(generator, torch.Generator):
-        seed = int(
-            torch.randint(low=0, high=2**31 - 1, size=(1,), generator=generator).item()
-        )
-        return np.random.default_rng(seed)
-    raise TypeError(
-        "generator must be None, np.random.Generator or torch.Generator, "
-        f"got {type(generator)}."
-    )
 
 
 def _require_feature_names(feature_names: Optional[Sequence[str]]) -> List[str]:
@@ -473,52 +461,35 @@ def apply_lorentz_batched(
 # ── Random online transforms (public entry points) ──────────────────
 #
 # Each jet in the batch receives an independently sampled transformation.
-# On CUDA, matrices are sampled directly on-device with torch's RNG (no
-# CPU round-trip). On CPU, matrices are sampled via the provided numpy
-# generator for reproducibility, then applied with the same batched einsum.
+# Matrices are sampled with torch on whatever device x lives on (no CPU
+# round-trip on GPU), then applied with a single batched einsum.
 
 
 def apply_random_so2(
     x: torch.Tensor,
     feature_names: Optional[Sequence[str]] = None,
-    px_index: int = 0,
-    py_index: int = 1,
     min_angle: float = 0.0,
     max_angle: float = 2.0 * math.pi,
-    generator: Optional[GeneratorLike] = None,
     norm_scales: Optional[dict] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Apply an independently sampled SO(2) rotation to each jet in the batch."""
+    """Apply an independently sampled SO(2) rotation to each jet in the batch.
+
+    Returns ``(x_rotated, thetas)``.
+    """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
-    _ = (px_index, py_index)
     names = _require_feature_names(feature_names)
-
-    if x.device.type == "cuda":
-        B = x.shape[0]
-        theta = torch.rand(B, device=x.device, dtype=x.dtype) * (max_angle - min_angle) + min_angle
-        mats = torch.zeros(B, 3, 3, device=x.device, dtype=x.dtype)
-        mats[:, 0, 0] =  torch.cos(theta)
-        mats[:, 0, 1] = -torch.sin(theta)
-        mats[:, 1, 0] =  torch.sin(theta)
-        mats[:, 1, 1] =  torch.cos(theta)
-        mats[:, 2, 2] = 1.0
-        return apply_so2_batched(x, mats, names, norm_scales), theta
-
-    rng = _as_numpy_rng(generator)
-    mats = create_so2_rot_matrices(x.shape[0], rng, device=x.device, dtype=x.dtype)
-    theta_t = torch.atan2(mats[:, 1, 0], mats[:, 0, 0])
-    return apply_so2_batched(x, mats, names, norm_scales), theta_t
+    mats, thetas = sample_so2_rot_matrices(
+        x.shape[0], min_angle=min_angle, max_angle=max_angle,
+        device=x.device, dtype=x.dtype,
+    )
+    return apply_so2_batched(x, mats, names, norm_scales), thetas
 
 
 def apply_random_so3(
     x: torch.Tensor,
     feature_names: Optional[Sequence[str]] = None,
-    px_index: int = 0,
-    py_index: int = 1,
-    pz_index: int = 2,
-    generator: Optional[GeneratorLike] = None,
     norm_scales: Optional[dict] = None,
     apply_filter: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -527,43 +498,32 @@ def apply_random_so3(
     When *apply_filter* is True, jets rotated outside detector acceptance
     (|ηrel| > 0.5, |φrel| > 0.5 in physical space) fall back to the original
     sample.
+
+    Returns ``(x_rotated, rotation_matrices)``.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
-    _ = (px_index, py_index, pz_index)
     names = _require_feature_names(feature_names)
-
-    if x.device.type == "cuda":
-        mats = sample_haar_so3_rot_matrices(x.shape[0], device=x.device, dtype=x.dtype)
-        return apply_so3_batched(x, mats, names, norm_scales, apply_filter), mats
-
-    rng = _as_numpy_rng(generator)
-    rot_mats = create_so3_rot_matrices(x.shape[0], rng, device=x.device, dtype=x.dtype)
-    return apply_so3_batched(x, rot_mats, names, norm_scales, apply_filter), rot_mats
+    mats = sample_haar_so3_rot_matrices(x.shape[0], device=x.device, dtype=x.dtype)
+    return apply_so3_batched(x, mats, names, norm_scales, apply_filter), mats
 
 
 def apply_random_lorentz(
     x: torch.Tensor,
     feature_names: Optional[Sequence[str]] = None,
-    e_index: Optional[int] = None,
-    px_index: int = 0,
-    py_index: int = 1,
-    pz_index: int = 2,
     eta_max: float = 2.0,
-    preserve_jet_phi: bool = False,
-    require_positive_energy: bool = True,
-    generator: Optional[GeneratorLike] = None,
     norm_scales: Optional[dict] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Apply an independently sampled Lorentz boost to each jet in the batch.
 
     No compensating rotation is applied — jet φ is left as the boost leaves it.
+
+    Returns ``(x_boosted, boost_matrices)``.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
-    _ = (e_index, px_index, py_index, pz_index, preserve_jet_phi, require_positive_energy)
     names = _require_feature_names(feature_names)
 
     if None in (
@@ -574,30 +534,7 @@ def apply_random_lorentz(
         print("Lorentz augmentation: missing required px/py/pz features. Returning unaugmented data.")
         return x.clone(), torch.empty((0, 4, 4), device=x.device, dtype=x.dtype)
 
-    if x.device.type == "cuda":
-        B = x.shape[0]
-        direction = torch.randn(B, 3, device=x.device, dtype=x.dtype)
-        direction = direction / direction.norm(dim=1, keepdim=True).clamp(min=1e-8)
-
-        eta   = (torch.rand(B, device=x.device, dtype=x.dtype) * 2.0 - 1.0) * eta_max
-        beta  = torch.tanh(eta).unsqueeze(1) * direction       # (B, 3)
-        beta2 = (beta ** 2).sum(dim=1)                         # (B,)
-        gamma = 1.0 / torch.sqrt((1.0 - beta2).clamp(min=1e-8))
-        gb    = (gamma - 1.0) / beta2.clamp(min=1e-12)
-
-        L = torch.eye(4, dtype=x.dtype, device=x.device).unsqueeze(0).expand(B, -1, -1).clone()
-        L[:, 0, 0]  = gamma
-        L[:, 0, 1:] = -gamma.unsqueeze(1) * beta
-        L[:, 1:, 0] = -gamma.unsqueeze(1) * beta
-        L[:, 1:, 1:] += gb.view(B, 1, 1) * torch.bmm(beta.unsqueeze(2), beta.unsqueeze(1))
-        near_zero = beta2 < 1e-12
-        if near_zero.any():
-            L[near_zero] = torch.eye(4, dtype=x.dtype, device=x.device)
-
-        return apply_lorentz_batched(x, L, names, norm_scales), L
-
-    rng = _as_numpy_rng(generator)
-    boosts = create_lorentz_boosts(x.shape[0], eta_max, rng, device=x.device, dtype=x.dtype)
+    boosts = sample_lorentz_boosts(x.shape[0], eta_max, device=x.device, dtype=x.dtype)
     return apply_lorentz_batched(x, boosts, names, norm_scales), boosts
 
 

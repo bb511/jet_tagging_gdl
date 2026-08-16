@@ -42,7 +42,10 @@ build/
 data/
 *.npz
 # *.csv
+
+# Ignore tex files
 *.tex
+*.bib
 
 # Ignore user-specific files
 *.swp

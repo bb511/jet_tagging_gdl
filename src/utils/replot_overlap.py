@@ -83,10 +83,10 @@ from src.utils.augmentation import (
     apply_so2_batched,
     apply_so3_batched,
     apply_lorentz_batched,
-    create_lorentz_boosts,
-    create_so2_rot_matrices,
-    create_so3_rot_matrices,
     feature_index,
+    sample_haar_so3_rot_matrices,
+    sample_lorentz_boosts,
+    sample_so2_rot_matrices,
 )
 
 
@@ -231,8 +231,8 @@ def main() -> None:
 
     # ---- Lorentz: plot both with and without SO(2) phi correction ----
     if args.scheme == "lorentz":
-        boosts = create_lorentz_boosts(
-            x_class.shape[0], args.eta_max, rng, device=x_class.device, dtype=x_class.dtype
+        boosts = sample_lorentz_boosts(
+            x_class.shape[0], args.eta_max, device=x_class.device, dtype=x_class.dtype
         )
 
         x_no_so2 = apply_lorentz_batched(x_class, boosts, feat_names, norm_scales)
@@ -249,7 +249,9 @@ def main() -> None:
 
     # ---- SO(2) ----
     elif args.scheme == "so2":
-        mats = create_so2_rot_matrices(x_class.shape[0], rng, device=x_class.device, dtype=x_class.dtype)
+        mats, _ = sample_so2_rot_matrices(
+            x_class.shape[0], device=x_class.device, dtype=x_class.dtype
+        )
         x_aug = apply_so2_batched(x_class, mats, feat_names, norm_scales)
         bounds_summary = _plot(
             x_orig=x_class,
@@ -263,7 +265,9 @@ def main() -> None:
 
     # ---- SO(3) ----
     elif args.scheme == "so3":
-        mats = create_so3_rot_matrices(x_class.shape[0], rng, device=x_class.device, dtype=x_class.dtype)
+        mats = sample_haar_so3_rot_matrices(
+            x_class.shape[0], device=x_class.device, dtype=x_class.dtype
+        )
         x_aug = apply_so3_batched(x_class, mats, feat_names, norm_scales)
         bounds_summary = _plot(
             x_orig=x_class,

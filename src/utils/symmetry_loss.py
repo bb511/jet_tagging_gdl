@@ -17,7 +17,6 @@ import torch
 import torch.nn.functional as F
 
 from src.utils.augmentation import (
-    GeneratorLike,
     apply_random_lorentz,
     apply_random_so2,
     apply_random_so3,
@@ -42,22 +41,17 @@ def build_symmetric_batch(
     x: torch.Tensor,
     group: str = "so2",
     feature_names: Optional[Sequence[str]] = None,
-    px_index: int = 0,
-    py_index: int = 1,
-    pz_index: int = 2,
-    e_index: Optional[int] = None,
     min_angle: float = 0.0,
     max_angle: float = 2.0 * math.pi,
     eta_max: float = 2.0,
-    preserve_jet_phi: bool = False,
-    require_positive_energy: bool = True,
-    generator: Optional[GeneratorLike] = None,
     norm_scales: Optional[dict] = None,
     apply_filter: bool = True,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     """Create transformed partners ``T(x)`` for symmetry regularization.
 
-    Each jet receives an independently sampled transformation.
+    Each jet receives an independently sampled transformation. Feature columns
+    are resolved by name from ``feature_names``, which must match the width of
+    ``x``.
 
     Returns:
         ``(x_transformed, transform_meta)``, where ``transform_meta`` is:
@@ -70,11 +64,8 @@ def build_symmetric_batch(
         return apply_random_so2(
             x=x,
             feature_names=feature_names,
-            px_index=px_index,
-            py_index=py_index,
             min_angle=min_angle,
             max_angle=max_angle,
-            generator=generator,
             norm_scales=norm_scales,
         )
 
@@ -82,10 +73,6 @@ def build_symmetric_batch(
         return apply_random_so3(
             x=x,
             feature_names=feature_names,
-            px_index=px_index,
-            py_index=py_index,
-            pz_index=pz_index,
-            generator=generator,
             norm_scales=norm_scales,
             apply_filter=apply_filter,
         )
@@ -94,14 +81,7 @@ def build_symmetric_batch(
         return apply_random_lorentz(
             x=x,
             feature_names=feature_names,
-            e_index=e_index,
-            px_index=px_index,
-            py_index=py_index,
-            pz_index=pz_index,
             eta_max=eta_max,
-            preserve_jet_phi=preserve_jet_phi,
-            require_positive_energy=require_positive_energy,
-            generator=generator,
             norm_scales=norm_scales,
         )
 

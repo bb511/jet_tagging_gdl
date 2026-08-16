@@ -515,17 +515,16 @@ class HLS4MLDataModule(LightningDataModule):
         output_indices = np.array(output_indices)
 
         def transform(x):  # x: (B, N, F_full) -> (B, N, len(self.features))
-            rng = np.random.default_rng()
             if scheme == "so2":
                 x, _ = apply_random_so2(x, feature_names=all_names,
-                                        generator=rng, norm_scales=norm_scales)
+                                        norm_scales=norm_scales)
             elif scheme == "so3":
                 x, _ = apply_random_so3(x, feature_names=all_names,
-                                        generator=rng, norm_scales=norm_scales,
+                                        norm_scales=norm_scales,
                                         apply_filter=True)
             elif scheme == "lorentz":
                 x, _ = apply_random_lorentz(x, feature_names=all_names,
-                                            eta_max=eta_max, generator=rng,
+                                            eta_max=eta_max,
                                             norm_scales=norm_scales)
             return x[:, :, output_indices]
 
@@ -557,17 +556,16 @@ class HLS4MLDataModule(LightningDataModule):
         def collate_fn(batch):
             x = torch.stack([b[0] for b in batch])
             y = torch.stack([b[1] for b in batch])
-            rng = np.random.default_rng() 
             if scheme == "so2":
                 x, _ = apply_random_so2(x, feature_names=active_names,
-                                        generator=rng, norm_scales=norm_scales)
+                                        norm_scales=norm_scales)
             elif scheme == "so3":
                 x, _ = apply_random_so3(x, feature_names=active_names,
-                                        generator=rng, norm_scales=norm_scales,
+                                        norm_scales=norm_scales,
                                         apply_filter=True)
             elif scheme == "lorentz":
                 x, _ = apply_random_lorentz(x, feature_names=active_names,
-                                            eta_max=eta_max, generator=rng,
+                                            eta_max=eta_max,
                                             norm_scales=norm_scales)
             return x, y
         return collate_fn
@@ -606,18 +604,17 @@ class HLS4MLDataModule(LightningDataModule):
         scheme   = self.augmentation_scheme
         if scheme == "so2":
             x_aug_t, _ = apply_random_so2(
-                x_tensor, feature_names=full_feat_names,
-                generator=rng_np, norm_scales=norm_scales,
+                x_tensor, feature_names=full_feat_names, norm_scales=norm_scales,
             )
         elif scheme == "so3":
             x_aug_t, _ = apply_random_so3(
                 x_tensor, feature_names=full_feat_names,
-                generator=rng_np, norm_scales=norm_scales, apply_filter=True,
+                norm_scales=norm_scales, apply_filter=True,
             )
         elif scheme == "lorentz":
             x_aug_t, _ = apply_random_lorentz(
                 x_tensor, feature_names=full_feat_names,
-                eta_max=self.lorentz_eta_max, generator=rng_np, norm_scales=norm_scales,
+                eta_max=self.lorentz_eta_max, norm_scales=norm_scales,
             )
         else:
             log.warning(f"[online aug plot] scheme '{scheme}' not plottable; skipping.")
