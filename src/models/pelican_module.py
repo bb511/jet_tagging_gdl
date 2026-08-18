@@ -12,7 +12,7 @@ from src.utils.flops import record_flops
 from torch.nn.functional import cross_entropy
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
-from src.utils.custom_loss import build_symmetric_batch, combine_with_symmetry_loss
+from src.utils.symmetry_loss import build_symmetric_batch, combine_with_symmetry_loss
 from ..utils.lorentz_metric import CATree, SDMultiplicity
 from .components.pelican_layers.generic_layers import BasicMLP, MessageNet, InputEncoder, GInvariants, MyLinear
 from .components.pelican_layers.perm_equiv_models import Net2to2, Eq1to2, Eq2to0

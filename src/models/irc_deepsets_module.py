@@ -8,7 +8,7 @@ from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 from src.utils.flops import record_flops
-from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
+from src.utils.symmetry_loss import combine_with_symmetry_loss, build_symmetric_batch
 from torch.nn.functional import cross_entropy
 import torch.nn as nn
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
