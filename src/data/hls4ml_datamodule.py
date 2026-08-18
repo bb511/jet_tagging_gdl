@@ -530,46 +530,6 @@ class HLS4MLDataModule(LightningDataModule):
 
         return transform
 
-    # ------------------------------------------------------------------
-    # Online Augmentation Trial (legacy collate-based path)
-    # ------------------------------------------------------------------
-    def _make_online_aug_collate(self):
-        scheme = self.augmentation_scheme
-        all_names = self.feature_names or []
-        eta_max   = self.lorentz_eta_max
-
-        # Canonical stored name for each selected feature (matches tensor column order)
-        active_names = []
-        for feat in self.features:
-            if feat in all_names:
-                active_names.append(feat)
-            elif f"j1_{feat}" in all_names:
-                active_names.append(f"j1_{feat}")
-            else:
-                active_names.append(feat)
-
-        norm_scales = (
-            {n: s for n, (_, s) in self.norm_params.items()}
-            if self.norm_params is not None else None
-        )
-
-        def collate_fn(batch):
-            x = torch.stack([b[0] for b in batch])
-            y = torch.stack([b[1] for b in batch])
-            if scheme == "so2":
-                x, _ = apply_random_so2(x, feature_names=active_names,
-                                        norm_scales=norm_scales)
-            elif scheme == "so3":
-                x, _ = apply_random_so3(x, feature_names=active_names,
-                                        norm_scales=norm_scales,
-                                        apply_filter=True)
-            elif scheme == "lorentz":
-                x, _ = apply_random_lorentz(x, feature_names=active_names,
-                                            eta_max=eta_max,
-                                            norm_scales=norm_scales)
-            return x, y
-        return collate_fn
-
     def _plot_online_aug_diagnostic(
         self,
         save_dir: str,
