@@ -348,9 +348,18 @@ class HLS4MLDataModule(LightningDataModule):
         x_val_norm   = self.apply_physics_norm(x_val_sorted,  self.feature_names, norm_params)
         self.norm_params = norm_params
 
-        if self.augmentation_scheme == "permute":
-            x_train_norm = permute_constituents(x_train_norm, self._rng)
-            x_val_norm   = permute_constituents(x_val_norm,   self._rng)
+        # DISABLED 2026-08-17 — permutation moved to the ONLINE per-batch path
+        # (see _make_batch_transform), so it is now resampled every batch like
+        # so2/so3/lorentz instead of being baked once into the .npy cache.
+        # The offline form had three problems: it was a single fixed permutation
+        # for the whole run (no augmentation diversity), it was frozen in the
+        # disk cache (prepare_data early-returns, so augmentation_seed had no
+        # effect on a re-run), and it was never applied to the test split —
+        # leaving an order-sensitive model trained on shuffled constituents but
+        # evaluated on pt-sorted ones. Kept here for reference.
+        # if self.augmentation_scheme == "permute":
+        #     x_train_norm = permute_constituents(x_train_norm, self._rng)
+        #     x_val_norm   = permute_constituents(x_val_norm,   self._rng)
 
         log.info(f"[{self.method}] train: {x_train_norm.shape}, val: {x_val_norm.shape}")
         self._save_processed_arrays(
@@ -526,6 +535,10 @@ class HLS4MLDataModule(LightningDataModule):
                 x, _ = apply_random_lorentz(x, feature_names=all_names,
                                             eta_max=eta_max,
                                             norm_scales=norm_scales)
+            elif scheme == "permute":
+                # Reorders the constituent axis only — feature-agnostic, so it
+                # needs no feature names, norm scales or physical arguments.
+                x = permute_constituents(x)
             return x[:, :, output_indices]
 
         return transform
@@ -781,7 +794,7 @@ class HLS4MLDataModule(LightningDataModule):
 
             transform = (
                 self._make_batch_transform()
-                if self.augmentation_scheme not in {"none", "permute"}
+                if self.augmentation_scheme != "none"
                 else None
             )
 

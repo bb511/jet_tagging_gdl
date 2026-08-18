@@ -542,12 +542,27 @@ def apply_random_lorentz(
 
 
 def permute_constituents(
-    x_data: torch.Tensor, rng: np.random.Generator
+    x_data: torch.Tensor, rng: Optional[np.random.Generator] = None
 ) -> torch.Tensor:
-    """Randomly permute constituent order within each jet."""
+    """Randomly permute constituent order within each jet.
+
+    With *rng* given, permutations are drawn from that numpy Generator (used by
+    ``InvarianceMetricCallback``, which owns a seeded one). With *rng=None* they
+    are drawn torch-natively on the input's device, matching how so2/so3/lorentz
+    sample -- this is the path used for online per-batch augmentation.
+    """
     n_jets, n_const = x_data.shape[:2]
-    rand_vals = torch.as_tensor(
-        rng.random((n_jets, n_const)), dtype=torch.float32, device=x_data.device
-    )
+    if rng is None:
+        rand_vals = torch.rand(n_jets, n_const, dtype=torch.float32)
+        if isinstance(x_data, torch.Tensor):
+            rand_vals = rand_vals.to(x_data.device)
+    else:
+        rand_vals = torch.as_tensor(
+            rng.random((n_jets, n_const)), dtype=torch.float32,
+            device=x_data.device if isinstance(x_data, torch.Tensor) else None,
+        )
     perms = torch.argsort(rand_vals, dim=1)
-    return x_data[torch.arange(n_jets, device=x_data.device)[:, None], perms]
+    idx = torch.arange(n_jets)[:, None]
+    if isinstance(x_data, torch.Tensor):
+        idx = idx.to(x_data.device)
+    return x_data[idx, perms]
