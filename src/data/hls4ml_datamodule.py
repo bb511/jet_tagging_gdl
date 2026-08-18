@@ -455,6 +455,24 @@ class HLS4MLDataModule(LightningDataModule):
     # Preprocessing helpers
     # ------------------------------------------------------------------
     def _restrict_and_sort_by_pt(self, x_data, pt_idx, nconstituents) -> np.ndarray:
+        """Keep the leading *nconstituents* by pT, in descending pT order.
+
+        The full constituent list is sorted **before** truncation, so the jets
+        kept are genuinely the highest-pT ones no matter what order they appear
+        in on disk. (Until 2026-08-17 this truncated first and sorted the
+        survivors, which only coincides with "leading-N by pT" if the H5
+        constituent list happens to already be pT-ordered.)
+
+        Jets with fewer than *nconstituents* entries are zero-padded; padded
+        rows have pT=0 and therefore sort to the end.
+        """
+        # Sort descending by pT over the FULL list. Negating and using a stable
+        # sort gives a deterministic order for equal-pT constituents (ties keep
+        # their on-disk order); `argsort(...)[::-1]` would instead reverse an
+        # unstable ascending sort, making tie order arbitrary run to run.
+        sort_idx = np.argsort(-x_data[:, :, pt_idx], axis=1, kind="stable")
+        x_data = np.take_along_axis(x_data, sort_idx[:, :, np.newaxis], axis=1)
+
         target = x_data.shape[1] if (nconstituents is None or nconstituents <= 0) else nconstituents
         if x_data.shape[1] < target:
             padding = np.zeros(
@@ -464,8 +482,7 @@ class HLS4MLDataModule(LightningDataModule):
             x_data = np.concatenate((x_data, padding), axis=1)
         else:
             x_data = x_data[:, :target, :]
-        sort_idx = np.argsort(x_data[:, :, pt_idx], axis=1)[:, ::-1]
-        return np.take_along_axis(x_data, sort_idx[:, :, np.newaxis], axis=1)
+        return x_data
 
     def fit_physics_norm(self, x_train, feature_names) -> Dict[str, Tuple[str, float]]:
         params: Dict[str, Tuple[str, float]] = {}
