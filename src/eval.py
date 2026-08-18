@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import hydra
+import lightning as L
 import rootutils
 import torch
 import omegaconf
@@ -39,7 +40,15 @@ def _eval_one_checkpoint(
     run_stage: str = "eval",
     shared_results_callback: Optional[ResultsTableCallback] = None,
 ) -> Dict[str, Any]:
-    """Run trainer.test for a single checkpoint and return callback_metrics."""
+    """Run trainer.test for a single checkpoint and return callback_metrics.
+
+    Re-seeds before every checkpoint so each fold sees the *same* sequence of
+    random test-time transforms. The invariance metrics then differ across folds
+    only because the models differ, not because the transform draws differ — and
+    re-evaluating a single fold reproduces the value it had in a full run.
+    """
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed, workers=True)
     log.info(f"[{fold_label}] Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
@@ -96,6 +105,18 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     :param cfg: DictConfig configuration composed by Hydra.
     :return: Tuple[dict, dict] with metrics and dict with all instantiated objects.
     """
+    # Seed before anything samples: the so2/so3/lorentz test-time transforms in
+    # InvarianceMetricCallback draw from the global torch RNG, so without this
+    # every eval run reports different invariance numbers for the same weights.
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed, workers=True)
+        log.info(f"Seeded evaluation with seed={cfg.seed}")
+    else:
+        log.warning(
+            "cfg.seed is None — test-time transforms will be drawn unseeded and "
+            "the reported invariance metrics will not be reproducible."
+        )
+
     manifest_path: Optional[str] = cfg.get("checkpoint_manifest_path")
 
     # ------------------------------------------------------------------

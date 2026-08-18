@@ -134,7 +134,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     :param cfg: A DictConfig configuration composed by Hydra.
     :return: A tuple with metrics and dict with all instantiated objects.
     """
-    if cfg.get("seed"):
+    if cfg.get("seed") is not None:
         L.seed_everything(cfg.seed, workers=True)
 
     # Training always runs fit-only (no in-train test) and emits a checkpoint
