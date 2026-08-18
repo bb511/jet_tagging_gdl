@@ -7,6 +7,7 @@ hidden_layers: [128, 64, 32]
 output_dim: 5
 activation: "relu"
 method: ${data.method}
+group: ${data.augmentation_scheme}
 batchnorm: false
 
 optimizer:

@@ -9,6 +9,7 @@ from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 from src.utils.flops import record_flops
+from src.utils.symmetry_loss import validate_symmetry_group
 from torch.nn.functional import cross_entropy
 from pytorch_lightning.utlities.memory import garbage_collection_cuda
 
@@ -228,6 +229,7 @@ class LorentzNetModule(LightningModule):
             )
         self.method = method
         self.group = group
+        validate_symmetry_group(method, group)
         self.nconstituents = nconstituents
 
         self.net = LorentzNet(

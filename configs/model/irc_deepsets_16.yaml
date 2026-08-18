@@ -2,9 +2,11 @@
 _target_: src.models.irc_deepsets_module.DeepSetsInvariantIRC
 
 nbr_feats: 5
+nconstituents: ${data.nconstituents}
 phi_layers: [64, 32, 32]
 rho_layers: [32, 16]
 method: ${data.method}
+group: ${data.augmentation_scheme}
 activation: "relu"
 aggregation: "sum"
 dropout: -1

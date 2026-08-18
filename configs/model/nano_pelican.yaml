@@ -1,4 +1,4 @@
-_target_: src.models.nano_pelican_module.PELICANNanoModule
+_target_: src.models.nano_pelican.PELICANModule
 
 # Architecture
 n_hidden: 32
@@ -22,6 +22,7 @@ batchnorm: "b"
 
 # Training
 method: ${data.method}
+group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 
 optimizer:

@@ -8,7 +8,7 @@ output_dim: 5
 activation: "groupsort2"   # 1-Lipschitz; hidden dims must be even
 k_coef_lip: 1.0            # global Lipschitz constant of the network
 method: ${data.method}
-group: so2
+group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 
 optimizer:

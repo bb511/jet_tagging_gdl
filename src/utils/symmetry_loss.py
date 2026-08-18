@@ -37,6 +37,29 @@ def get_and_reset_timings() -> dict[str, float]:
     return snapshot
 
 
+SUPPORTED_GROUPS = ("so2", "so3", "lorentz")
+
+
+def validate_symmetry_group(method: str, group: Optional[str]) -> None:
+    """Fail fast if a symm_loss run has no usable symmetry group.
+
+    ``model.group`` is interpolated from ``data.augmentation_scheme``, whose
+    domain also includes ``none`` and ``permute`` -- neither of which is a group
+    the SCL can transform with. Those values are legitimate for augmentation /
+    baseline / equivariance runs (where ``group`` is never read), so this only
+    rejects them for ``method="symm_loss"``, and does so at construction time
+    rather than at the first training step.
+    """
+    if method != "symm_loss":
+        return
+    if group is None or str(group).lower() not in SUPPORTED_GROUPS:
+        raise ValueError(
+            f"method='symm_loss' requires model.group in {list(SUPPORTED_GROUPS)}, got {group!r}. "
+            "group is interpolated from data.augmentation_scheme -- set that to so2/so3/lorentz "
+            "(e.g. data.augmentation_scheme=so3), or override model.group explicitly."
+        )
+
+
 def build_symmetric_batch(
     x: torch.Tensor,
     group: str = "so2",

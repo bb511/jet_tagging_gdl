@@ -2,10 +2,12 @@
 _target_: src.models.deepsets_module.DeepSetsInvariant
 
 nbr_feats: 5
+nconstituents: ${data.nconstituents}
 phi_layers: [64, 32, 32]
 rho_layers: [32, 16]
 activation: "relu"
 method: ${data.method}
+group: ${data.augmentation_scheme}
 aggregation: "mean"
 dropout: -1
 output_dim: 5

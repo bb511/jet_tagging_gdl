@@ -12,7 +12,7 @@ from src.utils.flops import record_flops
 
 import deel.torchlip as torchlip
 
-from src.utils.symmetry_loss import combine_with_symmetry_loss, build_symmetric_batch
+from src.utils.symmetry_loss import combine_with_symmetry_loss, build_symmetric_batch, validate_symmetry_group
 from torch.nn.functional import cross_entropy
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
@@ -132,6 +132,7 @@ class LipschitzMLPClassifier(LightningModule):
         self.method = method
         self.group = group
 
+        validate_symmetry_group(method, group)
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
 
         in_dim = nbr_feats * nconstituents

@@ -46,7 +46,7 @@ drop_rate: 0.25
 drop_rate_out: 0.1
 
 method: ${data.method}
-group: so2
+group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 
 optimizer:

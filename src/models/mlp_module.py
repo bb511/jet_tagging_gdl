@@ -12,7 +12,7 @@ from src.utils.flops import record_flops
 from torch.nn.functional import cross_entropy
 import torch.nn as nn
 
-from src.utils.symmetry_loss import combine_with_symmetry_loss, build_symmetric_batch
+from src.utils.symmetry_loss import combine_with_symmetry_loss, build_symmetric_batch, validate_symmetry_group
 from src.models.mlp import MLP
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
@@ -43,7 +43,7 @@ class MLPClassifier(LightningModule):
         optimizer: torch.optim.Optimizer = None,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
         compile: bool = False,
-        group: str = None,
+        group: str = "so2",
         symm_loss_weight: float = 0.1,
     ) -> None:
         super().__init__()
@@ -51,6 +51,8 @@ class MLPClassifier(LightningModule):
 
         self.group = group
 
+
+        validate_symmetry_group(method, group)
         # Validate method
         if method not in self.SUPPORTED_METHODS:
             raise ValueError(

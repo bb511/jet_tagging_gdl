@@ -11,7 +11,7 @@ nconstituents: ${data.nconstituents}
 
 # Training
 method: ${data.method}
-group: so2
+group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 
 optimizer:

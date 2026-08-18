@@ -39,7 +39,7 @@ build/
 *.egg-info/
 
 # Ignore data and scratch directories
-data/
+/data/
 *.npz
 # *.csv
 
