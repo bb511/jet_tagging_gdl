@@ -7,7 +7,7 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
-from torchinfo import summary as torchinfo_summary
+from src.utils.flops import record_flops
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 from torch.nn.functional import cross_entropy
 import torch.nn as nn
@@ -110,17 +110,9 @@ class Transformer(LightningModule):
         # sanity-check validation), persisted in checkpoints, and logged
         # to MLflow automatically via log_hyperparameters.
         # ----------------------------------------------------------------
-        stats = torchinfo_summary(
-            self,
-            input_data=self.example_input_array,
-            verbose=0,
-        )
-        mult_adds = float(stats.total_mult_adds)
-        total_flops = 2.0 * mult_adds
-        # Keep backwards compatibility (`flops`) but store explicit names too.
-        self.hparams["flops_mult_adds"] = mult_adds
-        self.hparams["flops_total"] = total_flops
-        self.hparams["flops"] = total_flops
+        # Per-jet forward FLOPs (scales with the constituent count; see
+        # src/utils/flops.py for the counting convention).
+        record_flops(self, nbr_const, nbr_feat)
 
     # ------------------------------------------------------------------
     # Forward

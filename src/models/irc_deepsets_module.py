@@ -7,7 +7,7 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
-from torchinfo import summary as torchinfo_summary
+from src.utils.flops import record_flops
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 from torch.nn.functional import cross_entropy
 import torch.nn as nn
@@ -51,6 +51,7 @@ class DeepSetsInvariantIRC(LightningModule):
     def __init__(
         self,
         nbr_feats: int,
+        nconstituents: int,
         phi_layers: list,
         rho_layers: list,
         activation: str,
@@ -85,7 +86,7 @@ class DeepSetsInvariantIRC(LightningModule):
         self.mask_enabled = mask
 
         # Full input shape for torchinfo / RichModelSummary
-        self.example_input_array = torch.randn(2, 32, nbr_feats)
+        self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
 
         # phi: takes (eta, phi) → always 2-dimensional input
         phi_blocks: list[nn.Module] = []
@@ -132,12 +133,9 @@ class DeepSetsInvariantIRC(LightningModule):
         self._eta_col = 1
         self._phi_col = 2
 
-        stats = torchinfo_summary(self, input_data=self.example_input_array, verbose=0)
-        mult_adds = float(stats.total_mult_adds)
-        total_flops = 2.0 * mult_adds
-        self.hparams["flops_mult_adds"] = mult_adds
-        self.hparams["flops_total"]     = total_flops
-        self.hparams["flops"]           = total_flops
+        # Per-jet forward FLOPs (scales with the constituent count; see
+        # src/utils/flops.py for the counting convention).
+        record_flops(self, nconstituents, nbr_feats)
 
     # ------------------------------------------------------------------
     # Forward — IRC-safe: phi sees only (eta, phi), weighted by pt fraction

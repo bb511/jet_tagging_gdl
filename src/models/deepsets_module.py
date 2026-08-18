@@ -8,7 +8,7 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
-from torchinfo import summary as torchinfo_summary
+from src.utils.flops import record_flops
 from src.utils.custom_loss import combine_with_symmetry_loss, build_symmetric_batch
 from src.utils.symmetry_loss import get_and_reset_timings
 from torch.nn.functional import cross_entropy
@@ -48,6 +48,7 @@ class DeepSetsInvariant(LightningModule):
     def __init__(
         self,
         nbr_feats: int,
+        nconstituents: int,
         phi_layers: list,
         rho_layers: list,
         activation: str,
@@ -78,7 +79,7 @@ class DeepSetsInvariant(LightningModule):
         self.nbr_feats    = nbr_feats
 
         # Example input for torchinfo and RichModelSummary
-        self.example_input_array = torch.randn(2, 32, nbr_feats)
+        self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
 
         # --- phi network (per-particle) ---
         phi_blocks: list[nn.Module] = []
@@ -126,17 +127,9 @@ class DeepSetsInvariant(LightningModule):
         # sanity-check validation), persisted in checkpoints, and logged
         # to MLflow automatically via log_hyperparameters.
         # ----------------------------------------------------------------
-        stats = torchinfo_summary(
-            self,
-            input_data=self.example_input_array,
-            verbose=0,
-        )
-        mult_adds = float(stats.total_mult_adds)
-        total_flops = 2.0 * mult_adds
-        # Keep backwards compatibility (`flops`) but store explicit names too.
-        self.hparams["flops_mult_adds"] = mult_adds
-        self.hparams["flops_total"] = total_flops
-        self.hparams["flops"] = total_flops
+        # Per-jet forward FLOPs (scales with the constituent count; see
+        # src/utils/flops.py for the counting convention).
+        record_flops(self, nconstituents, nbr_feats)
 
     # ------------------------------------------------------------------
     # Forward

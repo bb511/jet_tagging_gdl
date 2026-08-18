@@ -8,7 +8,7 @@ import torch.nn as nn
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
-from torchinfo import summary as torchinfo_summary
+from src.utils.flops import record_flops
 
 import deel.torchlip as torchlip
 
@@ -156,12 +156,9 @@ class LipschitzMLPClassifier(LightningModule):
         self.feature_names = None
         self.norm_scales   = None
 
-        stats = torchinfo_summary(self, input_data=self.example_input_array, verbose=0)
-        mult_adds = float(stats.total_mult_adds)
-        total_flops = 2.0 * mult_adds
-        self.hparams["flops_mult_adds"] = mult_adds
-        self.hparams["flops_total"]     = total_flops
-        self.hparams["flops"]           = total_flops
+        # Per-jet forward FLOPs (scales with the constituent count; see
+        # src/utils/flops.py for the counting convention).
+        record_flops(self, nconstituents, nbr_feats)
 
         logging.info(
             f"LipschitzMLPClassifier: in_dim={in_dim}, hidden={hidden_layers}, "
