@@ -8,16 +8,17 @@ on-device) using the same central pipeline as online training augmentation.
 Metrics are accumulated per batch and averaged at epoch end.
 
 Metrics per group:
-- Normalised L2
-- Cosine distance
-- Jensen-Shannon divergence
 - Flip rate
-- Orbit variance: E_x [ Var_g ( f(gx) ) ]
 - Wasserstein-1 distance between the *distributions* of f(x) and f(T(x))
-  (per class-logit channel, averaged over channels) — unlike the metrics
-  above, this is not a paired/pointwise comparison: it asks whether the
-  augmented test set's logit distribution matches the original's overall,
-  regardless of which jet produced which value.
+  (per class-logit channel, averaged over channels) — unlike flip rate,
+  this is not a paired/pointwise comparison: it asks whether the augmented
+  test set's logit distribution matches the original's overall, regardless
+  of which jet produced which value.
+
+Normalised L2, cosine distance, Jensen-Shannon divergence, and orbit
+variance (E_x [ Var_g ( f(gx) ) ]) are also implemented below but disabled
+at the call sites — only wasserstein + flip are reported. Search for
+"disabled" to re-enable.
 """
 
 import logging
@@ -101,47 +102,75 @@ class InvarianceMetricCallback(L.Callback):
     def _point_metrics(
         self, y_orig: torch.Tensor, y_aug: torch.Tensor
     ) -> Dict[str, float]:
-        """L2, cosine, JSD, flip between two batches of logits."""
-        diff_norm = (y_orig - y_aug).norm(dim=1)
-        base_norm = y_orig.norm(dim=1)
-        mean_norm = base_norm.mean().item()
-        l2_normed = 0.0 if mean_norm < 1e-12 else diff_norm.mean().item() / mean_norm
-
-        cos_dist = (1 - F.cosine_similarity(y_orig, y_aug, dim=1)).mean().item()
-
-        p = F.softmax(y_orig, dim=-1)
-        q = F.softmax(y_aug, dim=-1)
-        m_mix = 0.5 * (p + q)
-        eps = 1e-8
-        js = 0.5 * (
-            (p * (p.add(eps).log() - m_mix.add(eps).log())).sum(dim=1)
-            + (q * (q.add(eps).log() - m_mix.add(eps).log())).sum(dim=1)
-        ).clamp(min=0).mean().item()
+        """Flip rate between two batches of logits (L2/cosine/JSD disabled — only wasserstein + flip are reported)."""
+        # disabled — only wasserstein + flip are reported
+        # diff_norm = (y_orig - y_aug).norm(dim=1)
+        # base_norm = y_orig.norm(dim=1)
+        # mean_norm = base_norm.mean().item()
+        # l2_normed = 0.0 if mean_norm < 1e-12 else diff_norm.mean().item() / mean_norm
+        #
+        # cos_dist = (1 - F.cosine_similarity(y_orig, y_aug, dim=1)).mean().item()
+        #
+        # p = F.softmax(y_orig, dim=-1)
+        # q = F.softmax(y_aug, dim=-1)
+        # m_mix = 0.5 * (p + q)
+        # eps = 1e-8
+        # js = 0.5 * (
+        #     (p * (p.add(eps).log() - m_mix.add(eps).log())).sum(dim=1)
+        #     + (q * (q.add(eps).log() - m_mix.add(eps).log())).sum(dim=1)
+        # ).clamp(min=0).mean().item()
 
         flip_rate = (y_orig.argmax(dim=1) != y_aug.argmax(dim=1)).float().mean().item()
 
-        return {"l2": l2_normed, "cosine": cos_dist, "js": js, "flip": flip_rate}
+        return {"flip": flip_rate}
+        # return {"l2": l2_normed, "cosine": cos_dist, "js": js, "flip": flip_rate}
 
     @torch.no_grad()
     def _orbit_variance(
         self, pl_module: L.LightningModule, x: torch.Tensor, transform_fn
     ) -> float:
-        """E_x [ Var_g ( f(gx) ) ] estimated over orbit_variance_k draws."""
-        preds = []
-        for _ in range(self.orbit_variance_k):
-            y = F.normalize(pl_module(transform_fn(x)), dim=1)
-            preds.append(y)
-        preds = torch.stack(preds, dim=0)           # (K, B, C)
-        mean_g = preds.mean(dim=0, keepdim=True)
-        return ((preds - mean_g) ** 2).mean().item()
+        """E_x [ Var_g ( f(gx) ) ] estimated over orbit_variance_k draws.
+
+        ``transform_fn`` returns ``(x_t, keep_mask)``; for so3, a *different*
+        random subset of jets can be rejected on each of the K draws. Rather
+        than reverting rejected jets to x (which would make g(x) == x and
+        deflate the variance), predictions are scattered into a (K, B, C)
+        NaN-filled canvas by original jet index, and the variance is computed
+        only over jets that survived on all K draws.
+        """
+        preds = None
+        for k in range(self.orbit_variance_k):
+            x_t, keep_mask = transform_fn(x)
+            y = F.normalize(pl_module(x_t), dim=1)
+            if preds is None:
+                preds = torch.full(
+                    (self.orbit_variance_k, x.shape[0], y.shape[-1]),
+                    float("nan"), device=y.device, dtype=y.dtype,
+                )
+            if keep_mask is None:
+                preds[k] = y
+            else:
+                preds[k, keep_mask] = y
+
+        valid = ~torch.isnan(preds).any(dim=(0, 2))  # (B,) — kept on every draw
+        if not valid.any():
+            return float("nan")
+        preds_valid = preds[:, valid, :]
+        mean_g = preds_valid.mean(dim=0, keepdim=True)
+        return ((preds_valid - mean_g) ** 2).mean().item()
+
+    @staticmethod
+    def _so3_transform(t: torch.Tensor, names: List[str], ns: Optional[dict]):
+        """so3 transform_fn: drops (x, keep_mask), discarding the rotation matrices."""
+        x_t, _mats, keep_mask = apply_random_so3(t, feature_names=names, norm_scales=ns, apply_filter=True)
+        return x_t, keep_mask
 
     # ------------------------------------------------------------------
     # Test batch hook
     # ------------------------------------------------------------------
     @torch.no_grad()
     def on_test_batch_end(  # noqa: ARG002
-        self,
-        trainer: L.Trainer,
+        self,        trainer: L.Trainer,
         pl_module: L.LightningModule,
         outputs,
         batch,
@@ -174,33 +203,47 @@ class InvarianceMetricCallback(L.Callback):
             correct_before = (y_orig.argmax(dim=1) == y_true)
 
         transforms: Dict[str, object] = {
-            "so2":     lambda t: apply_random_so2(t, feature_names=names, norm_scales=ns)[0],
-            "so3":     lambda t: apply_random_so3(t, feature_names=names, norm_scales=ns, apply_filter=True)[0],
-            "lorentz": lambda t: apply_random_lorentz(t, feature_names=names, eta_max=self.lorentz_eta_max, norm_scales=ns)[0],
+            "so2":     lambda t: (apply_random_so2(t, feature_names=names, norm_scales=ns)[0], None),
+            "so3":     lambda t: self._so3_transform(t, names, ns),
+            "lorentz": lambda t: (apply_random_lorentz(t, feature_names=names, eta_max=self.lorentz_eta_max, norm_scales=ns)[0], None),
         }
         if self._dm_method == "equivariance":
-            transforms["permutation"] = lambda t: permute_constituents(t, self.rng)
+            transforms["permutation"] = lambda t: (permute_constituents(t, self.rng), None)
 
         for group, transform_fn in transforms.items():
-            x_aug = transform_fn(x)
+            x_aug, keep_mask = transform_fn(x)
             y_aug = pl_module(x_aug)
 
-            for k, v in self._point_metrics(y_orig, y_aug).items():
+            # so3 can reject jets and drop them from x_aug — subset y_orig/
+            # y_true/correct_before to the same surviving jets before pairing
+            # them against y_aug, instead of comparing against the full,
+            # unfiltered batch (which would silently compare mismatched jets).
+            y_orig_g = y_orig if keep_mask is None else y_orig[keep_mask]
+
+            for k, v in self._point_metrics(y_orig_g, y_aug).items():
                 self._batch_metrics.setdefault(f"invariance/{group}_{k}", []).append(v)
 
-            ov = self._orbit_variance(pl_module, x, transform_fn)
-            self._batch_metrics.setdefault(f"invariance/{group}_orbit_var", []).append(ov)
+            if keep_mask is not None:
+                reject_frac = 1.0 - keep_mask.float().mean().item()
+                self._batch_metrics.setdefault(f"invariance/{group}_reject_frac", []).append(reject_frac)
+
+            # disabled — only wasserstein + flip are reported (also saves the
+            # extra orbit_variance_k forward passes per group per batch)
+            # ov = self._orbit_variance(pl_module, x, transform_fn)
+            # self._batch_metrics.setdefault(f"invariance/{group}_orbit_var", []).append(ov)
 
             if self.compute_flip_breakdown:
-                correct_after = (y_aug.argmax(dim=1) == y_true)
-                wrong_before = ~correct_before
+                y_true_g = y_true if keep_mask is None else y_true[keep_mask]
+                correct_before_g = correct_before if keep_mask is None else correct_before[keep_mask]
+                correct_after = (y_aug.argmax(dim=1) == y_true_g)
+                wrong_before = ~correct_before_g
                 c = self._flip_counts.setdefault(
                     group, {"wrong_before": 0, "recovered": 0, "correct_before": 0, "stable": 0}
                 )
                 c["wrong_before"] += int(wrong_before.sum().item())
                 c["recovered"] += int((wrong_before & correct_after).sum().item())
-                c["correct_before"] += int(correct_before.sum().item())
-                c["stable"] += int((correct_before & correct_after).sum().item())
+                c["correct_before"] += int(correct_before_g.sum().item())
+                c["stable"] += int((correct_before_g & correct_after).sum().item())
 
             if self.compute_wasserstein:
                 self._aug_logits.setdefault(group, []).append(y_aug.detach().cpu())
