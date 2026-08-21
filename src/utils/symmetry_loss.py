@@ -69,7 +69,7 @@ def build_symmetric_batch(
     eta_max: float = 2.0,
     norm_scales: Optional[dict] = None,
     apply_filter: bool = True,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
     """Create transformed partners ``T(x)`` for symmetry regularization.
 
     Each jet receives an independently sampled transformation. Feature columns
@@ -77,20 +77,29 @@ def build_symmetric_batch(
     ``x``.
 
     Returns:
-        ``(x_transformed, transform_meta)``, where ``transform_meta`` is:
+        ``(x_transformed, transform_meta, keep_mask)``, where ``transform_meta`` is:
         - SO(2): sampled angle tensor
-        - SO(3): rotation matrices
+        - SO(3): rotation matrices (already subset to the kept jets)
         - Lorentz: boost matrices
+
+        ``keep_mask`` is ``None`` for SO(2)/Lorentz (no jets are ever
+        dropped). For SO(3), it has length equal to the *input* batch size
+        and marks which jets survived the detector-acceptance filter —
+        rejected jets are dropped from ``x_transformed`` entirely rather
+        than reverted to their pre-transform values, so the caller must use
+        ``keep_mask`` to subset the original batch's logits/labels before
+        comparing them against ``x_transformed``'s outputs.
     """
     g = group.lower()
     if g == "so2":
-        return apply_random_so2(
+        x_t, meta = apply_random_so2(
             x=x,
             feature_names=feature_names,
             min_angle=min_angle,
             max_angle=max_angle,
             norm_scales=norm_scales,
         )
+        return x_t, meta, None
 
     if g == "so3":
         return apply_random_so3(
@@ -101,12 +110,13 @@ def build_symmetric_batch(
         )
 
     if g == "lorentz":
-        return apply_random_lorentz(
+        x_t, meta = apply_random_lorentz(
             x=x,
             feature_names=feature_names,
             eta_max=eta_max,
             norm_scales=norm_scales,
         )
+        return x_t, meta, None
 
     raise NotImplementedError(
         f"Group '{group}' is not implemented. Choose one of ['so2', 'so3', 'lorentz']."

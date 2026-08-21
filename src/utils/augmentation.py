@@ -146,48 +146,30 @@ def sample_haar_so3_rot_matrices(
 
 
 def so3_jet_filter(
-    x_aug: torch.Tensor,
-    feature_names: List[str],
+    pt: torch.Tensor,
+    eta: torch.Tensor,
+    etarel: torch.Tensor,
+    phirel: torch.Tensor,
+    active: torch.Tensor,
     pt_max: float = 1600.0,
     eta_max: float = 3.0,
     etarel_max: float = 0.5,
     phirel_max: float = 0.5,
-    norm_scales: Optional[dict] = None,
 ) -> torch.Tensor:
-    """Return boolean mask (N,) of jets passing SO(3) detector-acceptance cuts."""
-    px_idx     = feature_index(feature_names, "j1_px",     "px")
-    py_idx     = feature_index(feature_names, "j1_py",     "py")
-    pt_idx     = feature_index(feature_names, "j1_pt",     "pt")
-    eta_idx    = feature_index(feature_names, "j1_eta",    "eta")
-    etarel_idx = feature_index(feature_names, "j1_etarel", "etarel")
-    phirel_idx = feature_index(feature_names, "j1_phirel", "phirel")
+    """Return boolean mask (B,) of jets whose constituents all pass SO(3)
+    detector-acceptance cuts.
 
-    n_feats = x_aug.shape[2]
-
-    if pt_idx is not None and pt_idx < n_feats:
-        active = x_aug[:, :, pt_idx] > 0
-    elif px_idx is not None and py_idx is not None:
-        active = (x_aug[:, :, px_idx] ** 2 + x_aug[:, :, py_idx] ** 2) > 0
-    else:
-        active = torch.ones(x_aug.shape[:2], dtype=torch.bool, device=x_aug.device)
-
-    _etarel_max = etarel_max / get_norm_scale(norm_scales, "etarel")
-    _phirel_max = phirel_max / get_norm_scale(norm_scales, "phirel")
-
-    ok = torch.ones(x_aug.shape[:2], dtype=torch.bool, device=x_aug.device)
-    if pt_idx is not None and pt_idx < n_feats:
-        pt = x_aug[:, :, pt_idx]
-        ok &= (pt >= 0) & (pt <= pt_max)
-    if eta_idx is not None and eta_idx < n_feats:
-        eta = x_aug[:, :, eta_idx]
-        ok &= (eta >= -eta_max) & (eta <= eta_max)
-    if etarel_idx is not None and etarel_idx < n_feats:
-        etarel = x_aug[:, :, etarel_idx]
-        ok &= (etarel >= -_etarel_max) & (etarel <= _etarel_max)
-    if phirel_idx is not None and phirel_idx < n_feats:
-        phirel = x_aug[:, :, phirel_idx]
-        ok &= (phirel >= -_phirel_max) & (phirel <= _phirel_max)
-
+    ``pt``, ``eta``, ``etarel``, ``phirel`` and the ``*_max`` thresholds must
+    all be in the same (physical, un-normalised) units — call this *before*
+    normalisation is applied, not after, so the thresholds never need
+    rescaling by a norm scale.
+    """
+    ok = (
+        (pt >= 0) & (pt <= pt_max)
+        & (eta >= -eta_max) & (eta <= eta_max)
+        & (etarel >= -etarel_max) & (etarel <= etarel_max)
+        & (phirel >= -phirel_max) & (phirel <= phirel_max)
+    )
     constituent_ok = ~active | ok
     return constituent_ok.all(dim=1)
 
@@ -301,8 +283,17 @@ def apply_so3_batched(
     feature_names: List[str],
     norm_scales: Optional[dict] = None,
     apply_filter: bool = True,
-) -> torch.Tensor:
-    """Apply a different SO(3) rotation to each jet. mats: (B, 3, 3), x: (B, C, F)."""
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Apply a different SO(3) rotation to each jet. mats: (B, 3, 3), x: (B, C, F).
+
+    Returns ``(x_new, keep_mask)``. When *apply_filter* is True, jets rotated
+    outside detector acceptance are dropped from the batch entirely, rather
+    than reverted to their pre-rotation values — reverting would make
+    T(x) == x for those jets and silently deflate any invariance metric
+    computed against the augmented batch. ``keep_mask`` has length equal to
+    the *input* batch size, so the caller can subset any tensor aligned with
+    the input batch (labels, ...) the same way.
+    """
     px_idx      = feature_index(feature_names, "j1_px",     "px")
     py_idx      = feature_index(feature_names, "j1_py",     "py")
     pz_idx      = feature_index(feature_names, "j1_pz",     "pz")
@@ -314,7 +305,7 @@ def apply_so3_batched(
     delta_r_idx = feature_index(feature_names, "j1_deltaR", "deltaR")
     ptrel_idx   = feature_index(feature_names, "j1_ptrel",  "ptrel")
     if None in (px_idx, py_idx, pz_idx):
-        return x.clone()
+        return x.clone(), torch.ones(x.shape[0], dtype=torch.bool, device=x.device)
 
     s_px = get_norm_scale(norm_scales, "px")
     s_py = get_norm_scale(norm_scales, "py")
@@ -349,6 +340,15 @@ def apply_so3_batched(
     delta_r = torch.sqrt(eta_rel ** 2 + phi_rel ** 2)
     pt_rel  = pt_r / jet_pt.clamp(min=1e-8)
 
+    # Acceptance filter runs on the PHYSICAL (pre-normalisation) quantities
+    # computed above, so its pt_max/eta_max/etarel_max/phirel_max thresholds
+    # are always compared against values in the same physical units they're
+    # defined in — no norm-scale rescaling needed or possible to get wrong.
+    if apply_filter:
+        keep_mask = so3_jet_filter(pt_r, eta_r, eta_rel, phi_rel, active=pad_mask)
+    else:
+        keep_mask = torch.ones(x.shape[0], dtype=torch.bool, device=x.device)
+
     x_new = x.clone()
     for idx, arr, feat in zip(
         [px_idx, py_idx, pz_idx, pt_idx, eta_idx, phi_idx,
@@ -365,12 +365,7 @@ def apply_so3_batched(
                 x[:, :, idx],
             )
 
-    if apply_filter:
-        ok = so3_jet_filter(x_new, feature_names, norm_scales=norm_scales)  # (B,)
-        failed = ~ok
-        if failed.any():
-            x_new[failed] = x[failed]
-    return x_new
+    return x_new[keep_mask], keep_mask
 
 
 def apply_lorentz_batched(
@@ -492,21 +487,25 @@ def apply_random_so3(
     feature_names: Optional[Sequence[str]] = None,
     norm_scales: Optional[dict] = None,
     apply_filter: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Apply an independently sampled Haar-random SO(3) rotation to each jet.
 
     When *apply_filter* is True, jets rotated outside detector acceptance
-    (|ηrel| > 0.5, |φrel| > 0.5 in physical space) fall back to the original
-    sample.
+    (physical pt/eta/etarel/phirel bounds — see ``so3_jet_filter``) are
+    dropped from the batch rather than reverted to their pre-rotation values.
 
-    Returns ``(x_rotated, rotation_matrices)``.
+    Returns ``(x_rotated, rotation_matrices, keep_mask)``. ``x_rotated`` and
+    ``rotation_matrices`` are already subset to the surviving jets;
+    ``keep_mask`` has length equal to the *input* batch size, so the caller
+    can subset any other batch-aligned tensor (labels, ...) the same way.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
 
     names = _require_feature_names(feature_names)
     mats = sample_haar_so3_rot_matrices(x.shape[0], device=x.device, dtype=x.dtype)
-    return apply_so3_batched(x, mats, names, norm_scales, apply_filter), mats
+    x_new, keep_mask = apply_so3_batched(x, mats, names, norm_scales, apply_filter)
+    return x_new, mats[keep_mask], keep_mask
 
 
 def apply_random_lorentz(

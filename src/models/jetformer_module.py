@@ -151,7 +151,7 @@ class JetFormer(LightningModule):
             # compute the transform. forward() reduces to the model's own
             # input features internally — same separation as the online
             # augmentation transform uses.
-            x_sym, _ = build_symmetric_batch(
+            x_sym, _, keep_mask = build_symmetric_batch(
                 x,
                 group=self.group,
                 feature_names=self.feature_names,
@@ -160,9 +160,13 @@ class JetFormer(LightningModule):
 
             logits     = self.forward(x)
             logits_sym = self.forward(x_sym)
+            # keep_mask is set only for so3, which can drop jets rotated
+            # outside detector acceptance — subset logits to the same
+            # surviving jets before comparing against logits_sym.
+            logits_for_sym = logits if keep_mask is None else logits[keep_mask]
             cls_loss   = cross_entropy(logits, y)
             loss, _    = self.criterion(
-                cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
+                cls_loss, logits_for_sym, logits_sym, weight=self.hparams.symm_loss_weight
             )
 
         else:

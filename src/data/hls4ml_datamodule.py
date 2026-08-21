@@ -540,14 +540,18 @@ class HLS4MLDataModule(LightningDataModule):
                 )
         output_indices = np.array(output_indices)
 
-        def transform(x):  # x: (B, N, F_full) -> (B, N, len(self.features))
+        def transform(x):  # x: (B, N, F_full) -> (x_reduced, keep_mask)
+            keep_mask = None
             if scheme == "so2":
                 x, _ = apply_random_so2(x, feature_names=all_names,
                                         norm_scales=norm_scales)
             elif scheme == "so3":
-                x, _ = apply_random_so3(x, feature_names=all_names,
-                                        norm_scales=norm_scales,
-                                        apply_filter=True)
+                # so3 can reject jets rotated outside detector acceptance —
+                # keep_mask marks which of the input batch's jets survive, so
+                # HLS4MLDataset.__iter__ can drop the matching labels too.
+                x, _, keep_mask = apply_random_so3(x, feature_names=all_names,
+                                                    norm_scales=norm_scales,
+                                                    apply_filter=True)
             elif scheme == "lorentz":
                 x, _ = apply_random_lorentz(x, feature_names=all_names,
                                             eta_max=eta_max,
@@ -556,7 +560,7 @@ class HLS4MLDataModule(LightningDataModule):
                 # Reorders the constituent axis only — feature-agnostic, so it
                 # needs no feature names, norm scales or physical arguments.
                 x = permute_constituents(x)
-            return x[:, :, output_indices]
+            return x[:, :, output_indices], keep_mask
 
         return transform
 
@@ -590,14 +594,19 @@ class HLS4MLDataModule(LightningDataModule):
         y_sample  = y_full[idx]
 
         # Apply augmentation on the full feature set
-        x_tensor = torch.from_numpy(x_sample).float()
-        scheme   = self.augmentation_scheme
+        x_tensor  = torch.from_numpy(x_sample).float()
+        scheme    = self.augmentation_scheme
+        keep_mask = None
         if scheme == "so2":
             x_aug_t, _ = apply_random_so2(
                 x_tensor, feature_names=full_feat_names, norm_scales=norm_scales,
             )
         elif scheme == "so3":
-            x_aug_t, _ = apply_random_so3(
+            # so3 can reject jets and drop them from the batch — keep_mask
+            # tells us which of x_sample/y_sample's rows survived, so we can
+            # align them with x_aug_t's (now possibly smaller) row count
+            # before slicing both down to a single class below.
+            x_aug_t, _, keep_mask = apply_random_so3(
                 x_tensor, feature_names=full_feat_names,
                 norm_scales=norm_scales, apply_filter=True,
             )
@@ -612,9 +621,14 @@ class HLS4MLDataModule(LightningDataModule):
 
         x_orig = x_sample
         x_aug  = x_aug_t.numpy()
+        y_ref  = y_sample
+        if keep_mask is not None:
+            keep_np = keep_mask.numpy()
+            x_orig  = x_orig[keep_np]
+            y_ref   = y_ref[keep_np]
 
         # Filter to one class
-        class_ids = np.argmax(y_sample, axis=1) if y_sample.ndim > 1 else y_sample.astype(int)
+        class_ids = np.argmax(y_ref, axis=1) if y_ref.ndim > 1 else y_ref.astype(int)
         mask   = class_ids == class_idx
         x_orig = x_orig[mask]
         x_aug  = x_aug[mask]
@@ -831,7 +845,7 @@ class HLS4MLDataModule(LightningDataModule):
                 )
 
             shuffler = torch.Generator()
-            shuffler.manual_seed(torch.seed())
+            shuffler.manual_seed(torch.initial_seed())
             self.data_train = HLS4MLDataset(
                 torch.from_numpy(x_train).float(),
                 torch.from_numpy(y_train).float(),

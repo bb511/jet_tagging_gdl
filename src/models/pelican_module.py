@@ -550,7 +550,7 @@ class PELICANModule(LightningModule):
                     "feature_names is None — symm_loss requires feature_names. "
                     "Ensure setup() has been called so the datamodule populates it."
                 )
-            x_sym, _ = build_symmetric_batch(
+            x_sym, _, keep_mask = build_symmetric_batch(
                 x,
                 group=self.group,
                 feature_names=self.feature_names,
@@ -558,9 +558,15 @@ class PELICANModule(LightningModule):
             )
             logits_sym = self.forward(x_sym)
 
+            # keep_mask is set only for so3, which can drop jets rotated
+            # outside detector acceptance — subset the original logits to
+            # the same surviving jets so the symmetry term compares like
+            # with like (classification loss still uses the full batch).
+            logits_for_sym = logits if keep_mask is None else logits[keep_mask]
+
             cls_loss = cross_entropy(logits, y)
             loss, _  = self.criterion(
-                cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
+                cls_loss, logits_for_sym, logits_sym, weight=self.hparams.symm_loss_weight
             )
         else:
             # augmentation / equivariance — plain cross-entropy

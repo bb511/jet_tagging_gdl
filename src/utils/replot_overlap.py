@@ -268,7 +268,7 @@ def main() -> None:
         mats = sample_haar_so3_rot_matrices(
             x_class.shape[0], device=x_class.device, dtype=x_class.dtype
         )
-        x_aug = apply_so3_batched(x_class, mats, feat_names, norm_scales)
+        x_aug, _ = apply_so3_batched(x_class, mats, feat_names, norm_scales)
         bounds_summary = _plot(
             x_orig=x_class,
             augmented={"SO(3) augmented": x_aug},

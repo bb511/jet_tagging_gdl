@@ -152,7 +152,7 @@ class MLPClassifier(LightningModule):
                     "feature_names are available before training starts."
                 )
             t_tr0 = time.perf_counter()
-            x_sym, _ = build_symmetric_batch(
+            x_sym, _, keep_mask = build_symmetric_batch(
                 x,
                 group=self.group,
                 feature_names=self.feature_names,
@@ -163,9 +163,13 @@ class MLPClassifier(LightningModule):
             t_fwd2 = time.perf_counter()
             logits_sym = self.forward(x_sym)
             t_fwd3 = time.perf_counter()
+            # keep_mask is set only for so3, which can drop jets rotated
+            # outside detector acceptance — subset logits to the same
+            # surviving jets before comparing against logits_sym.
+            logits_for_sym = logits if keep_mask is None else logits[keep_mask]
             cls_loss = cross_entropy(logits, y)
             loss, _ = self.criterion(
-                cls_loss, logits, logits_sym, weight=self.hparams.symm_loss_weight
+                cls_loss, logits_for_sym, logits_sym, weight=self.hparams.symm_loss_weight
             )
 
             if self.training and hasattr(self, "_timing_steps"):

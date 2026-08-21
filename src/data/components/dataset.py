@@ -51,7 +51,10 @@ class HLS4MLDataset(IterableDataset):
                 break
             idx = perm[i * self.batch_size : (i + 1) * self.batch_size]
             x = self.X[idx]
+            y = self.y[idx]
             if self.transform is not None:
-                x = self.transform(x)
-            yield x, self.y[idx]
+                x, keep_mask = self.transform(x)
+                if keep_mask is not None:
+                    y = y[keep_mask]
+            yield x, y
             nb += 1
