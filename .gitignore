@@ -1,5 +1,6 @@
-# Ignore vscode
+# Ignore IDEs
 .vscode/
+.sublime/
 
 # Ignore Python cache and compiled files
 __pycache__/
