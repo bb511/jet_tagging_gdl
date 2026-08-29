@@ -61,6 +61,49 @@ if your cluster needs a different CUDA version.)
 **2. Set the dataset path** in `configs/data/hls4ml.yaml` (`data_dir`), or override on the CLI
 with `data.data_dir=...` / `$HLS4ML_DATA_DIR` as used in the SLURM scripts.
 
+## Data
+
+The [hls4ml LHC jet dataset](https://doi.org/10.5281/zenodo.3602260) (150 particles per jet),
+Zenodo record 3602260, CC-BY-4.0. Two routes read it and end at the same tensors, with one
+known exception: the legacy route normalises its test split with the scales as they come back
+off `norm_params.npz` (rounded to float32), the record with the scales as fitted, so the test
+`x` tensors differ by one float32 ulp in some entries (max |diff| 1.2e-7). Pick a route with
+the `data=` group.
+
+**`data=hls4ml` (legacy).** Downloads the two Zenodo tarballs into `data.data_dir`, reads the
+`jetImage_*_150p_*.h5` files, and caches the pT-sorted, normalised arrays under
+`<data_dir>/processed/`:
+
+```bash
+python src/train.py data=hls4ml data.data_dir="$HLS4ML_DATA_DIR"
+```
+
+**`data=hls4ml_hf` (published record).** Reads `fastmachinelearning/hls4ml_lhc_jets_150p` through the loader
+shipped inside the record, so it needs no data path. Point `HF_HUB_CACHE` at somewhere with room:
+the first run downloads the record (a few GB) and builds its caches under `data/hf/`, later runs
+reuse both.
+
+```bash
+export HF_HUB_CACHE=/scratch/$USER/hf_cache
+python src/train.py data=hls4ml_hf
+```
+
+Setting `data.repo_id` to a local directory reads a mirror of the record without going through
+the hub, and `data.revision` pins a record revision.
+
+**Parity.** `scripts/analysis/check_hf_parity.py` surveys both routes in separate child processes
+and compares the train/val/test `x` and `y` tensors by sha256 over shape, dtype and bytes, along
+with `feature_names`, `norm_params` and the split sizes, for three configurations (single split,
+5-fold, `symm_loss`). It also prints the wall clock and peak RSS of each route.
+
+```bash
+python scripts/analysis/check_hf_parity.py \
+    --legacy-dir "$HLS4ML_DATA_DIR" \
+    --repo fastmachinelearning/hls4ml_lhc_jets_150p \
+    --hf-cache data/hf \
+    --work /tmp/parity_work
+```
+
 ## Order of running things
 
 **1. Train — submit jobs to SLURM.** Every run goes through Hydra's
