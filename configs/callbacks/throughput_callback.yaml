@@ -1,2 +1,0 @@
-throughput_callback:
-  _target_: src.callbacks.throughput_callback.ThroughputCallback

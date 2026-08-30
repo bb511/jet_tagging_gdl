@@ -1,5 +1,8 @@
-from typing import Any, Dict
+# Choose what of a run's config and of the fitted algorithm reaches the loggers.
 
+from typing import Any
+
+from lightning import LightningModule
 from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf
 
@@ -9,59 +12,58 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
 @rank_zero_only
-def log_hyperparameters(object_dict: Dict[str, Any]) -> None:
-    """Controls which config parts are saved by Lightning loggers.
+def log_hyperparameters(object_dict: dict[str, Any]) -> None:
+    """Send the config, the parameter counts and the FLOP count to every attached logger.
 
-    Additionally saves:
-        - Number of model parameters
-
-    :param object_dict: A dictionary containing the following objects:
-        - `"cfg"`: A DictConfig object containing the main config.
-        - `"model"`: The Lightning model.
-        - `"trainer"`: The Lightning trainer.
+    :param object_dict: holds ``cfg`` (the composed config), ``algorithm`` (the LightningModule),
+        ``trainer``, and optionally ``fold_idx`` and ``run_stage``, which name the fold and the
+        pass this run belongs to and exist only at runtime.
     """
-    hparams = {}
-
-    cfg = OmegaConf.to_container(object_dict["cfg"])
-    model = object_dict["model"]
-    trainer = object_dict["trainer"]
-
-    if not trainer.logger:
+    if not object_dict["trainer"].logger:
         log.warning("Logger not found! Skipping hyperparameter logging...")
         return
 
-    hparams["model"] = cfg["model"]
+    cfg = OmegaConf.to_container(object_dict["cfg"])
+    algorithm = object_dict["algorithm"]
+    hparams = _config_hparams(cfg, object_dict)
+    hparams.update(_algorithm_hparams(cfg, algorithm))
 
-    # save number of model parameters
-    hparams["model/params/total"] = sum(p.numel() for p in model.parameters())
-    hparams["model/params/trainable"] = sum(
-        p.numel() for p in model.parameters() if p.requires_grad
-    )
-    hparams["model/params/non_trainable"] = sum(
-        p.numel() for p in model.parameters() if not p.requires_grad
-    )
-
-    hparams["data"] = cfg["data"]
-    hparams["trainer"] = cfg["trainer"]
-
-    hparams["callbacks"] = cfg.get("callbacks")
-    hparams["extras"] = cfg.get("extras")
-
-    hparams["task_name"] = cfg.get("task_name")
-    hparams["tags"] = cfg.get("tags")
-    hparams["ckpt_path"] = cfg.get("ckpt_path")
-    hparams["seed"] = cfg.get("seed")
-    hparams["fold_idx"] = object_dict.get("fold_idx")
-    # run_stage distinguishes train-only vs eval-only passes in separated mode
-    hparams["run_stage"] = object_dict.get("run_stage", cfg.get("run_stage"))
-
-    # Log runtime-computed FLOPs (not in Hydra config, stored in model.hparams)
-    if hasattr(model, "hparams"):
-        for key in ("flops", "flops_total", "flops_mult_adds"):
-            val = model.hparams.get(key)
-            if val is not None:
-                hparams[f"model/{key}"] = val
-
-    # send hparams to all loggers
-    for logger in trainer.loggers:
+    for logger in object_dict["trainer"].loggers:
         logger.log_hyperparams(hparams)
+
+
+def _config_hparams(cfg: dict[str, Any], object_dict: dict[str, Any]) -> dict[str, Any]:
+    """The parts of the composed config worth keeping beside a run."""
+    return {
+        "data": cfg["data"],
+        "trainer": cfg["trainer"],
+        "callbacks": cfg.get("callbacks"),
+        "extras": cfg.get("extras"),
+        "task_name": cfg.get("task_name"),
+        "tags": cfg.get("tags"),
+        "ckpt_path": cfg.get("ckpt_path"),
+        "seed": cfg.get("seed"),
+        "experiment_name": cfg.get("experiment_name"),
+        "run_name": cfg.get("run_name"),
+        "fold_idx": object_dict.get("fold_idx"),
+        "run_stage": object_dict.get("run_stage", cfg.get("run_stage")),
+    }
+
+
+def _algorithm_hparams(cfg: dict[str, Any], algorithm: LightningModule) -> dict[str, Any]:
+    """The algorithm's config, its parameter counts and its per-jet FLOP count.
+
+    The FLOP count is computed at construction, not present in the Hydra config, so it is read back
+    off the module's own hparams.
+    """
+    parameters = list(algorithm.parameters())
+    return {
+        "algorithm": cfg["algorithm"],
+        "algorithm/name": cfg["algorithm"].get("name"),
+        "algorithm/params/total": sum(p.numel() for p in parameters),
+        "algorithm/params/trainable": sum(p.numel() for p in parameters if p.requires_grad),
+        "algorithm/params/non_trainable": sum(
+            p.numel() for p in parameters if not p.requires_grad
+        ),
+        "algorithm/flops": algorithm.hparams.get("flops_total", algorithm.hparams.get("flops")),
+    }

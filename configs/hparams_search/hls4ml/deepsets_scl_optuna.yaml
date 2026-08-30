@@ -1,0 +1,16 @@
+# @package _global_
+
+# SCL regimes (data.method=symm_loss) add the consistency-loss weight to the DeepSets
+# search space defined in deepsets_optuna.yaml. lorentz_eta_max is not searched: it
+# defines the invariance probe and stays fixed across every regime.
+defaults:
+  - hls4ml/deepsets_optuna
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      # symm_loss_weight balances the SCL consistency term against the classification
+      # cross-entropy in JetTaggingModule.model_step; log-scaled because it ranges
+      # from a light regulariser (1e-3) to dominating the total loss (10).
+      algorithm.symm_loss_weight: tag(log, interval(1e-3, 10))

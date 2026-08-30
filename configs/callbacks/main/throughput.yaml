@@ -1,0 +1,3 @@
+# Per-epoch timings, to tell a GPU-bound run from an input-bound one.
+
+_target_: src.callbacks.throughput.ThroughputCallback

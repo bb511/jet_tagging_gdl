@@ -2,20 +2,17 @@ _target_: lightning.pytorch.trainer.Trainer
 
 default_root_dir: ${paths.output_dir}
 
-min_epochs: 1 # prevents early stopping
+# A floor of one epoch, so early stopping cannot end a run before any validation.
+min_epochs: 1
 max_epochs: 10
 
 accelerator: cpu
 devices: 1
 
-# mixed precision for extra speed-up
-# precision: 16
-
-# perform a validation loop every N training epochs
 check_val_every_n_epoch: 1
 
 gradient_clip_val: 1.0
 
-# set True to to ensure deterministic results
-# makes training slower but gives more reproducibility than just setting seeds
+# LorentzNet aggregates its edge messages with index_add_, which is non-deterministic on
+# CUDA; run-to-run reproducibility rests on seed_everything alone.
 deterministic: False

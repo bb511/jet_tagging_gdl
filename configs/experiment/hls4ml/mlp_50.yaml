@@ -1,0 +1,29 @@
+# @package _global_
+# MLP for 50 constituents. Method and symmetry group are CLI overrides:
+#   python src/train.py experiment=hls4ml/mlp_50 data.method=symm_loss \
+#       data.augmentation_scheme=so2
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: mlp
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "mlp", "nconst-50"]
+
+experiment_name: hls4ml_mlp_nconst50
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  nconstituents: 50
+  batch_size: 2048
+  n_folds: 5
+
+# The published widths, unchanged across the constituent counts; only the flattened
+# input width, and with it the first layer, grows with N.
+algorithm:
+  hidden_layers: [128, 64, 32]
+
+trainer:
+  max_epochs: 200

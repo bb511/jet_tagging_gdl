@@ -1,14 +1,42 @@
+# The hls4ml LHC jets, read from the published record. The record ships the split, the
+# pT sorting and the physics normalisation as a loader package of its own, so those
+# stages are fixed there and only the wrapper is configured here.
 _target_: src.data.hls4ml_datamodule.HLS4MLDataModule
-data_dir: /cluster/scratch/agogia/datasets/
-# data_dir: /capstor/scratch/cscs/agogia/datasets/
+
+# A local directory of this name is read directly, which is how a mirror is checked
+# before it is uploaded.
+repo_id: fastmachinelearning/hls4ml_lhc_jets_150p
+
+# The record ships executable code, so a run reads and executes whatever is at this
+# commit (null follows the head instead). Move it forward after a re-upload.
+revision: 8cfaed27b9d1df48987331a3e25cfda166aaabe3
+
+# Its restricted, normalised caches per nconstituents land here. The download itself
+# goes to HF_HUB_CACHE.
+cache_dir: ${paths.base_data_dir}/hf
+
+# augmentation: online so2/so3/lorentz on train batches | symm_loss: SCL, no augmentation
 method: augmentation
+
+# none | so2 | so3 | lorentz. Under symm_loss it names the group the SCL draws from.
+augmentation_scheme: none
+
+# Half-width of the uniform rapidity range the boosts are drawn from.
+lorentz_eta_max: 2.0
+
+# Experiments use 16, 50 and 150; 150 is every constituent the record carries.
+nconstituents: 16
+
+# Any subset of the 16 record columns; LorentzNet needs exactly these four.
+features: [px, py, pz, e]
+
 batch_size: 256
 num_workers: 4
-pin_memory: True
-nconstituents: 32
-features: ["px", "py", "pz", "etarel", "phirel"]
-augmentation_scheme: none
-augmentation_seed: ${seed}
-lorentz_eta_max: 2.0
-n_folds: 5
+pin_memory: true
+
+# 1: the record's split; k >= 2: pool train+val and re-split (experiments set 5).
+n_folds: 1
+kfold_seed: 42
+
+# Test batches keep all 16 columns so the invariance probes find px, py and pz.
 keep_full_features_at_test: true

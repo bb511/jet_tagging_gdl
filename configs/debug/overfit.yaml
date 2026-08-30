@@ -1,6 +1,6 @@
 # @package _global_
 
-# overfits to 3 batches
+# Overfit three batches, which a working architecture drives to near-zero loss.
 
 defaults:
   - default
@@ -9,5 +9,5 @@ trainer:
   max_epochs: 20
   overfit_batches: 3
 
-# model ckpt and early stopping need to be disabled during overfitting
+# Checkpointing and early stopping would fire on a validation loop that never runs.
 callbacks: null

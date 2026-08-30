@@ -1,0 +1,26 @@
+# @package callbacks
+
+# The built-ins only. A hyperparameter trial draws no plots and writes no results row, so
+# a search leaves nothing behind but its study database.
+defaults:
+  - util@model_checkpoint: model_checkpoint
+  - util@early_stopping: early_stopping
+  - util@lr_monitor: lr_monitor
+  - util@model_summary: model_summary
+  - util@rich_progress_bar: rich_progress_bar
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch_{epoch:03d}"
+  monitor: val/acc
+  mode: max
+  save_top_k: 1
+  save_last: true
+  auto_insert_metric_name: false
+
+early_stopping:
+  monitor: val/acc
+  mode: max
+  min_delta: 1.0e-4
+  patience: 30 # shorter than a training run's: a trial is judged on its best epoch, not its last

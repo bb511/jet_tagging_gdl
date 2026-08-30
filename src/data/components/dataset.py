@@ -1,13 +1,28 @@
+# In-memory dataset that hands the trainer whole batches of jets.
+
+from collections.abc import Callable
+
 import torch
 from torch.utils.data import IterableDataset
-from typing import Callable, Optional
 
 
 class HLS4MLDataset(IterableDataset):
-    """In-memory jet dataset that yields pre-batched tensors directly.
+    """Yield pre-batched jets from tensors held in memory.
 
-    Shuffling is handled internally via a torch.Generator so the DataLoader
-    can be configured with batch_size=1 and num_workers=0.
+    The whole split fits in RAM, so batching and shuffling are done here rather than by
+    a sampler: the DataLoader is configured with ``batch_size=1`` and each of its items
+    is one batch. Shuffling draws from a ``torch.Generator`` of the caller's, which
+    ``lightning.seed_everything`` fixes.
+
+    :param x: the constituents, shape (jets, constituents, features).
+    :param y: the one-hot flavour labels, shape (jets, classes).
+    :param batch_size: jets per yielded batch. A trailing partial batch is dropped, so
+        ``len(self)`` is exact and OneCycleLR can be given a step count.
+    :param shuffler: seeded generator for the per-epoch permutation, or None to keep
+        the stored order, which is what the evaluation splits want.
+    :param max_batches: cap on the batches each worker yields, for debug runs.
+    :param transform: online augmentation, from a batch to ``(x, keep_mask)``. The mask
+        marks the jets that survive an acceptance cut, and the labels follow it.
     """
 
     def __init__(
@@ -15,9 +30,9 @@ class HLS4MLDataset(IterableDataset):
         x: torch.Tensor,
         y: torch.Tensor,
         batch_size: int,
-        shuffler: Optional[torch.Generator] = None,
-        max_batches: Optional[int] = None,
-        transform: Optional[Callable] = None,
+        shuffler: torch.Generator | None = None,
+        max_batches: int | None = None,
+        transform: Callable | None = None,
     ):
         if x.shape[0] != y.shape[0]:
             raise ValueError("x and y must have the same number of samples.")
@@ -37,7 +52,7 @@ class HLS4MLDataset(IterableDataset):
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        worker_id   = 0 if worker_info is None else worker_info.id
+        worker_id = 0 if worker_info is None else worker_info.id
         num_workers = 1 if worker_info is None else worker_info.num_workers
 
         if self.shuffler is not None:
@@ -46,6 +61,7 @@ class HLS4MLDataset(IterableDataset):
             perm = torch.arange(self.n)
 
         nb = 0
+        # Workers stride through the batches, so each batch is emitted exactly once.
         for i in range(worker_id, self.num_batches, num_workers):
             if self.max_batches is not None and nb >= self.max_batches:
                 break

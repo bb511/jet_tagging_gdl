@@ -1,6 +1,7 @@
 # @package _global_
 
-# runs with execution time profiling
+# One epoch under Lightning's simple profiler; "advanced" and "pytorch" are the finer
+# alternatives, at a much higher overhead.
 
 defaults:
   - default
@@ -8,6 +9,3 @@ defaults:
 trainer:
   max_epochs: 1
   profiler: "simple"
-  # profiler: "advanced"
-  # profiler: "pytorch"
-

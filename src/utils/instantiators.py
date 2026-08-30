@@ -1,4 +1,4 @@
-from typing import List
+# Turn the callbacks and logger sections of a config into Lightning objects.
 
 import hydra
 from lightning import Callback
@@ -10,13 +10,14 @@ from src.utils import pylogger
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
-def instantiate_callbacks(callbacks_cfg: DictConfig) -> List[Callback]:
-    """Instantiates callbacks from config.
+def instantiate_callbacks(callbacks_cfg: DictConfig) -> list[Callback]:
+    """Instantiate every entry of *callbacks_cfg* that carries a ``_target_``.
 
-    :param callbacks_cfg: A DictConfig object containing callback configurations.
-    :return: A list of instantiated callbacks.
+    :param callbacks_cfg: the ``callbacks`` config node.
+    :return: the instantiated callbacks, empty if the node is empty.
+    :raises TypeError: if the node is not a DictConfig.
     """
-    callbacks: List[Callback] = []
+    callbacks: list[Callback] = []
 
     if not callbacks_cfg:
         log.warning("No callback configs found! Skipping..")
@@ -33,13 +34,15 @@ def instantiate_callbacks(callbacks_cfg: DictConfig) -> List[Callback]:
     return callbacks
 
 
-def instantiate_loggers(logger_cfg: DictConfig) -> List[Logger]:
-    """Instantiates loggers from config.
+def instantiate_loggers(logger_cfg: DictConfig) -> list[Logger]:
+    """Instantiate every entry of *logger_cfg* that carries a ``_target_``.
 
-    :param logger_cfg: A DictConfig object containing logger configurations.
-    :return: A list of instantiated loggers.
+    :param logger_cfg: the ``logger`` config node; ``logger=none`` is composed as an empty node and
+        yields no loggers.
+    :return: the instantiated loggers.
+    :raises TypeError: if the node is not a DictConfig.
     """
-    logger: List[Logger] = []
+    logger: list[Logger] = []
 
     if not logger_cfg:
         log.warning("No logger configs found! Skipping...")

@@ -1,8 +1,13 @@
-# disable python warnings if they annoy you
+# Silence python warnings.
 ignore_warnings: False
 
-# ask user for tags if none are provided in the config
+# Prompt for tags when the config carries none. A multirun with no tags fails rather than
+# waiting at the prompt, so every experiment config sets its own.
 enforce_tags: True
 
-# pretty print config tree at the start of the run using Rich library
+# Print the composed config as a tree at the start of the run.
 print_config: True
+
+# Passed to torch.set_float32_matmul_precision when set. "high" buys tensor cores on
+# Volta and later at some accuracy; null leaves torch's own default alone.
+matmul_precision: null

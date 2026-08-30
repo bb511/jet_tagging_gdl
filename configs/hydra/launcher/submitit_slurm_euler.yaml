@@ -1,8 +1,12 @@
 # @package hydra.launcher
+# ETH Euler. scripts/cluster/submit_*.sh --cluster euler prepends this launcher and
+# overrides hydra.launcher.timeout_min per catalogue.
 defaults:
   - submitit_slurm
 
-submitit_folder: /cluster/scratch/agogia/submitit/%j
+# Under the sweep directory, so the submitit logs of a run sit beside its Hydra output
+# and no absolute scratch path is baked into the repository.
+submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 
 account: null
 qos: null
@@ -12,19 +16,17 @@ timeout_min: 2880
 cpus_per_task: 4
 tasks_per_node: 1
 nodes: 1
-exclude: eu-lo-g2-028  # CUDA init fails on this node (torch._C._cuda_init -> "CUDA unknown error"); SLURM still reports it healthy
 
 array_parallelism: 200
 
 name: ${hydra.job.name}
 
+# Euler's SLURM takes the GPU count and the memory through generic parameters rather than
+# through --gpus-per-node. 4 x 20 GB covers the pooled k-fold tensors, which reach about
+# 15 GB of host RAM at nconstituents=150.
 additional_parameters:
   gpus: "1"
   mem_per_cpu: "20G"
-
-setup:
-  - source /cluster/home/agogia/jet_tagging_gdl/HYDRA/bin/activate
-  - export PYTHONPATH=/cluster/home/agogia/jet_tagging_gdl:$PYTHONPATH
 
 signal_delay_s: 120
 max_num_timeout: 0

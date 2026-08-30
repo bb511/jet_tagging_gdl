@@ -1,3 +1,69 @@
+[project]
+name = "jet-tagging-gdl"
+version = "0.1.0"
+description = "Data augmentation against a symmetry-consistency loss for jet tagging on the hls4ml jet data set."
+authors = [
+    {name = "Patrick Odagiu", email = "patrickodagiu@gmail.com"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+
+requires-python = ">=3.11,<3.13"
+# Four of these are imported by nothing in this repository and so are easy to prune by
+# mistake: sqlalchemy holds optuna 2.10's storage layer below the 2.x that breaks it, pandas
+# backs optuna's trials_dataframe() (fetch_best_params.py --csv), pyarrow is what the record's
+# own loader reads its parquet shards with, and mlflow is the backend of MLFlowLogger. optuna
+# and pyyaml arrive through the sweeper and omegaconf anyway, but scripts/optuna imports both
+# directly, so they are declared.
+dependencies = [
+    "torch (==2.9.1+cu126)",
+    "lightning (>=2.6,<3)",
+    "torchmetrics (>=1.9,<2)",
+    "hydra-core (>=1.3.2,<2)",
+    "hydra-colorlog (>=1.2,<2)",
+    "hydra-optuna-sweeper (>=1.2,<2)",
+    "optuna (>=2.10,<3)",
+    "hydra-submitit-launcher (>=1.2,<2)",
+    "sqlalchemy (<2)",
+    "rootutils (>=1.0.7,<2)",
+    "rich (>=13)",
+    "numpy (<2.5)",
+    "scipy (<1.18)",
+    "pandas (<3)",
+    "pyarrow (>=21,<26)",
+    "omegaconf (>=2.3)",
+    "pyyaml (>=6,<7)",
+    "scikit-learn (>=1.4,<2)",
+    "matplotlib (>=3.8)",
+    "mplhep (>=0.4)",
+    "pathvalidate (>=3.3,<4)",
+    "mlflow (>=3.2,<4)",
+    "huggingface-hub (>=1.0)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest (>=8,<10)",
+    "sh (>=2.2,<3)",
+    "pre-commit (>=3.7,<5)",
+]
+
+# The CUDA 12.6 build of torch is not on PyPI, so it is pulled from the PyTorch index.
+[[tool.poetry.source]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+priority = "explicit"
+
+[tool.poetry.dependencies]
+torch = {source = "pytorch-cu126"}
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
 [tool.pytest.ini_options]
 addopts = [
   "--color=yes",
@@ -22,64 +88,4 @@ exclude_lines = [
     "raise NotImplementedError",
     "raise NotImplementedError()",
     "if __name__ == .__main__.:",
-]
-
-[[tool.poetry.source]]
-name = "nvidia"
-url = "https://pypi.nvidia.com"
-priority = "supplemental"
-
-
-[[tool.poetry.source]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-priority = "explicit"
-
-[tool.poetry.dependencies]
-torch = {source = "pytorch-cu126"}
-torchvision = {source = "pytorch-cu126"}
-[project]
-name = "jet-tagging-gdl"
-version = "0.1.0"
-description = ""
-authors = [
-    {name = "Patrick Odagiu",email = "patrickodagiu@gmail.com"}
-]
-readme = "README.md"
-requires-python = ">=3.11,<=3.12"
-dependencies = [
-    "torch (==2.9.1+cu126)",
-    "torchvision (==0.24.1+cu126)",
-    "lightning (>=2.6.5,<3.0.0)",
-    "torchmetrics (>=1.9.0,<2.0.0)",
-    "hydra-core (>=1.3.5,<2.0.0)",
-    "rootutils (>=1.0.7,<2.0.0)",
-    "rich (>=15.0.0,<16.0.0)",
-    "numpy (<2.5)",
-    "scipy (<1.18)",
-    "pandas (<3)",
-    "h5py (>=3.16.0,<4.0.0)",
-    "scikit-learn (>=1.9.0,<2.0.0)",
-    "matplotlib (>=3.11.1,<4.0.0)",
-    "wget (>=3.2,<4.0)",
-    "deel-torchlip (>=1.0.5,<2.0.0)",
-    "hydra-submitit-launcher (>=1.2.0,<2.0.0)",
-    "mlflow (>=3.15.1,<4.0.0)",
-    "hydra-optuna-sweeper (>=1.2.0,<2.0.0)",
-    "sqlalchemy (<2.0)",
-    "huggingface-hub (>=1.0)"
-]
-
-[tool.poetry]
-package-mode = false
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[dependency-groups]
-dev = [
-    "pytest (>=9.1.1,<10.0.0)",
-    "sh (>=2.4.0,<3.0.0)",
-    "datasets (>=5.0.1,<6.0.0)"
 ]

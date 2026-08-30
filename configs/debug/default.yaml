@@ -1,12 +1,13 @@
 # @package _global_
 
-# default debugging setup, runs 1 full epoch
-# other debugging configs can inherit from this one
+# One full epoch on the CPU, with the callbacks and the loggers switched off. The other
+# debug configs inherit from this one.
 
-# overwrite task name so debugging logs are stored in separate folder
+# Debug runs keep their logs out of logs/train/.
 task_name: "debug"
 
-# disable callbacks and loggers during debugging
+# No checkpoints are written without the callbacks, so train.py records an empty manifest
+# and eval.py has nothing to read; that is intended for a debug run.
 callbacks: null
 logger: null
 
@@ -14,22 +15,20 @@ extras:
   ignore_warnings: False
   enforce_tags: False
 
-# sets level of all command line loggers to 'DEBUG'
 # https://hydra.cc/docs/tutorials/basic/running_your_app/logging/
 hydra:
   job_logging:
     root:
       level: DEBUG
 
-  # use this to also set hydra loggers to 'DEBUG'
-  # verbose: True
-
 trainer:
   max_epochs: 1
-  accelerator: cpu # debuggers don't like gpus
-  devices: 1 # debuggers don't like multiprocessing
-  detect_anomaly: true # raise exception if NaN or +/-inf is detected in any tensor
+  accelerator: cpu # debuggers do not like gpus
+  devices: 1 # debuggers do not like multiprocessing
+  detect_anomaly: true # raise on a NaN or an infinity in any tensor
 
 data:
-  num_workers: 0 # debuggers don't like multiprocessing
-  pin_memory: False # disable gpu memory pin
+  num_workers: 0 # debuggers do not like multiprocessing
+  pin_memory: False
+  # One split rather than the experiment's five, so a debug run fits one model, not six.
+  n_folds: 1

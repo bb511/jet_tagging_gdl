@@ -1,0 +1,48 @@
+# LorentzNet, the Lorentz-invariant tagger (arXiv:2201.08187). The widths below are the
+# algorithm defaults; the per-nconstituents values live in
+# configs/experiment/hls4ml/lorentznet_<N>.yaml.
+_target_: src.algorithms.lorentznet.LorentzNet
+# The module stores the scheduler dict as it arrives and pops from it in
+# _set_up_scheduler, so it must be a plain dict holding a real partial, not a DictConfig.
+_convert_: all
+name: lorentznet # short label used by the results table and MLflow
+
+nconstituents: ${data.nconstituents}
+# Fixed rather than ${len:${data.features}}: the network reads the four-momentum and
+# nothing else, so data.features must be exactly px, py, pz, e.
+nbr_feats: 4
+output_dim: 5
+
+# One CLI override (data.method=symm_loss data.augmentation_scheme=so3) configures the
+# data and the algorithm together.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+symm_loss_metric: l2
+lorentz_eta_max: ${data.lorentz_eta_max}
+
+# Widths from the paper, 224k parameters; the searches replace them per nconstituents.
+n_hidden: 72
+n_layers: 6
+c_weight: 1.0e-3 # step size of the coordinate updates inside a block
+dropout: 0.0
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 1.0e-3
+  weight_decay: 1.0e-7
+
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 1.0e-4
+  monitor: val/acc
+  interval: epoch
+  frequency: 1
+
+compile: false

@@ -1,0 +1,32 @@
+# @package _global_
+# LorentzNet at 150 constituents, at the algorithm defaults: a starting point for the
+# searches, not tuned values. Method and symmetry group are CLI overrides:
+#   python src/train.py experiment=hls4ml/lorentznet_150 data.method=symm_loss \
+#       data.augmentation_scheme=so2
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: lorentznet
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "lorentznet", "nconst-150"]
+
+experiment_name: hls4ml_lorentznet_nconst150
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+# A quarter of the batch of the other models: the memory follows the squared
+# multiplicity of the jets, whose mean over the record is 2 800 at 150 slots, so one
+# step holds 17 GiB of a 32 GB V100 at 512 jets. Raise it only on a larger card.
+data:
+  nconstituents: 150
+  batch_size: 512
+  n_folds: 5
+
+# fp32 rather than the 16-mixed of the gpu trainer: the network works on de-normalised
+# four-momenta, so edge invariants of order 1e4 to 1e5 GeV^2 are formed before the signed
+# log compresses them, above the fp16 maximum of 65 504.
+trainer:
+  max_epochs: 200
+  precision: 32

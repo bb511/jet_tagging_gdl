@@ -1,0 +1,42 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: tpe
+
+# One TPE study per (nconstituents, method, augmentation_scheme) regime for DeepSets.
+# train.py returns the main run's clean val/acc_best (never a fold average, never an
+# invariance metric: those are reported, not tuned on), and every regime shares this
+# space and this 100-trial budget so the augmentation-vs-SCL comparison is not
+# confounded by unequal search effort. Runs at data.n_folds=1 (set on the CLI, see
+# scripts/hls4ml/*_search.sh) and callbacks=search, so trials draw no plots and never
+# touch results/.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: sqlite:///logs/optuna/hls4ml/deepsets.db?timeout=600
+    # e.g. deepsets_nconst16_augmentation_none (baseline) or
+    # deepsets_nconst16_symm_loss_so2 (SCL); the regime alone picks the study, so no
+    # study name is passed on the CLI.
+    study_name: deepsets_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
+    n_jobs: 1
+    direction: maximize
+    n_trials: 100
+    sampler:
+      seed: 1234
+      n_startup_trials: 20
+
+    # phi (per-constituent) and rho (set-level) widths span from the compact pair used
+    # at nconst=8 up to beyond the tuned nconst=16 pair, since 50 and 150 constituents
+    # may need more capacity than either. aggregation is searched because sum keeps a
+    # multiplicity-dependent signal, mean removes it, and max is a permutation-
+    # invariant "hardest constituent" pool; which is most stable under a rotated or
+    # boosted input is not known ahead of the search.
+    params:
+      algorithm.phi_layers: choice([16,16], [32,32], [32,32,32], [64,32,32], [64,64,32], [64,64,64], [128,64,32])
+      algorithm.rho_layers: choice([16], [32], [32,16], [32,32,16], [64,32])
+      algorithm.activation: choice(relu, tanh)
+      algorithm.aggregation: choice(sum, mean, max)
+      algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-2))
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5, 1e-4)

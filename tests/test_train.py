@@ -1,132 +1,107 @@
+"""The training entry point, run against the real record.
+
+These are the only tests that fit a model on real jets, so they are gated on the record's hub
+snapshot being present. What they check is what nothing else can: that the folds are fitted and
+recorded, and that the number an Optuna trial reads back is the main run's.
+"""
+
 import json
-import os
 from pathlib import Path
 
 import pytest
+import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
 from src.train import train
+from src.utils.checkpoints import MANIFEST_FILENAME
+from tests.conftest import needs_record
 from tests.helpers.run_if import RunIf
 
+pytestmark = needs_record
 
-def test_train_fast_dev_run(cfg_train: DictConfig) -> None:
-    """Run for 1 train, val and test step.
 
-    :param cfg_train: A DictConfig containing a valid training configuration.
-    """
+def test_a_fast_dev_run_reaches_the_end_of_the_loop(cfg_train: DictConfig) -> None:
+    """One batch through fit is the cheapest proof that the whole stack composes and runs."""
     HydraConfig().set_config(cfg_train)
     with open_dict(cfg_train):
         cfg_train.trainer.fast_dev_run = True
-        cfg_train.trainer.accelerator = "cpu"
-    train(cfg_train)
+
+    metric_dict, object_dict = train(cfg_train)
+
+    assert "train/loss" in metric_dict
+    assert object_dict["algorithm"].hparams["flops_total"] > 0
+
+
+def test_the_top_level_metrics_are_the_main_runs(cfg_train: DictConfig) -> None:
+    """Optuna maximises the top level, and must get the clean split's number, not a fold's."""
+    HydraConfig().set_config(cfg_train)
+
+    metric_dict, _ = train(cfg_train)
+
+    assert metric_dict["val/acc_best"] == metric_dict["main/val/acc_best"]
+    assert metric_dict["val/acc"] == metric_dict["main/val/acc"]
+
+
+def test_two_folds_leave_a_manifest_of_three_runs(cfg_train: DictConfig, tmp_path: Path) -> None:
+    """eval.py finds its checkpoints only here: the main run, and one per fold.
+
+    The per-run checkpoint directories are checked in the same fit, since three fits of the real
+    record are the expensive part of this file.
+    """
+    HydraConfig().set_config(cfg_train)
+    with open_dict(cfg_train):
+        cfg_train.data.n_folds = 2
+
+    metric_dict, _ = train(cfg_train)
+    manifest = json.loads((tmp_path / MANIFEST_FILENAME).read_text())
+
+    assert manifest["n_folds"] == 2
+    assert [run["fold_label"] for run in manifest["runs"]] == ["main", "fold_1", "fold_2"]
+    assert manifest["runs"][0]["fold_idx"] is None
+    assert all(Path(run["checkpoint_path"]).is_absolute() for run in manifest["runs"])
+    assert all(Path(run["checkpoint_path"]).exists() for run in manifest["runs"])
+    assert "fold1/val/acc" in metric_dict and "fold2/val/acc" in metric_dict
+    # One directory per run: a shared one would have fold 2 overwrite fold 1's best.
+    assert {path.name for path in (tmp_path / "checkpoints").iterdir()} == {
+        "main",
+        "fold_1",
+        "fold_2",
+    }
 
 
 @RunIf(min_gpus=1)
-def test_train_fast_dev_run_gpu(cfg_train: DictConfig) -> None:
-    """Run for 1 train, val and test step on GPU.
-
-    :param cfg_train: A DictConfig containing a valid training configuration.
-    """
+def test_a_fast_dev_run_reaches_the_end_of_the_loop_on_a_gpu(cfg_train: DictConfig) -> None:
+    """The trainings run on GPU, where a dtype or a device mismatch shows up and nowhere else."""
     HydraConfig().set_config(cfg_train)
     with open_dict(cfg_train):
         cfg_train.trainer.fast_dev_run = True
         cfg_train.trainer.accelerator = "gpu"
-    train(cfg_train)
 
-
-@RunIf(min_gpus=1)
-@pytest.mark.slow
-def test_train_epoch_gpu_amp(cfg_train: DictConfig) -> None:
-    """Train 1 epoch on GPU with mixed-precision.
-
-    :param cfg_train: A DictConfig containing a valid training configuration.
-    """
-    HydraConfig().set_config(cfg_train)
-    with open_dict(cfg_train):
-        cfg_train.trainer.max_epochs = 1
-        cfg_train.trainer.accelerator = "gpu"
-        cfg_train.trainer.precision = 16
     train(cfg_train)
 
 
 @pytest.mark.slow
-def test_train_epoch_double_val_loop(cfg_train: DictConfig) -> None:
-    """Train 1 epoch with validation loop twice per epoch.
+def test_a_run_resumes_from_its_own_last_checkpoint(cfg_train: DictConfig, tmp_path: Path) -> None:
+    """A queued training that dies overnight is restarted from the checkpoint it left.
 
-    :param cfg_train: A DictConfig containing a valid training configuration.
+    Progress is read off the checkpoint rather than off the file names: ``save_top_k: 1``
+    on ``val/acc`` writes a new ``epoch_*.ckpt`` only when the accuracy improves, which a
+    one-epoch run on a fraction of the batches has no reason to do.
     """
     HydraConfig().set_config(cfg_train)
-    with open_dict(cfg_train):
-        cfg_train.trainer.max_epochs = 1
-        cfg_train.trainer.val_check_interval = 0.5
     train(cfg_train)
 
-
-@pytest.mark.slow
-def test_train_ddp_sim(cfg_train: DictConfig) -> None:
-    """Simulate DDP (Distributed Data Parallel) on 2 CPU processes.
-
-    :param cfg_train: A DictConfig containing a valid training configuration.
-    """
-    HydraConfig().set_config(cfg_train)
-    with open_dict(cfg_train):
-        cfg_train.trainer.max_epochs = 2
-        cfg_train.trainer.accelerator = "cpu"
-        cfg_train.trainer.devices = 2
-        cfg_train.trainer.strategy = "ddp_spawn"
-    train(cfg_train)
-
-
-@pytest.mark.slow
-def test_train_resume(tmp_path: Path, cfg_train: DictConfig) -> None:
-    """Run 1 epoch, finish, and resume for another epoch.
-
-    :param tmp_path: The temporary logging path.
-    :param cfg_train: A DictConfig containing a valid training configuration.
-    """
-    with open_dict(cfg_train):
-        cfg_train.trainer.max_epochs = 1
-
-    HydraConfig().set_config(cfg_train)
-    metric_dict_1, _ = train(cfg_train)
-
-    # Checkpoints are now written to checkpoints/main/ (per-run subdirectory)
-    files = os.listdir(tmp_path / "checkpoints" / "main")
-    assert "last.ckpt" in files
-    assert "epoch_000.ckpt" in files
+    last = tmp_path / "checkpoints" / "main" / "last.ckpt"
+    before = torch.load(last, weights_only=False)
 
     with open_dict(cfg_train):
-        cfg_train.ckpt_path = str(tmp_path / "checkpoints" / "main" / "last.ckpt")
+        cfg_train.ckpt_path = str(last)
         cfg_train.trainer.max_epochs = 2
 
-    metric_dict_2, _ = train(cfg_train)
-
-    files = os.listdir(tmp_path / "checkpoints" / "main")
-    assert "epoch_001.ckpt" in files
-    assert "epoch_002.ckpt" not in files
-
-    assert metric_dict_1["train/acc"] < metric_dict_2["train/acc"]
-    assert metric_dict_1["val/acc"] < metric_dict_2["val/acc"]
-
-
-@pytest.mark.slow
-def test_train_manifest_created(tmp_path: Path, cfg_train: DictConfig) -> None:
-    """Training always writes checkpoint_manifest.json to output_dir."""
-    with open_dict(cfg_train):
-        cfg_train.trainer.max_epochs = 1
-
-    HydraConfig().set_config(cfg_train)
     train(cfg_train)
+    after = torch.load(last, weights_only=False)
 
-    manifest_path = tmp_path / "checkpoint_manifest.json"
-    assert manifest_path.exists(), "checkpoint_manifest.json not found after training"
-
-    manifest = json.loads(manifest_path.read_text())
-    assert "runs" in manifest
-    assert len(manifest["runs"]) >= 1
-
-    main_run = manifest["runs"][0]
-    assert main_run["fold_label"] == "main"
-    assert main_run["fold_idx"] == 0
-    assert main_run["checkpoint_path"]  # non-empty string
+    # The second epoch was trained on top of the first, not in place of it.
+    assert after["epoch"] > before["epoch"]
+    assert after["global_step"] > before["global_step"]

@@ -1,0 +1,32 @@
+# @package _global_
+# DeepSets for 150 constituents. Method and symmetry group are CLI overrides:
+#   python src/train.py experiment=hls4ml/deepsets_150 data.method=symm_loss \
+#       data.augmentation_scheme=so2
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: deepsets
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "deepsets", "nconst-150"]
+
+experiment_name: hls4ml_deepsets_nconst150
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  nconstituents: 150
+  batch_size: 2048
+  n_folds: 5
+
+# Carried over from the 32-constituent search of the earlier study: a starting point for
+# the searches at this constituent count, not a tuned configuration.
+algorithm:
+  phi_layers: [64, 64, 32]
+  rho_layers: [32, 32, 16]
+  optimizer:
+    lr: 2.8e-3
+
+trainer:
+  max_epochs: 200

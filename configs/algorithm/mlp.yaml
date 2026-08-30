@@ -1,0 +1,44 @@
+# Flattened-input MLP, the tagger with no symmetry built in at all.
+_target_: src.algorithms.mlp.MLPClassifier
+# The module stores the scheduler dict as it arrives and pops from it in
+# _set_up_scheduler, so it must be a plain dict holding a real partial, not a DictConfig.
+_convert_: all
+name: mlp # short label used by the results table and MLflow
+
+nconstituents: ${data.nconstituents}
+nbr_feats: ${len:${data.features}}
+output_dim: 5
+
+# One CLI override (data.method=symm_loss data.augmentation_scheme=so3) configures the
+# data and the algorithm together.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+symm_loss_metric: l2
+lorentz_eta_max: ${data.lorentz_eta_max}
+
+# The input is the flattened (nconstituents x nbr_feats) grid, so the first layer grows
+# with the constituent count (64 columns at N = 16, 600 at N = 150) while these do not.
+hidden_layers: [128, 64, 32]
+activation: relu
+batchnorm: false
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 1.0e-3
+  weight_decay: 1.0e-7
+
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 1.0e-4
+  monitor: val/acc
+  interval: epoch
+  frequency: 1
+
+compile: false

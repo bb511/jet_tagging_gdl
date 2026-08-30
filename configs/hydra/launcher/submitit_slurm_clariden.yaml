@@ -1,8 +1,12 @@
 # @package hydra.launcher
+# CSCS Clariden. scripts/cluster/submit_*.sh --cluster clariden prepends this launcher and
+# overrides hydra.launcher.timeout_min per catalogue.
 defaults:
   - submitit_slurm
 
-submitit_folder: /capstor/scratch/cscs/agogia/submitit/%j
+# Under the sweep directory, so the submitit logs of a run sit beside its Hydra output
+# and no absolute scratch path is baked into the repository.
+submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 
 account: a0166
 qos: null
@@ -13,6 +17,8 @@ cpus_per_task: 4
 gpus_per_node: 1
 tasks_per_node: 1
 nodes: 1
+# The pooled k-fold tensors reach about 15 GB of host RAM at nconstituents=150, before
+# the dataloader's own copies.
 mem_gb: 100
 
 array_parallelism: 96

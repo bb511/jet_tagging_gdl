@@ -1,23 +1,31 @@
+# @package callbacks
+
+# Everything a full training run needs: the Lightning built-ins under util, and the four
+# project callbacks under main.
 defaults:
-  - model_checkpoint
-  - model_summary
-  - rich_progress_bar
-  - lr_monitor
-  - plotting
-  - early_stopping
+  - util@model_checkpoint: model_checkpoint
+  - util@early_stopping: early_stopping
+  - util@lr_monitor: lr_monitor
+  - util@model_summary: model_summary
+  - util@rich_progress_bar: rich_progress_bar
+  - main@invariance_metric: invariance_metric
+  - main@results_table: results_table
+  - main@plotting: plotting
+  - main@throughput: throughput
   - _self_
-  - invariance_metric
-  - results_table
-  - throughput_callback 
-  
+
 model_checkpoint:
+  # Under the run's own Hydra directory; train.py adds a subdirectory per fold.
   dirpath: ${paths.output_dir}/checkpoints
   filename: "epoch_{epoch:03d}"
-  monitor: "val/acc"
-  mode: "max"
+  monitor: val/acc
+  mode: max
   save_top_k: 1
-  save_last: True
-  auto_insert_metric_name: False
+  save_last: true
+  auto_insert_metric_name: false
 
-model_summary:
-  max_depth: -1
+early_stopping:
+  monitor: val/acc
+  mode: max
+  min_delta: 1.0e-4 # matches the scheduler threshold, so sub-threshold noise counts for neither
+  patience: 100 # longer than the scheduler patience (80), so the rate drops before the run ends

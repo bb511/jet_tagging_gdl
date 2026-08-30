@@ -1,54 +1,46 @@
 # @package _global_
 
-# specify here default configuration
-# order of defaults determines the order in which configs override each other
+# The order of the defaults decides which config overrides which: later entries win.
 defaults:
   - _self_
   - data: hls4ml
-  - model: deepsets_32
+  - algorithm: deepsets
   - callbacks: default
-  - logger: csv
-  - trainer: mps
+  - trainer: default
   - paths: default
   - extras: default
+  - hydra: default
+  - logger: none
 
-  # experiment configs allow for version control of specific hyperparameters
-  # e.g. best hyperparameters for given model and datamodule
+  # An experiment config pins one (architecture, nconstituents) pair; the method and the
+  # symmetry group stay command-line overrides, e.g.
+  #   python src/train.py experiment=hls4ml/deepsets_16 data.method=symm_loss \
+  #       data.augmentation_scheme=so2
   - experiment: null
 
-  # config for hyperparameter optimization
   - hparams_search: null
 
-  # optional local config for machine/user specific settings
-  # it's optional since it doesn't need to exist and is excluded from version control
+  # Machine-specific settings, excluded from version control, hence optional.
   - optional local: default
 
-  # debugging config (enable through command line, e.g. `python train.py debug=default)
+  # Enable from the command line, e.g. `python src/train.py debug=default`.
   - debug: null
 
-
-
-# Use n_folds from the data config for k-fold cross-validation
-# This makes k-fold logic work for any model (MLP, DeepSets, Transformer)
-# Set n_folds in your data config (e.g., configs/data/hls4ml.yaml)
-# Example: n_folds: 5
-# task name, determines output directory path
 task_name: "train"
 
-# tags to help you identify your experiments
-# you can overwrite this in experiment configs
-# overwrite from command line with `python train.py tags="[first_tag, second_tag]"`
+# Overwrite from the command line with `tags="[first_tag, second_tag]"`.
 tags: ["dev"]
 
-# set False to skip model training
-train: True
+experiment_name: jet_tagging_gdl_dev
 
-# evaluate on test set, using best model weights achieved during training
-# lightning chooses best weights based on the metric specified in checkpoint callback
-test: False
+# The output directory is unique per run, so its hash names the run in MLflow.
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
-# simply provide checkpoint path to resume training
+# Resume training from this checkpoint.
 ckpt_path: null
 
-# seed for random number generators in pytorch, numpy and python.random
+# What train.py returns, and therefore what an Optuna study maximises. The main run's
+# value, not a fold average, so the objective is one clean number per trial.
+optimized_metric: val/acc_best
+
 seed: 12345
