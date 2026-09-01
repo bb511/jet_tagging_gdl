@@ -2,16 +2,13 @@
 # ========================================================================
 # MLP TRAINING COMMANDS
 # ========================================================================
-# One block per (constituent count, regime): 3 x 7 = 21 train runs.
+# One block per (constituent count, regime): 3 x 7 = 21 train runs. Generated
+# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
+# Each block carries the best trial of its own study under logs/optuna/hls4ml/;
+# a block whose study is missing carries none and says so (transferred ablation).
 #
-# Generated from the study databases under logs/optuna/hls4ml/ by
-# scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
-# Each block carries the best trial of its own study. Blocks whose study is
-# missing carry no overrides and say so: they are the transferred ablation.
-#
-# Every command is commented out. Copy one to run it by hand, or feed the
-# whole file to scripts/cluster/submit_train.sh, which parses these blocks
-# and can queue them on a GPU or send them to slurm.
+# Every command is commented out: copy one to run it by hand, or feed the whole
+# file to scripts/cluster/submit_train.sh, which queues them on a GPU or slurm.
 
 # ========================================================================
 # mlp  nconst=16

@@ -22,12 +22,11 @@ experiment_name: jet_tagging_gdl_dev
 
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
-# Single-checkpoint mode: evaluate exactly this checkpoint. Ignored once
-# checkpoint_manifest_path is set.
+# Single-checkpoint mode, ignored once checkpoint_manifest_path is set.
 ckpt_path: null
 
-# Manifest mode: the checkpoint_manifest.json that train.py wrote, whose runs are all
-# tested in turn. It sits in the training run's hydra.run.dir.
+# Manifest mode: the checkpoint_manifest.json train.py left in its run directory, every run of it
+# tested in turn.
 checkpoint_manifest_path: null
 
 seed: 12345

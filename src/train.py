@@ -1,14 +1,10 @@
-# Training entry point: one main run, then the cross-validation folds, then the manifest.
 """Fit one architecture on the hls4ml jet data set.
 
-Every run fits a main model on the record's own train/validation split. When ``data.n_folds >= 2``
-it then fits one model per fold over the pooled train and validation jets, which is where the
-uncertainty on a reported accuracy comes from. The metrics are returned three times over: once
-under ``main/``, once per fold under ``fold<i>/``, and once at the top level mirroring the main
-run, which is what an Optuna trial reads back.
-
-Nothing is tested here. The run writes a checkpoint manifest (``src/utils/checkpoints.py``) and
-``src/eval.py`` tests every checkpoint listed in it.
+The main run keeps the record's own train/validation split; ``data.n_folds >= 2`` adds one run per
+fold over the pooled train and validation jets, which is where the quoted uncertainty comes from.
+Metrics come back under ``main/``, per fold under ``fold<i>/``, and once more at the top level,
+which is what an Optuna trial reads. Nothing is tested here: the run writes a checkpoint manifest
+that ``src/eval.py`` picks up.
 """
 
 from pathlib import Path
@@ -22,14 +18,12 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
-# Before any other import of the project: .env carries PROJECT_ROOT, which every path in
-# configs/paths/default.yaml resolves against, and HF_HUB_CACHE, which huggingface_hub
-# reads once at import time.
+# Before any src import: .env carries PROJECT_ROOT and HF_HUB_CACHE, both read at import time.
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True, dotenv=True)
 
 from src.utils.omegaconf import register_resolvers
 
-# Before Hydra composes anything, since the configs interpolate ${len:} and ${short_hash:}.
+# Before Hydra composes: the configs interpolate ${len:} and ${short_hash:}.
 register_resolvers()
 
 from src.callbacks.plotting import PlottingCallback
@@ -65,9 +59,8 @@ def _fold_callbacks(
 ) -> list[Callback]:
     """Instantiate one run's callbacks, with its checkpoints in a directory of its own.
 
-    :param results_callback: the instance the folds share, which replaces the one this run
-        composed; ``None`` leaves the composed callbacks untouched.
-    :param checkpoint_subdir: directory under ``${paths.output_dir}/checkpoints``.
+    :param results_callback: replaces the composed one so the folds share a table; ``None`` leaves
+        the composed callbacks untouched.
     """
     callbacks = instantiate_callbacks(cfg.get("callbacks"))
     if results_callback is not None:
@@ -79,8 +72,7 @@ def _fold_callbacks(
         if isinstance(callback, ModelCheckpoint):
             callback.dirpath = str(checkpoint_dir)
         elif isinstance(callback, PlottingCallback):
-            # Same subdirectory as the checkpoints: without it every fold would draw over the
-            # previous fold's figures, since they all share ${paths.output_dir}/plots.
+            # Without a subdirectory of its own, every fold would draw over the previous one.
             callback.subdir = checkpoint_subdir
     return callbacks
 
@@ -88,9 +80,8 @@ def _fold_callbacks(
 def _drop_lr_monitor(callbacks: list[Callback]) -> list[Callback]:
     """Remove LearningRateMonitor, which raises at on_train_start when there is no logger.
 
-    Searches, debug runs and the catalogue blocks all pass ``logger=none`` while composing
-    ``callbacks=default`` or ``callbacks=search``, and the pair is a crash rather than a warning in
-    Lightning, so the monitor is dropped here instead of from the configs.
+    Searches and debug runs compose the callbacks with ``logger=none``, a crash rather than a
+    warning in Lightning, so the monitor is dropped here instead of from the configs.
     """
     return [cb for cb in callbacks if not isinstance(cb, LearningRateMonitor)]
 
@@ -105,11 +96,10 @@ def _run_one_fold(
 ) -> tuple[Trainer, LightningModule, list[Callback], list[Logger]]:
     """Fit one model on whichever split *datamodule* currently holds.
 
-    The datamodule is not rebuilt between folds: the record is read and the k-fold pool
-    assembled once, and ``set_fold`` alone moves the split.
+    The datamodule is not rebuilt between folds: the pool is assembled once and ``set_fold`` alone
+    moves the split.
 
     :param fold_label: names the run in the logs and in the manifest, "main" or "fold_<i>".
-    :param ckpt_path: a checkpoint to resume the fit from.
     :return: the trainer, the fitted algorithm, its callbacks and its loggers.
     """
     log.info(f"[{fold_label}] Instantiating algorithm <{cfg.algorithm._target_}>")
@@ -142,8 +132,8 @@ def _manifest_run(
 ) -> ManifestRun | None:
     """The manifest entry of a finished run, or ``None`` when it saved no checkpoint.
 
-    A debug run, or any run composed without the model_checkpoint callback, trains normally but
-    leaves nothing for ``src/eval.py`` to load. That is worth a warning, not a failure.
+    A run composed without model_checkpoint trains normally but leaves nothing for ``src/eval.py``
+    to load, which is worth a warning rather than a failure.
     """
     try:
         checkpoint_path = best_or_last_checkpoint(trainer)
@@ -160,8 +150,8 @@ def _run_folds(
 ) -> tuple[dict[str, Any], list[ManifestRun]]:
     """Fit one model per fold over the pooled train and validation jets.
 
-    :return: the fold metrics, keyed ``fold<i>/<metric>`` with i counting from one, and the
-        manifest entries of the folds that saved a checkpoint.
+    :return: metrics keyed ``fold<i>/<metric>`` with i counting from one, and the manifest entries
+        of the folds that saved a checkpoint.
     """
     results_callback = _shared_results_callback(cfg)
     datamodule.n_folds = n_folds
@@ -181,8 +171,8 @@ def _run_folds(
 def _write_manifest(cfg: DictConfig, n_folds: int, runs: list[ManifestRun]) -> None:
     """Record what this training left behind, for ``src/eval.py`` to pick up.
 
-    :param n_folds: the number of folds fitted, or 0 when only the main run was, which is what
-        tells the evaluation whether it has folds to aggregate.
+    :param n_folds: 0 when only the main run was fitted, which is how the evaluation knows it has
+        no folds to aggregate.
     """
     manifest = Manifest(
         n_folds=n_folds if n_folds >= 2 else 0,
@@ -197,7 +187,6 @@ def _write_manifest(cfg: DictConfig, n_folds: int, runs: list[ManifestRun]) -> N
 def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Fit the main run, then the folds when there are any, then write the manifest.
 
-    :param cfg: the config Hydra composed.
     :return: the metrics of all runs, and the objects of the main run.
     """
     if cfg.get("seed") is not None:
@@ -208,8 +197,7 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     datamodule.prepare_data()
     n_folds = int(cfg.data.get("n_folds") or 1)
 
-    # The main run keeps the record's own train/validation split whatever n_folds asks for,
-    # so the number a search reads back comes from one clean split, not a fold average.
+    # The main run keeps the record's own split: a search then reads one clean number, not a mean.
     datamodule.n_folds = 1
     datamodule.set_fold(0)
     trainer, algorithm, callbacks, loggers = _run_one_fold(
@@ -244,11 +232,7 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> float | None:
-    """Train, and return ``cfg.optimized_metric`` for an Optuna sweep to maximise.
-
-    :param cfg: the config Hydra composed.
-    :return: the optimised metric of the main run, or ``None`` when none is configured.
-    """
+    """Train, and return the main run's ``cfg.optimized_metric`` for Optuna to maximise."""
     extras(cfg)
     metric_dict, _ = train(cfg)
     return get_metric_value(metric_dict, cfg.get("optimized_metric"))

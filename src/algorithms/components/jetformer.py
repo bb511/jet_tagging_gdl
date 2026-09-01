@@ -1,11 +1,10 @@
-# JetFormer layers and the network assembled from them, a replica of the reference model.
 """Custom transformer block matching the reference JetFormer architecture (arXiv:2601.17215).
 
 Differs from a standard nn.TransformerEncoderLayer in three ways: bias-free Q/K/V projections, a
 pre-activation FFN (norm -> activation -> linear, not the usual linear -> activation), and a
 learnable normalization layer over the full (num_tokens x num_tokens) attention-score matrix that
-is registered (so it contributes to the parameter count) but never applied in forward, matching the
-reference implementation, where this layer is defined but commented out.
+is registered, so it counts in the parameter total, but never applied in forward, as in the
+reference, where it is defined but commented out.
 """
 
 import torch
@@ -44,8 +43,7 @@ class JetFormerAttention(nn.Module):
         self.v = nn.Linear(dim, dim, bias=False)
         self.out = nn.Linear(dim, dim, bias=True)
 
-        # Registered but unused in forward, kept only so the parameter count
-        # matches the reference (it has the same dead layer).
+        # Unused in forward, kept so the parameter count matches the reference's own dead layer.
         score_dim = num_tokens * num_tokens
         self.pre_exp_norm = (
             nn.BatchNorm1d(score_dim) if normalization == "batch" else nn.LayerNorm(score_dim)
@@ -99,16 +97,11 @@ class JetFormerBlock(nn.Module):
 class JetFormerNet(nn.Module):
     """Embed the constituents, prepend a CLS token, run the blocks, read token 0.
 
-    :param in_dim: feature columns per constituent.
     :param nconstituents: constituents per jet; with the CLS token this fixes the sequence length
         that the dead score-norm layer of each block is sized for.
-    :param embed_dim: token width.
     :param num_heads: attention heads per block, which must divide ``embed_dim``.
-    :param num_transformers: number of blocks in the stack.
-    :param out_dim: number of jet classes.
     :param normalization: either ``batch`` or ``layer``, used by every :class:`SeqNorm` here.
     :param activation: either ``relu`` or ``silu``, used in the feed-forward sub-layers.
-    :param dropout: dropout on the feed-forward branch of each block.
     """
 
     def __init__(

@@ -1,5 +1,4 @@
-# Small helpers wrapping a Hydra task: optional startup work, failure handling, metrics.
-"""Utilities shared by ``src/train.py`` and ``src/eval.py``."""
+"""Startup work, failure handling and metric retrieval, shared by both entry points."""
 
 import warnings
 from collections.abc import Callable
@@ -16,11 +15,8 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 def extras(cfg: DictConfig) -> None:
     """Apply the optional conveniences configured under ``cfg.extras``.
 
-    Silencing warnings, prompting for tags, printing the config tree, and setting the float32
-    matmul precision (``high`` trades a little accuracy for tensor cores on the V100s and above;
-    ``null`` leaves torch's default alone).
-
-    :param cfg: the composed config tree.
+    Warning filters, tag prompting, the config tree, and the float32 matmul precision (``high``
+    trades a little accuracy for tensor cores on Volta and later; ``null`` leaves torch alone).
     """
     if not cfg.get("extras"):
         log.warning("Extras config not found! <cfg.extras=null>")
@@ -47,8 +43,8 @@ def extras(cfg: DictConfig) -> None:
 def task_wrapper(task_func: Callable) -> Callable:
     """Log the traceback and the output directory when the task fails, then re-raise.
 
-    Re-raising is deliberate: an Optuna trial that dies of an invalid hyperparameter
-    combination should fail loudly rather than report a silent objective.
+    Re-raising is deliberate: an Optuna trial must fail loudly rather than report a silent
+    objective.
     """
 
     def wrap(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -66,13 +62,11 @@ def task_wrapper(task_func: Callable) -> Callable:
 
 
 def get_metric_value(metric_dict: dict[str, Any], metric_name: str | None) -> float | None:
-    """Read one metric out of a finished run's metric dict.
+    """Read one scalar metric out of a finished run's metrics.
 
-    :param metric_dict: the metrics a task returned, values being scalar tensors.
-    :param metric_name: the metric to read; ``None`` returns ``None``, which is what a run outside
-        a hyperparameter search wants.
-    :raises Exception: if the metric was never logged, since an Optuna study would otherwise
-        optimise nothing.
+    :param metric_name: the metric to read, ``None`` outside a hyperparameter search.
+    :raises Exception: if the metric was never logged, since a study would otherwise optimise
+        nothing.
     """
     if not metric_name:
         log.info("Metric name is None! Skipping metric value retrieval...")

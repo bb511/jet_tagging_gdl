@@ -1,13 +1,9 @@
-# Evaluation entry point: test the checkpoints a training run recorded in its manifest.
 """Test the checkpoints of one training run on the record's held-out test split.
 
-``src/train.py`` writes a checkpoint manifest; this script reads it and tests every checkpoint in
-it. The test split is the record's own, which the k-fold pooling never touches, so all folds are
-scored on the same jets. A single checkpoint can be tested directly with ``ckpt_path`` instead.
-
-One ``ResultsTableCallback`` is shared by the runs that enter the results table, so a k-fold
-training yields one row carrying the spread over folds. The main run and the folds are never mixed
-in that row: the folds re-split the pool the main run trained on.
+Every checkpoint of the manifest ``src/train.py`` wrote is tested, or a single one with
+``ckpt_path``. The k-fold pooling never touches the test split, so all folds are scored on the same
+jets. The runs entering the results table share one ``ResultsTableCallback``, so a k-fold training
+yields one row carrying the spread over folds.
 """
 
 from pathlib import Path
@@ -20,14 +16,12 @@ from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
-# Before any other import of the project: .env carries PROJECT_ROOT, which every path in
-# configs/paths/default.yaml resolves against, and HF_HUB_CACHE, which huggingface_hub
-# reads once at import time.
+# Before any src import: .env carries PROJECT_ROOT and HF_HUB_CACHE, both read at import time.
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True, dotenv=True)
 
 from src.utils.omegaconf import register_resolvers
 
-# Before Hydra composes anything, since the configs interpolate ${len:} and ${short_hash:}.
+# Before Hydra composes: the configs interpolate ${len:} and ${short_hash:}.
 register_resolvers()
 
 from src.callbacks.plotting import PlottingCallback
@@ -48,8 +42,7 @@ log = RankedLogger(__name__, rank_zero_only=True)
 def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
     """The checkpoints this evaluation covers: a manifest's runs, or a single ``ckpt_path``.
 
-    :raises ValueError: when neither ``checkpoint_manifest_path`` nor ``ckpt_path`` is set, so that
-        a mistyped path fails here rather than testing nothing.
+    :raises ValueError: when neither is set, so a mistyped path fails rather than test nothing.
     """
     manifest_path = cfg.get("checkpoint_manifest_path")
     if manifest_path:
@@ -67,8 +60,8 @@ def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
 def _aggregated_labels(runs: list[ManifestRun]) -> set[str]:
     """The labels of the runs whose test metrics enter the results table.
 
-    The folds when the manifest holds any, the main run otherwise. Mixing the two would count the
-    same jets twice, since the folds re-split the pool the main run trained on.
+    The folds when the manifest holds any, the main run otherwise: the folds re-split the pool the
+    main run trained on, so mixing the two would count the same jets twice.
     """
     folds = {run.fold_label for run in runs if run.fold_idx is not None}
     return folds or {run.fold_label for run in runs}
@@ -84,13 +77,10 @@ def _shared_results_callback(cfg: DictConfig) -> ResultsTableCallback | None:
 def _eval_callbacks(
     cfg: DictConfig, results_callback: ResultsTableCallback | None, fold_label: str
 ) -> list[Callback]:
-    """Instantiate one run's callbacks.
+    """Instantiate one run's callbacks, with its figures in a subdirectory of their own.
 
-    :param results_callback: the instance shared across the runs that enter the results table,
-        replacing the one this run composed; ``None`` drops the results table from this run
-        altogether, which is how a main run is kept out of a k-fold row.
-    :param fold_label: names the plot subdirectory, so that the checkpoints of one manifest do not
-        draw over each other's figures.
+    :param results_callback: the shared instance, replacing the one this run composed; ``None``
+        drops the results table, which is how a main run is kept out of a k-fold row.
     """
     callbacks = instantiate_callbacks(cfg.get("callbacks"))
     if results_callback is None:
@@ -113,11 +103,8 @@ def _eval_one_checkpoint(
 ) -> dict[str, Any]:
     """Load one checkpoint into a fresh algorithm and test it.
 
-    Re-seeded first: the invariance callback draws its SO(2), SO(3) and Lorentz transforms
-    from the global torch RNG, so without this the folds would see different draws and their
-    spread would mix model variation with transform variation.
-
-    :return: the trainer's callback metrics for this checkpoint.
+    Re-seeded first: the invariance callback draws its transforms from the global torch RNG, so the
+    spread over folds would otherwise mix model variation with transform variation.
     """
     if cfg.get("seed") is not None:
         L.seed_everything(cfg.seed, workers=True)
@@ -140,8 +127,7 @@ def _eval_one_checkpoint(
         )
 
     log.info(f"[{run.fold_label}] Testing {run.checkpoint_path}")
-    # weights_only=False: the checkpoints carry the hyperparameters as plain containers,
-    # which torch.load rejects under its 2.6 default.
+    # weights_only=False: the hyperparameters are plain containers, which torch.load 2.6 rejects.
     trainer.test(
         model=algorithm, datamodule=datamodule, ckpt_path=run.checkpoint_path, weights_only=False
     )
@@ -152,10 +138,7 @@ def _eval_one_checkpoint(
 def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Test every checkpoint this evaluation covers, one after the other.
 
-    :param cfg: the config Hydra composed; ``checkpoint_manifest_path`` or ``ckpt_path`` says what
-        to test.
-    :return: the metrics of every checkpoint, keyed ``<fold_label>/<metric>``, and the objects the
-        runs share.
+    :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``, and the shared objects.
     """
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
@@ -165,9 +148,8 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     aggregated = _aggregated_labels(runs)
     results_callback = _shared_results_callback(cfg)
     if results_callback is not None:
-        # The row is written once this many runs have been tested. The manifest, not
-        # data.n_folds, says how many there are: a single checkpoint evaluated under an
-        # experiment config that trains five folds would otherwise never yield a row.
+        # The manifest, not data.n_folds, says how many runs the row waits for: one checkpoint
+        # tested under a five-fold experiment config would otherwise never yield a row.
         results_callback.n_folds = len(aggregated)
 
     all_metrics: dict[str, Any] = {}
@@ -184,10 +166,7 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="eval.yaml")
 def main(cfg: DictConfig) -> None:
-    """Evaluate the checkpoints ``cfg`` points at.
-
-    :param cfg: the config Hydra composed.
-    """
+    """Evaluate the checkpoints ``cfg`` points at."""
     extras(cfg)
     evaluate(cfg)
 

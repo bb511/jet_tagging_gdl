@@ -1,4 +1,3 @@
-# Diagnostic plots of one run: training curves, ROC curves and the confusion matrix.
 """Draw the per-run plots and attach them to MLflow when MLflow is logging.
 
 Every number comes from Lightning's hooks rather than from a logger backend, so the plots are drawn
@@ -25,8 +24,8 @@ log = RankedLogger(__name__, rank_zero_only=True)
 def _step_logits(pl_module: LightningModule, outputs: Any, x: torch.Tensor) -> torch.Tensor:
     """Return the logits for a batch, reusing the step's own when it hands them over.
 
-    The steps of :class:`~src.algorithms.JetTaggingModule` return their ``model_step`` dict, so the
-    logits come free; a module whose step returns nothing pays one forward pass here.
+    :class:`~src.algorithms.JetTaggingModule` returns its ``model_step`` dict, so the logits come
+    free; a module whose step returns nothing pays one forward pass here.
     """
     if isinstance(outputs, dict) and "logits" in outputs:
         return outputs["logits"]
@@ -53,7 +52,7 @@ class _Predictions:
         self.labels: list[torch.Tensor] = []
 
     def clear(self) -> None:
-        """Drop everything collected so far."""
+        """Drop the predictions of the previous pass."""
         self.logits.clear()
         self.labels.clear()
 
@@ -73,10 +72,8 @@ class _Predictions:
 class PlottingCallback(Callback):
     """Write the diagnostic plots of a run under ``<default_root_dir>/plots``.
 
-    Three families: the training curves once the fit ends, and one-vs-rest ROC curves
-    with a confusion matrix, both for the last validation epoch and for the test pass.
-    The entry points set :attr:`subdir` per fold, so the folds of one training keep their
-    figures apart.
+    Three families: the training curves once the fit ends, and one-vs-rest ROC curves with a
+    confusion matrix, both for the last validation epoch and for the test pass.
 
     :param class_names: display names of the output classes, in column order.
     """
@@ -91,8 +88,7 @@ class PlottingCallback(Callback):
         self._test = _Predictions()
         self._epoch_lr: float = float("nan")
         # The entry points set this to the run label ("main", "fold_1"), so that the folds of
-        # one training do not draw over each other's figures. None keeps the plots directly
-        # under the run directory.
+        # one training do not draw over each other's figures.
         self.subdir: str | None = None
 
     def on_train_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
@@ -126,9 +122,9 @@ class PlottingCallback(Callback):
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Append this epoch's point to every curve.
 
-        Not at the end of the validation epoch: the validation loop runs inside the training
-        epoch, so ``callback_metrics`` still carries the previous epoch's ``train/*`` there, and
-        none at all in the first epoch. Here both halves of the epoch are in.
+        Not at the end of the validation epoch: that loop runs inside the training epoch, so
+        ``callback_metrics`` still carries the previous epoch's ``train/*`` there, and none at all
+        in the first epoch.
         """
         metrics = trainer.callback_metrics
         self._history["epoch"].append(trainer.current_epoch)

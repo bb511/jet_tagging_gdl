@@ -12,31 +12,16 @@ import torch
 from packaging.version import Version
 from pytest import MarkDecorator
 
-from tests.helpers.package_available import (
-    _COMET_AVAILABLE,
-    _DEEPSPEED_AVAILABLE,
-    _FAIRSCALE_AVAILABLE,
-    _IS_WINDOWS,
-    _MLFLOW_AVAILABLE,
-    _NEPTUNE_AVAILABLE,
-    _SH_AVAILABLE,
-    _TPU_AVAILABLE,
-    _WANDB_AVAILABLE,
-)
+from tests.helpers.package_available import _IS_WINDOWS
 
 
 class RunIf:
-    """RunIf wrapper for conditional skipping of tests.
-
-    Fully compatible with `@pytest.mark`.
-
-    Example:
+    """Conditional skipping of tests, fully compatible with `@pytest.mark`.
 
     ```python
-        @RunIf(min_torch="1.8")
-        @pytest.mark.parametrize("arg1", [1.0, 2.0])
-        def test_wrapper(arg1):
-            assert arg1 > 0
+        @RunIf(min_gpus=1)
+        def test_wrapper():
+            ...
     ```
     """
 
@@ -47,33 +32,9 @@ class RunIf:
         max_torch: str | None = None,
         min_python: str | None = None,
         skip_windows: bool = False,
-        sh: bool = False,
-        tpu: bool = False,
-        fairscale: bool = False,
-        deepspeed: bool = False,
-        wandb: bool = False,
-        neptune: bool = False,
-        comet: bool = False,
-        mlflow: bool = False,
         **kwargs: dict[Any, Any],
     ) -> MarkDecorator:
-        """Creates a new `@RunIf` `MarkDecorator` decorator.
-
-        :param min_gpus: Min number of GPUs required to run test.
-        :param min_torch: Minimum pytorch version to run test.
-        :param max_torch: Maximum pytorch version to run test.
-        :param min_python: Minimum python version required to run test.
-        :param skip_windows: Skip test for Windows platform.
-        :param tpu: If TPU is available.
-        :param sh: If `sh` module is required to run the test.
-        :param fairscale: If `fairscale` module is required to run the test.
-        :param deepspeed: If `deepspeed` module is required to run the test.
-        :param wandb: If `wandb` module is required to run the test.
-        :param neptune: If `neptune` module is required to run the test.
-        :param comet: If `comet` module is required to run the test.
-        :param mlflow: If `mlflow` module is required to run the test.
-        :param kwargs: Native `pytest.mark.skipif` keyword arguments.
-        """
+        """Create the `skipif` mark; *kwargs* are passed to `pytest.mark.skipif` untouched."""
         conditions = []
         reasons = []
 
@@ -82,13 +43,11 @@ class RunIf:
             reasons.append(f"GPUs>={min_gpus}")
 
         if min_torch:
-            torch_version = _distribution_version("torch")
-            conditions.append(Version(torch_version) < Version(min_torch))
+            conditions.append(Version(_distribution_version("torch")) < Version(min_torch))
             reasons.append(f"torch>={min_torch}")
 
         if max_torch:
-            torch_version = _distribution_version("torch")
-            conditions.append(Version(torch_version) >= Version(max_torch))
+            conditions.append(Version(_distribution_version("torch")) >= Version(max_torch))
             reasons.append(f"torch<{max_torch}")
 
         if min_python:
@@ -101,38 +60,6 @@ class RunIf:
         if skip_windows:
             conditions.append(_IS_WINDOWS)
             reasons.append("does not run on Windows")
-
-        if tpu:
-            conditions.append(not _TPU_AVAILABLE)
-            reasons.append("TPU")
-
-        if sh:
-            conditions.append(not _SH_AVAILABLE)
-            reasons.append("sh")
-
-        if fairscale:
-            conditions.append(not _FAIRSCALE_AVAILABLE)
-            reasons.append("fairscale")
-
-        if deepspeed:
-            conditions.append(not _DEEPSPEED_AVAILABLE)
-            reasons.append("deepspeed")
-
-        if wandb:
-            conditions.append(not _WANDB_AVAILABLE)
-            reasons.append("wandb")
-
-        if neptune:
-            conditions.append(not _NEPTUNE_AVAILABLE)
-            reasons.append("neptune")
-
-        if comet:
-            conditions.append(not _COMET_AVAILABLE)
-            reasons.append("comet")
-
-        if mlflow:
-            conditions.append(not _MLFLOW_AVAILABLE)
-            reasons.append("mlflow")
 
         reasons = [rs for cond, rs in zip(conditions, reasons) if cond]
         return pytest.mark.skipif(

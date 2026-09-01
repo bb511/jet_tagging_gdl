@@ -2,26 +2,21 @@
 # ========================================================================
 # MLP HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
-# One Optuna driver per (constituent count, regime): 3 x 7 = 21 studies, with
-# the same search space and the same 100-trial budget for every one of them,
-# so that the regimes stay comparable.
+# One Optuna driver per (constituent count, regime): 3 x 7 = 21 studies, same
+# search space and same 100-trial budget throughout so the regimes stay
+# comparable. The objective is the main run's clean val/acc_best; the invariance
+# metrics are never tuned on, since that would select for the probe rather than
+# for the symmetry.
 #
-# The objective is the main run's clean val/acc_best, which src/train.py
-# returns. The invariance metrics are reported by the callbacks and never
-# tuned on: a search that maximised them would select for the probe rather
-# than for the symmetry.
+# Trials run at data.n_folds=1 with callbacks=search, so they draw no figure and
+# never write to results/. The study name is not on the command line:
+# configs/hparams_search/hls4ml/mlp_optuna.yaml derives it from the regime as
+# <model>_nconst<N>_<method>_<scheme>; the SCL regimes select _scl_optuna instead,
+# which adds algorithm.symm_loss_weight. lorentz_eta_max defines the probe and is
+# never tuned.
 #
-# Trials run at data.n_folds=1 with callbacks=search, so none of them draws a
-# figure or writes to results/. The study name is not on the command line:
-# configs/hparams_search/hls4ml/mlp_optuna.yaml derives it from the regime
-# as <model>_nconst<N>_<method>_<scheme>. The three SCL regimes select the
-# _scl_optuna variant instead, which adds algorithm.symm_loss_weight to the
-# space; lorentz_eta_max is never tuned, since it defines the probe.
-#
-# Hand-maintained, unlike the train and eval catalogues: no tool regenerates
-# this file. Every command is commented out; feed the whole file to
-# scripts/cluster/submit_search.sh, which parses these blocks and launches one
-# nohup'd driver each.
+# Hand-maintained, unlike the train and eval catalogues. Every command is
+# commented out; feed the whole file to scripts/cluster/submit_search.sh.
 
 # ========================================================================
 # mlp  nconst=16

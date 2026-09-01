@@ -1,13 +1,13 @@
 # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
 
 _target_: lightning.pytorch.callbacks.EarlyStopping
-monitor: ??? # the metric to watch, set by whichever callbacks config selects this one
-min_delta: 0.0 # smallest change in the metric that counts as an improvement
+monitor: ??? # set by whichever callbacks config selects this one
+min_delta: 0.0
 patience: 3 # checks without an improvement before the run stops
 verbose: true
-mode: "min" # "max" if a higher value of the monitored metric is better
-strict: true # fail the run if the monitored metric is never logged
-check_finite: true # stop as soon as the metric turns NaN or infinite
-stopping_threshold: null # stop once the metric reaches this value
-divergence_threshold: null # stop once the metric falls below this value
-check_on_train_epoch_end: null # check at the end of the training epoch, not of validation
+mode: "min"
+strict: true
+check_finite: true
+stopping_threshold: null
+divergence_threshold: null
+check_on_train_epoch_end: null

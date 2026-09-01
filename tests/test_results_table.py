@@ -1,8 +1,7 @@
 """One row per run: how the folds are aggregated, and where the row is written.
 
 The results tables are the paper's numbers, and a run that has already cost GPU-days writes its row
-once. Every quantity below is therefore pinned against hand-computed values rather than against
-whatever the callback happens to produce.
+once, so every quantity below is pinned against hand-computed values.
 """
 
 import csv
@@ -14,6 +13,7 @@ from src.callbacks.results_table import ResultsTableCallback
 
 GROUPS = ("so2", "so3", "lorentz")
 FLIP_SUFFIXES = ("flip_recover", "flip_stable", "flip_degrade")
+MEAN_OF_THREE = (0.3 + 0.6 + 0.9) / 3
 
 # The header of the tables written before the refactor, which new runs still append to.
 LEGACY_HEADER = (
@@ -59,17 +59,16 @@ def _rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(table))
 
 
+def _wasserstein_fold(so2: float, so3: float, lorentz: float) -> dict[str, float]:
+    """One fold reporting the three groups' Wasserstein distances."""
+    return {f"invariance/{g}_wasserstein": v for g, v in zip(GROUPS, (so2, so3, lorentz))}
+
+
 def _fold(so2: float, so3: float, lorentz: float) -> dict[str, float]:
     """One fold's invariance metrics, the same value for every family of a given group."""
-    fold = {f"invariance/{group}_wasserstein": 0.0 for group in GROUPS}
+    fold = _wasserstein_fold(0.0, 0.0, 0.0)
     for suffix in FLIP_SUFFIXES:
-        fold.update(
-            {
-                f"invariance/so2_{suffix}": so2,
-                f"invariance/so3_{suffix}": so3,
-                f"invariance/lorentz_{suffix}": lorentz,
-            }
-        )
+        fold |= {f"invariance/{g}_{suffix}": v for g, v in zip(GROUPS, (so2, so3, lorentz))}
 
     return fold
 
@@ -83,92 +82,62 @@ def _fill(callback: ResultsTableCallback, *invariance: dict[str, float], **overr
 
 def test_every_group_keeps_its_per_fold_values_beside_the_mean(tmp_path: Path) -> None:
     """The paired bootstrap in add_pvalues.py reads the fold values, not the summary."""
-    callback = _callback(tmp_path)
-    callback._fold_invariance = [
-        {f"invariance/{group}_wasserstein": value for group, value in zip(GROUPS, values)}
-        for values in ([0.1, 0.2, 0.3], [0.15, 0.25, 0.35], [0.2, 0.3, 0.4])
-    ]
-    callback._fold_test_acc = [0.9, 0.91, 0.92]
-    callback._fold_flops = [1000.0, 1000.0, 1000.0]
-
+    callback = _callback(tmp_path, n_folds=4)
+    _fill(
+        callback,
+        _wasserstein_fold(0.1, 0.2, 0.3),
+        _wasserstein_fold(0.15, 0.25, 0.35),
+        _wasserstein_fold(0.2, 0.3, 0.4),
+        _wasserstein_fold(float("nan"), 0.25, 0.35),
+        test_acc=[0.9, 0.91, 0.92, 0.93],
+    )
     callback._maybe_write_summary()
     row = _rows(callback.output_path)[0]
 
-    assert row["so2_wasserstein_folds"] == "0.100000;0.150000;0.200000"
-    assert row["so3_wasserstein_folds"] == "0.200000;0.250000;0.300000"
-    assert row["lorentz_wasserstein_folds"] == "0.300000;0.350000;0.400000"
-    assert float(row["so2_wasserstein_mean"]) == (0.1 + 0.15 + 0.2) / 3
-    assert row["folds_used"] == "3"
+    assert row["so2_wasserstein_folds"] == "0.100000;0.150000;0.200000;nan"
+    assert row["so3_wasserstein_folds"] == "0.200000;0.250000;0.300000;0.250000"
+    assert row["lorentz_wasserstein_folds"] == "0.300000;0.350000;0.400000;0.350000"
+    # A NaN fold averaged in would silently drag the whole row towards zero.
+    assert float(row["so2_wasserstein_mean"]) == pytest.approx((0.1 + 0.15 + 0.2) / 3)
+    assert row["folds_used"] == "4"
     assert row["model"] == "mlp"
+    # The published tables are appended to, so the column order is part of the interface.
+    with open(callback.output_path, newline="") as table:
+        assert next(csv.reader(table)) == LEGACY_HEADER
 
 
-def test_a_fold_that_reported_no_value_is_left_out_of_the_mean(tmp_path: Path) -> None:
-    """A NaN averaged in would silently drag a whole row towards zero."""
-    callback = _callback(tmp_path)
-    folds = [
-        {f"invariance/{group}_wasserstein": value for group, value in zip(GROUPS, values)}
-        for values in ([0.1, 0.2, 0.3], [float("nan"), 0.25, 0.35], [0.2, 0.3, 0.4])
-    ]
-    callback._fold_invariance = folds
-    callback._fold_test_acc = [0.9, 0.91, 0.92]
-    callback._fold_flops = [1000.0, 1000.0, 1000.0]
-
-    callback._maybe_write_summary()
-    row = _rows(callback.output_path)[0]
-
-    assert row["so2_wasserstein_folds"] == "0.100000;nan;0.200000"
-    assert float(row["so2_wasserstein_mean"]) == pytest.approx((0.1 + 0.2) / 2)
-
-
-def test_a_run_is_judged_on_the_group_it_was_trained_on(tmp_path: Path) -> None:
-    """An SO(2)-augmented run must not be scored on the Lorentz probe it never saw."""
-    callback = _callback(tmp_path, augmentation_scheme="so2", n_folds=1)
-    _fill(callback, _fold(0.4, 0.5, 0.6))
-
-    callback._maybe_write_summary()
-    row = _rows(callback.output_path)[0]
-
-    assert float(row["flip_recover_mean"]) == pytest.approx(0.4)
-    assert float(row["flip_stable_mean"]) == pytest.approx(0.4)
-    assert float(row["flip_degrade_mean"]) == pytest.approx(0.4)
-
-
-def test_a_baseline_is_judged_on_the_mean_over_the_three_groups(tmp_path: Path) -> None:
-    """A run trained on no symmetry belongs to none of them, so all three are averaged."""
-    callback = _callback(tmp_path, augmentation_scheme="none", n_folds=1)
-    _fill(callback, _fold(0.3, 0.6, 0.9))
-
-    callback._maybe_write_summary()
-    row = _rows(callback.output_path)[0]
-
-    assert float(row["flip_recover_mean"]) == pytest.approx((0.3 + 0.6 + 0.9) / 3)
-
-
-def test_mean_all_averages_the_three_groups_whatever_the_run_was_trained_on(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "scheme, mode, expected, expected_key",
+    [
+        # A run is judged on the group it was trained on: an SO(2)-augmented run must not be
+        # scored on the Lorentz probe it never saw.
+        ("so2", "scheme", 0.3, "invariance/so2_wasserstein"),
+        # A run trained on no symmetry belongs to none of them, so all three are averaged, as
+        # mean_all does whatever the run was trained on.
+        ("none", "scheme", MEAN_OF_THREE, "invariance/mean_wasserstein"),
+        ("so2", "mean_all", MEAN_OF_THREE, "invariance/mean_wasserstein"),
+    ],
+)
+def test_the_selected_columns_follow_the_regime_or_average_over_it(
+    tmp_path: Path, scheme: str, mode: str, expected: float, expected_key: str
 ) -> None:
-    """The other way to fill the selected columns, for a table read across regimes."""
+    """The selected_inv_* columns are the one number a table is read across regimes by."""
     callback = _callback(
-        tmp_path, augmentation_scheme="so2", selected_metric_mode="mean_all", n_folds=1
+        tmp_path, augmentation_scheme=scheme, selected_metric_mode=mode, n_folds=1
     )
     _fill(callback, _fold(0.3, 0.6, 0.9))
-
     callback._maybe_write_summary()
     row = _rows(callback.output_path)[0]
 
-    assert row["selected_inv_key"] == "invariance/mean_wasserstein"
-    assert float(row["flip_recover_mean"]) == pytest.approx((0.3 + 0.6 + 0.9) / 3)
+    assert float(row["flip_recover_mean"]) == pytest.approx(expected)
+    assert row["selected_inv_key"] == expected_key
 
 
 def test_the_regime_and_the_feature_list_name_the_table(tmp_path: Path) -> None:
     """Three tables per feature list, so a baseline and an SCL run never share a file."""
-    baseline = _callback(tmp_path, augmentation_scheme="none", features=["px", "py", "pz", "e"])
-    scl = _callback(
-        tmp_path,
-        method="symm_loss",
-        augmentation_scheme="so3",
-        features=["px", "py", "pz", "e"],
-    )
+    features = ["px", "py", "pz", "e"]
+    baseline = _callback(tmp_path, augmentation_scheme="none", features=features)
+    scl = _callback(tmp_path, method="symm_loss", augmentation_scheme="so3", features=features)
 
     assert baseline.display_method == "baseline"
     assert baseline.output_path == tmp_path / "px_py_pz_e" / "results_table_baseline.csv"
@@ -177,34 +146,25 @@ def test_the_regime_and_the_feature_list_name_the_table(tmp_path: Path) -> None:
     assert not (tmp_path / "px_py_pz_e").exists()
 
 
-def test_the_row_is_written_only_once_every_fold_is_in(tmp_path: Path) -> None:
+def test_the_row_is_written_once_the_folds_are_in_and_a_second_run_appends(tmp_path: Path) -> None:
     """A row written after the first fold would carry no spread and no warning that it does not."""
     callback = _callback(tmp_path, n_folds=2)
     _fill(callback, _fold(0.4, 0.5, 0.6), test_acc=[0.9], flops=[1000.0])
-
     callback._maybe_write_summary()
+
     assert not callback.output_path.exists()
 
     _fill(callback, _fold(0.4, 0.5, 0.6), _fold(0.4, 0.5, 0.6), test_acc=[0.9, 0.92])
     callback._maybe_write_summary()
-    rows = _rows(callback.output_path)
-
-    assert len(rows) == 1
-    assert rows[0]["folds_used"] == "2"
-    assert rows[0]["test_acc_folds"] == "0.900000;0.920000"
-
-
-def test_a_second_run_appends_under_the_same_header(tmp_path: Path) -> None:
-    """A regime's table collects every architecture and constituent count of that regime."""
-    for accuracy in (0.9, 0.95):
-        callback = _callback(tmp_path, n_folds=1)
-        _fill(callback, _fold(0.4, 0.5, 0.6), test_acc=[accuracy])
-        callback._maybe_write_summary()
-
+    second = _callback(tmp_path, n_folds=1)
+    _fill(second, _fold(0.4, 0.5, 0.6), test_acc=[0.95])
+    second._maybe_write_summary()
     rows = _rows(callback.output_path)
 
     assert len(rows) == 2
-    assert [row["test_acc_mean"] for row in rows] == ["0.9", "0.95"]
+    assert rows[0]["folds_used"] == "2"
+    assert rows[0]["test_acc_folds"] == "0.900000;0.920000"
+    assert rows[1]["test_acc_mean"] == "0.95"
 
 
 def test_appending_under_a_different_header_is_refused(tmp_path: Path) -> None:
@@ -216,14 +176,3 @@ def test_appending_under_a_different_header_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="misalign"):
         callback._maybe_write_summary()
-
-
-def test_the_column_order_is_the_one_the_tables_on_disk_carry(tmp_path: Path) -> None:
-    """The published tables are appended to, so the order is part of the interface."""
-    callback = _callback(tmp_path, n_folds=1)
-    _fill(callback, _fold(0.4, 0.5, 0.6))
-
-    callback._maybe_write_summary()
-
-    with open(callback.output_path, newline="") as table:
-        assert next(csv.reader(table)) == LEGACY_HEADER

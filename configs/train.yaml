@@ -12,10 +12,8 @@ defaults:
   - hydra: default
   - logger: none
 
-  # An experiment config pins one (architecture, nconstituents) pair; the method and the
-  # symmetry group stay command-line overrides, e.g.
-  #   python src/train.py experiment=hls4ml/deepsets_16 data.method=symm_loss \
-  #       data.augmentation_scheme=so2
+  # Pins one (architecture, nconstituents) pair; data.method and data.augmentation_scheme stay
+  # command-line overrides, e.g. experiment=hls4ml/deepsets_16 data.method=symm_loss.
   - experiment: null
 
   - hparams_search: null
@@ -23,12 +21,11 @@ defaults:
   # Machine-specific settings, excluded from version control, hence optional.
   - optional local: default
 
-  # Enable from the command line, e.g. `python src/train.py debug=default`.
   - debug: null
 
 task_name: "train"
 
-# Overwrite from the command line with `tags="[first_tag, second_tag]"`.
+# Overwrite with `tags="[first_tag, second_tag]"`.
 tags: ["dev"]
 
 experiment_name: jet_tagging_gdl_dev
@@ -39,8 +36,7 @@ run_name: ${short_hash:${hydra:runtime.output_dir},12}
 # Resume training from this checkpoint.
 ckpt_path: null
 
-# What train.py returns, and therefore what an Optuna study maximises. The main run's
-# value, not a fold average, so the objective is one clean number per trial.
+# What an Optuna study maximises: the main run's value, not a fold average.
 optimized_metric: val/acc_best
 
 seed: 12345

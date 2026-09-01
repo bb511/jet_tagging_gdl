@@ -1,11 +1,10 @@
-# Lightning data module for the record published at:
-# https://huggingface.co/datasets/fastmachinelearning/hls4ml_lhc_jets_150p
 """The only data route of this project: the published hls4ml jet record.
 
-The record carries its own pipeline under ``loader/`` and the configuration tree that drives it
-under ``configs/``, so no reading, restricting or normalising stage runs here: the record is
-downloaded, its own configuration is composed, and the tensors it hands back are wrapped in the
-datasets the rest of the project trains on.
+The record, https://huggingface.co/datasets/fastmachinelearning/hls4ml_lhc_jets_150p, carries its
+own pipeline under ``loader/`` and the configuration tree that drives it under ``configs/``, so no
+reading, restricting or normalising stage runs here: the record is downloaded, its own
+configuration is composed, and the tensors it hands back are wrapped in the datasets the rest of
+the project trains on.
 
 Batches are ``(x, y)``, with ``x`` of shape (jets, constituents, features), float32, and ``y`` a
 one-hot vector of shape (jets, 5). Padded constituents are all-zero rows. The width of ``x`` is the
@@ -36,15 +35,15 @@ from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
-# The domains validated below, kept in step with src.algorithms.SUPPORTED_METHODS and
-# src.algorithms.losses.symmetry.SUPPORTED_GROUPS. They are duplicated rather than
-# imported so that the data package does not depend on the algorithms package.
+# Duplicated from src.algorithms.SUPPORTED_METHODS and
+# src.algorithms.losses.symmetry.SUPPORTED_GROUPS, rather than imported, so that the data
+# package does not depend on the algorithms package.
 SUPPORTED_METHODS = ("augmentation", "symm_loss")
 SUPPORTED_SCHEMES = ("none", "so2", "so3", "lorentz")
 
-# HLS4MLDataset is an IterableDataset that defines __len__, which Lightning warns is
-# unreliable under several workers. It is exact here: the workers stride through one
-# grid of batches, so their counts add up to len(dataset).
+# Lightning warns that an IterableDataset defining __len__ is unreliable under several
+# workers. It is exact here: the workers stride through one grid of batches, so their
+# counts add up to len(dataset).
 warnings.filterwarnings(
     "ignore",
     message=r"Your `IterableDataset` has `__len__` defined\..*",
@@ -56,9 +55,8 @@ def compose_record_config(root: str, overrides: list) -> DictConfig:
     """Compose the record's own configuration tree, leaving the caller's Hydra intact.
 
     initialize_config_dir refuses to run while a global Hydra is live, which it is inside any
-    hydra.main application, and it restores only the state it saw at its own entry, which is the
-    state after the clear below. The running application's Hydra is therefore set aside here and
-    put back by hand. Composing outside an application takes the same path with nothing to restore.
+    hydra.main application, and restores only the state it saw at its own entry, that is the state
+    after the clear below, so the running application's Hydra is set aside and put back by hand.
     """
     outer = GlobalHydra.instance().hydra
     GlobalHydra.instance().clear()
@@ -87,31 +85,27 @@ def _validate_run(method: str, augmentation_scheme: str) -> None:
 class HLS4MLDataModule(LightningDataModule):
     """Serve the published jets, optionally augmented online and optionally k-folded.
 
-    Nothing reaches the hub until :meth:`prepare_data`, so instantiating this class is an offline
-    operation and a configuration test costs no download.
+    Nothing reaches the hub until :meth:`prepare_data`, so instantiating this class is offline.
 
-    :param repo_id: the data set repository on the HuggingFace hub. An existing local directory of
-        that name is read directly instead, which is how a mirror is tested before it is uploaded.
-    :param revision: a commit of that repository to pin, or None to follow its head. The record
-        ships executable code, so a run executes whatever is at this commit.
-    :param cache_dir: where the record's restricted, normalised caches are built, its
-        ``paths.base_data_dir``. The hub snapshot itself goes to ``HF_HUB_CACHE``.
-    :param method: either ``augmentation``, where the training batches are transformed here, or
-        ``symm_loss``, where they are left alone and the model penalises the change in its logits
-        under a transform of its own.
-    :param augmentation_scheme: the symmetry group, ``none`` or one of so2, so3 and lorentz. Under
-        ``symm_loss`` it names the group the model draws from and is never rewritten here, so
-        ``${data.augmentation_scheme}`` and the results table agree on what a run did.
+    :param repo_id: the hub repository, or an existing local directory of that name, which is how
+        a mirror is tested before it is uploaded.
+    :param revision: a commit to pin, or None to follow the head. The record ships executable
+        code, so a run executes whatever is at this commit.
+    :param cache_dir: the record's ``paths.base_data_dir``, where its restricted and normalised
+        caches are built; the hub snapshot itself goes to ``HF_HUB_CACHE``.
+    :param method: ``augmentation`` transforms the training batches here, ``symm_loss`` leaves
+        them alone and the model penalises the change in its logits under a transform of its own.
+    :param augmentation_scheme: the symmetry group. Under ``symm_loss`` it names the group the
+        model draws from and is never rewritten here, so ``${data.augmentation_scheme}`` and the
+        results table agree on what a run did.
     :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts.
-    :param nconstituents: leading constituents by pT to keep; 150 is every constituent the record
-        carries. A change of this value builds a new cache directory.
-    :param features: the record columns the model consumes, bare or ``j1_``-prefixed, in the order
-        the model expects them.
+    :param nconstituents: leading constituents by pT to keep, 150 being all the record carries. A
+        change of this value builds a new cache directory.
+    :param features: the record columns the model consumes, in the order it expects them.
     :param n_folds: 1 uses the record's own train and validation splits; k >= 2 pools them and
         splits them again, with :meth:`set_fold` choosing which fold is served.
-    :param kfold_seed: fixed so that every run folds the pool the same way, which is what makes two
-        runs' per-fold numbers comparable.
-    :param keep_full_features_at_test: keep all 16 columns in the test batches, so that the
+    :param kfold_seed: fixed, so that two runs' per-fold numbers are comparable.
+    :param keep_full_features_at_test: keep the full record width in the test batches, so that the
         invariance probes find px, py and pz whatever the model reads.
     """
 
@@ -159,17 +153,11 @@ class HLS4MLDataModule(LightningDataModule):
         self.data_test: HLS4MLDataset | None = None
 
     def prepare_data(self) -> None:
-        """Fetch the record and run its pipeline.
-
-        Cached, so reruns are cheap.
-        """
+        """Fetch the record and run its pipeline; cached, so reruns are cheap."""
         self._ensure_record().prepare()
 
     def setup(self, stage: str | None = None) -> None:
-        """Build the datasets of *stage* out of the record's cached tensors.
-
-        :param stage: one of ``fit``, ``validate`` and ``test``, or None for all of them.
-        """
+        """Build the datasets of *stage* (``fit``, ``validate`` or ``test``, None for all)."""
         record = self._ensure_record()
         indices = self.feature_indices()
 
@@ -195,8 +183,6 @@ class HLS4MLDataModule(LightningDataModule):
         """Columns of :attr:`features` inside the record's 16, in the order requested.
 
         None means that the two agree column for column, so nothing has to be sliced.
-
-        :raises ValueError: naming the first requested feature the record does not hold.
         """
         names = list(self._ensure_record().feature_names)
         indices = [self._column(feature, names) for feature in self.features]
@@ -207,8 +193,6 @@ class HLS4MLDataModule(LightningDataModule):
         """Select the fold the next :meth:`setup` serves, and force it to rebuild.
 
         The test split is never folded, so the test dataset survives the switch.
-
-        :raises ValueError: if *fold_idx* is out of range for :attr:`n_folds`.
         """
         if self.n_folds >= 2 and not 0 <= fold_idx < self.n_folds:
             raise ValueError(f"fold_idx {fold_idx} is out of range for n_folds={self.n_folds}.")
@@ -278,8 +262,8 @@ class HLS4MLDataModule(LightningDataModule):
         # Deterministic after lightning.seed_everything, and advanced by every epoch's
         # permutation, so the epochs of one run differ from each other.
         shuffler.manual_seed(torch.initial_seed())
-        # A transform reads px, py and pz whatever the model consumes, so it is handed
-        # the full width and reduces to self.features itself, after transforming.
+        # A transform reads px, py and pz whatever the model consumes, so it takes the full
+        # width and reduces to self.features itself, after transforming.
         x_train = self._reduce(x_train, indices, self._keeps_full_width or transform is not None)
         x_val = self._reduce(x_val, indices, self._keeps_full_width)
         self.data_train = self._dataset(x_train, y_train, shuffler=shuffler, transform=transform)

@@ -11,12 +11,7 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
 def instantiate_callbacks(callbacks_cfg: DictConfig) -> list[Callback]:
-    """Instantiate every entry of *callbacks_cfg* that carries a ``_target_``.
-
-    :param callbacks_cfg: the ``callbacks`` config node.
-    :return: the instantiated callbacks, empty if the node is empty.
-    :raises TypeError: if the node is not a DictConfig.
-    """
+    """Instantiate every entry of the ``callbacks`` node that carries a ``_target_``."""
     callbacks: list[Callback] = []
 
     if not callbacks_cfg:
@@ -35,12 +30,9 @@ def instantiate_callbacks(callbacks_cfg: DictConfig) -> list[Callback]:
 
 
 def instantiate_loggers(logger_cfg: DictConfig) -> list[Logger]:
-    """Instantiate every entry of *logger_cfg* that carries a ``_target_``.
+    """Instantiate every entry of the ``logger`` node that carries a ``_target_``.
 
-    :param logger_cfg: the ``logger`` config node; ``logger=none`` is composed as an empty node and
-        yields no loggers.
-    :return: the instantiated loggers.
-    :raises TypeError: if the node is not a DictConfig.
+    ``logger=none`` composes an empty node, and so yields no loggers at all.
     """
     logger: list[Logger] = []
 

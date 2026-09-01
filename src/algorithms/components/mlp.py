@@ -1,26 +1,16 @@
-# MLP model class to build algorithms out of.
 from collections.abc import Callable
 
 import torch
 from torch import nn
 
-from src.utils import pylogger
-
-log = pylogger.RankedLogger(__name__)
-
 
 class MLP(nn.Module):
     """Multi-layer perceptron.
 
-    :param in_dim: Int of the input dimension.
-    :param nodes: List of ints number of nodes composing each of the layers.
-    :param out_dim: Int of the output dimension.
-    :param batchnorm: Whether to use batch normalization after each layer or not.
-    :param affine: Bool whether the batchnorm is affine if used.
-    :param activation: Pytorch module that defines the activation function.
-    :param final_activation: Bool whether to attach an activation after the final layer.
-    :param init_weight: Callable method to initialize the weights of the decoder nodes.
-    :param init_bias: Callable method to initialize the biases of the decoder nodes.
+    :param nodes: widths of the hidden layers, in order.
+    :param final_activation: whether an activation follows the output layer as well.
+    :param init_weight: initialiser applied to every linear weight; ``None`` keeps the default.
+    :param init_bias: initialiser applied to every linear bias.
     """
 
     def __init__(
@@ -70,7 +60,6 @@ class MLP(nn.Module):
 
         current_dim = self.in_dim
 
-        # Hidden layers
         for hidden_dim in self.hidden_dims:
             layers.append(nn.Linear(current_dim, hidden_dim))
             layers.append(
@@ -79,7 +68,6 @@ class MLP(nn.Module):
             layers.append(self.activation)
             current_dim = hidden_dim
 
-        # Output layer
         layers.append(nn.Linear(current_dim, self.out_dim))
         if self.final_activation:
             layers.append(self.activation)

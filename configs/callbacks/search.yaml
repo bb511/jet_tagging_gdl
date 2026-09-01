@@ -1,7 +1,6 @@
 # @package callbacks
 
-# The built-ins only. A hyperparameter trial draws no plots and writes no results row, so
-# a search leaves nothing behind but its study database.
+# The built-ins only: a trial draws no plots and writes no results row, leaving only its study.
 defaults:
   - util@model_checkpoint: model_checkpoint
   - util@early_stopping: early_stopping

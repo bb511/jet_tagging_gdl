@@ -54,7 +54,7 @@ def test_the_folds_of_one_training_become_one_results_row(
     assert float(row["flops_mean"]) > 0.0
 
 
-def test_a_fold_less_training_still_yields_a_row(
+def test_a_fold_less_training_is_evaluated_from_its_manifest_or_from_one_checkpoint(
     cfg_train: DictConfig, cfg_eval: DictConfig, tmp_path: Path
 ) -> None:
     """With no folds the main run is what enters the table, so a search run is still reported."""
@@ -69,18 +69,10 @@ def test_a_fold_less_training_still_yields_a_row(
     assert metric_dict["main/test/acc"] > 0.0
     assert _results_row(Path(cfg_eval.paths.results_dir))["folds_used"] == "1"
 
-
-def test_a_single_checkpoint_can_be_evaluated_on_its_own(
-    cfg_train: DictConfig, cfg_eval: DictConfig, tmp_path: Path
-) -> None:
-    """Testing one checkpoint by hand must not need a manifest to be written first."""
-    HydraConfig().set_config(cfg_train)
-    train(cfg_train)
-
+    # Testing one checkpoint by hand must not need a manifest to be written first.
     with open_dict(cfg_eval):
         cfg_eval.checkpoint_manifest_path = None
         cfg_eval.ckpt_path = str(tmp_path / "checkpoints" / "main" / "last.ckpt")
-    HydraConfig().set_config(cfg_eval)
     metric_dict, _ = evaluate(cfg_eval)
 
     assert metric_dict["main/test/acc"] > 0.0

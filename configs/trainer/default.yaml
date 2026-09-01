@@ -13,6 +13,6 @@ check_val_every_n_epoch: 1
 
 gradient_clip_val: 1.0
 
-# LorentzNet aggregates its edge messages with index_add_, which is non-deterministic on
-# CUDA; run-to-run reproducibility rests on seed_everything alone.
+# LorentzNet aggregates edges with index_add_, non-deterministic on CUDA, so run-to-run
+# reproducibility rests on seed_everything alone.
 deterministic: False

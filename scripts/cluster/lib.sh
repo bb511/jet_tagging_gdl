@@ -1,22 +1,17 @@
 #!/bin/bash
 # Helpers shared by submit_search.sh, submit_train.sh and submit_eval.sh.
 #
-# The block parser below is the one piece that must stay in step with
-# scripts/optuna/make_train_catalogues.py: it defines what a "command" in a
-# run*_{search,train,eval}.sh file is. Copy-pasting it into each submitter
-# would mean a change to the generated layout has to be made in three places
-# or one submitter silently stops finding commands.
-#
-# Source it as:  . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# The block parser below is the single definition of what a "command" in a
+# run*_{search,train,eval}.sh file is, and must stay in step with the generator,
+# scripts/optuna/make_train_catalogues.py. Copied into each submitter, it would
+# need the same edit in three places whenever the generated layout changed.
 
-# Clusters the submitters know how to prepend a launcher for; a value of
-# --cluster outside this list is a typo, not a new site.
+# Clusters with a submitit launcher config; anything else is a typo, not a site.
 KNOWN_CLUSTERS="euler clariden"
 
-# A block opens at the commented 'python3 src/train.py' or 'python3 src/eval.py'
-# line and runs to the first line without a trailing continuation. Emits one
-# flat command per block, starting with the entry point ('src/train.py ...'), so
-# that a caller need not know which of the two a catalogue holds.
+# A block opens at a commented 'python3 src/{train,eval}.py' line and runs to
+# the first line without a trailing continuation. Emits one flat command per
+# block, entry point first, so a caller need not know which of the two it holds.
 extract_cmds() {
     awk '
         /^# python3 src\/(train|eval)\.py/ {
@@ -42,14 +37,12 @@ extract_cmds() {
     ' "$1"
 }
 
-# The value of an override, e.g. field "$cmd" 'data\.method' or
-# field "$cmd" 'hydra\.run\.dir'. Empty when the command has none.
+# The value of an override, e.g. field "$cmd" 'data\.method'. Empty when absent.
 field() { printf "%s" "$1" | grep -oE "$2=[^ ]+" | head -1 | cut -d= -f2- || true; }
 
-# The block's grid position, '<model>_nconst<N>_<variant>', reconstructed from
-# the overrides. It is what --only matches on and what names the driver logs.
-# The variant names match the log directories the catalogues write to, so
-# '--only symm_so2' and '--only nconst150' both select the obvious thing.
+# The block's grid position, '<model>_nconst<N>_<variant>', rebuilt from the
+# overrides: what --only matches on and what names the driver logs. The variant
+# names are those of the log directories the catalogues write to.
 block_label() {
     local exp model nconst method scheme variant
     exp=$(field "$1" 'experiment')
@@ -65,10 +58,9 @@ block_label() {
     printf "%s_nconst%s_%s" "$model" "$nconst" "$variant"
 }
 
-# $1 = 1-based index, $2 = name. Matches against the caller's $only, a
-# comma-separated list of name substrings or indices; an empty $only selects
-# everything. Written with explicit ifs rather than 'test && action': under
-# 'set -e' a bare failing && list aborts the script.
+# $1 = 1-based index, $2 = name, matched against the caller's $only (comma-
+# separated name substrings or indices; empty selects everything). Explicit ifs
+# rather than 'test && action': under 'set -e' a failing && list aborts.
 selected() {
     if [ -z "$only" ]; then return 0; fi
     local idx="$1" name="$2" s
@@ -76,8 +68,8 @@ selected() {
     for s in $only; do
         if [ -n "$s" ]; then
             case "$s" in
-                # An all-digit selector is an index only. Matching it as a
-                # substring too would make '--only 1' also pick nconst16, ...
+                # All-digit selector is an index only: '--only 1' must not also
+                # match nconst16 as a substring.
                 *[!0-9]*) case "$name" in *"$s"*) return 0 ;; esac ;;
                 *) if [ "$s" = "$idx" ]; then return 0; fi ;;
             esac
@@ -86,8 +78,7 @@ selected() {
     return 1
 }
 
-# Every command is relative to the repository root, and the log directories are
-# created there too, so refuse to run from anywhere else.
+# Every command and every log directory is relative to the repository root.
 require_repo_root() {
     if [ ! -f .project-root ]; then
         echo "run this from the repository root" >&2
@@ -95,10 +86,9 @@ require_repo_root() {
     fi
 }
 
-# Export what scripts/setup.sh wrote, so that a nohup'd driver inherits
-# PROJECT_ROOT (configs/paths/default.yaml will not compose without it) and
-# HF_HUB_CACHE (huggingface_hub reads it at import). Absent .env is not an
-# error here: the caller may have exported both itself.
+# Export what scripts/setup.sh wrote, so a nohup'd driver inherits PROJECT_ROOT
+# (configs/paths/default.yaml will not compose without it) and HF_HUB_CACHE.
+# Absent .env is not an error: the caller may have exported both itself.
 load_env() {
     if [ -f .env ]; then
         set -a
@@ -108,9 +98,8 @@ load_env() {
     fi
 }
 
-# A run without HF_HUB_CACHE downloads the 3.1 GB record snapshot again into
-# whatever default cache the driver's home directory offers, which on a shared
-# machine means one copy per user and a very slow first epoch.
+# Without HF_HUB_CACHE the 3.1 GB record snapshot is downloaded again into the
+# driver's home directory, one copy per user on a shared machine.
 require_hf_cache() {
     if [ -z "${HF_HUB_CACHE:-}" ]; then
         echo "error: HF_HUB_CACHE is not set - the record snapshot would be re-downloaded." >&2
@@ -120,25 +109,23 @@ require_hf_cache() {
 }
 
 # $1 = command, $2 = GPU index. The catalogues all say trainer.devices=[0]; this
-# is what makes several queues on one multi-GPU host independent of each other.
+# is what makes several queues on one multi-GPU host independent.
 pin_gpu() {
     printf "%s" "$1" | sed -E "s/trainer\.devices=\[[0-9]+\]/trainer.devices=[$2]/"
 }
 
-# Turn a single-run command into a multirun one. Hydra writes a multirun job's
-# output to <sweep.dir>/<job number> rather than to <run.dir>, so the eval
-# blocks' manifest path has to gain the same '/0/' that the train job's
-# checkpoints did.
+# Turn a single-run command into a multirun one. Hydra writes a multirun job to
+# <sweep.dir>/<job number>, so the eval blocks' manifest path has to gain the
+# same '/0/' that the train job's checkpoints did.
 to_sweep_dir() {
     printf "%s" "$1" |
         sed -E 's#hydra\.run\.dir=#hydra.sweep.dir=#' |
         sed -E 's#checkpoint_manifest_path=([^ ]*)/checkpoint_manifest\.json#checkpoint_manifest_path=\1/0/checkpoint_manifest.json#'
 }
 
-# $1 = cluster, $2 = slurm time limit in minutes. The launcher's own default
-# (60) is shorter than any of these trainings. The '-m' that turns these into
-# multiruns is left to the caller: a search block already carries one, a train
-# or eval block does not.
+# $1 = cluster, $2 = slurm time limit in minutes (the launcher's own default of
+# 60 is shorter than any of these trainings). The '-m' is left to the caller: a
+# search block already carries one, a train or eval block does not.
 cluster_prefix() {
     case " $KNOWN_CLUSTERS " in
         *" $1 "*) ;;
@@ -147,10 +134,8 @@ cluster_prefix() {
     printf -- "hydra/launcher=submitit_slurm_%s hydra.launcher.timeout_min=%s" "$1" "$2"
 }
 
-# Preflight: the drivers are nohup'd, so an unimportable dependency shows up
-# only as a tiny log per driver and nothing ever gets trained. Forgetting to
-# activate the env once costs a whole batch, so it is checked up front.
-# $1 = python, $2 = modules, rest = hint lines.
+# $1 = python, $2 = modules, rest = hint lines. The drivers are nohup'd, so an
+# inactive env shows up only as a tiny log per driver and a whole batch is lost.
 require_imports() {
     local py="$1" mods="$2" line
     shift 2

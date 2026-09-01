@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 """Status of every Optuna sweep on this machine, and the commands to finish it.
 
-For each study: how many COMPLETE trials it has against the n_trials its
-run*_search.sh block asks for, and whether a driver is still alive to produce
-the rest. Prints a table, then a submit_search.sh command per study that needs
-one.
+For each study: COMPLETE trials against the n_trials its run*_search.sh block asks for, and
+whether a driver is still alive to produce the rest. Prints a table, then the launch commands::
 
     python3 scripts/cluster/sweep_status.py            # table + commands
     python3 scripts/cluster/sweep_status.py --commands # commands only
 
-Driver liveness is read from the driver log rather than from the trial counts:
-a dead driver leaves its last batch marked RUNNING forever, so a stalled study
-looks busy. A log is classified by scanning its tail:
-
-  * an error signature anywhere in the tail  -> DEAD (the driver exited)
-  * Hydra's closing best-value report        -> FINISHED (reached n_trials)
-  * anything else                            -> alive
-
-Checking only the final line is not enough: a Hydra config error ends with
-'Set the environment variable HYDRA_FULL_ERROR=1 ...', several lines below the
-actual exception.
+Liveness comes from the driver log, not from the trial counts, since a dead driver leaves its
+last batch marked RUNNING forever. The whole tail is scanned rather than the final line: a Hydra
+config error ends with 'Set the environment variable HYDRA_FULL_ERROR=1 ...', several lines
+below the exception.
 """
 
 import argparse
@@ -75,8 +66,8 @@ def _label(model: str, nconst: str, method: str, scheme: str) -> str:
 def blocks(script):
     """Study -> (index, n_trials, label) for each driver block in a run*_search.sh.
 
-    The study name is not on the command line: the hparams_search config builds
-    it from the regime, so it is rebuilt the same way here.
+    The study name is not on the command line: it is rebuilt from the regime, as the
+    hparams_search config builds it.
     """
     out = {}
     if not os.path.exists(script):
@@ -109,11 +100,9 @@ def classify(log):
 def complete_of(db, study, writable=False):
     """COMPLETE trials in a study.
 
-    A driver that crashed mid-transaction leaves a hot '<db>-journal' behind.
-    Rolling it back needs a writable connection, so a read-only open of such a
-    file fails outright with 'database is locked'. Point --db-root at copies
-    (copied together with their -journal siblings) to read those safely without
-    touching the live files: ``writable`` is set for exactly that case.
+    A driver that crashed mid-transaction leaves a hot '<db>-journal' that a read-only open cannot
+    roll back, failing with 'database is locked'; ``writable`` is for reading copies of such
+    databases (copied with their -journal siblings) without touching the live files.
     """
     if not os.path.exists(db):
         return 0
@@ -206,8 +195,8 @@ def main():
     )
     args = ap.parse_args()
 
-    # Anchored on .project-root rather than the CWD: globbing 'scripts/*' from
-    # the wrong directory silently yields an empty table instead of an error.
+    # Anchored on .project-root: globbing from the wrong CWD would silently yield
+    # an empty table instead of an error.
     repo = find_repo_root(Path(__file__).resolve().parent)
     os.chdir(repo)
 

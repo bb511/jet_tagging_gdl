@@ -1,19 +1,16 @@
 #!/bin/bash
 # Replace data/ logs/ outputs/ results/ with symlinks to the locations named in
-# .env, for keeping them on a scratch filesystem instead of in the repository.
-#
-# Run scripts/setup.sh first: this reads the .env that writes. Edit RES_DIR
-# there (or the individual *_DIR variables) before running this.
+# .env, for keeping them on a scratch filesystem. Run scripts/setup.sh first and
+# edit RES_DIR (or the individual *_DIR variables) there. Run this before the
+# first training: the checkpoint manifests under logs/ carry absolute paths, so
+# moving logs/ afterwards breaks eval.
 #
 #   bash scripts/symbolink.sh          # asks before destroying anything
 #   bash scripts/symbolink.sh --force  # no questions
 #
-# Run it before the first training: the checkpoint manifests written under
-# logs/ carry absolute paths, so moving logs/ afterwards breaks eval.
-#
-# DESTRUCTIVE: a real directory in the way is deleted with its contents, because
-# a symlink cannot replace it. With RES_DIR unchanged from setup.sh's "." the
-# targets are the directories themselves, which this refuses to do.
+# DESTRUCTIVE: a real directory in the way is deleted with its contents. With
+# RES_DIR left at setup.sh's "." the targets are those directories themselves,
+# which this refuses to do.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

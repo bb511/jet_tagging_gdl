@@ -1,8 +1,8 @@
 # Invariance probe, run over the test set once training has finished.
 
 _target_: src.callbacks.invariance.InvarianceMetricCallback
-# The same rapidity range the boosts of the data pipeline use, so the probe measures the
-# regime the run was trained in. It defines the probe and is therefore never tuned.
+# The rapidity range the data pipeline boosts over, so the probe measures the trained regime. It
+# defines the probe and is therefore never tuned.
 lorentz_eta_max: ${data.lorentz_eta_max}
 compute_wasserstein: true
 compute_flip_breakdown: true

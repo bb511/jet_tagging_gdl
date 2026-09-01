@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """Generate the run<model>_train.sh and run<model>_eval.sh catalogues.
 
-Every architecture is trained on a 3 x 7 grid: three constituent counts
-(16, 50, 150) crossed with seven regimes (the unaugmented baseline, SO(2),
-SO(3) and Lorentz augmentation, and the same three groups as a
-symmetry-consistency loss). This writes the 21 training commands of that grid
-and the 21 evaluation commands that read their checkpoint manifests.
+DeepSets, MLP and JetFormer are trained on a 3 x 7 grid: three constituent counts (16, 50, 150)
+crossed with seven regimes (the unaugmented baseline, SO(2), SO(3) and Lorentz augmentation, and
+the same three groups as a symmetry-consistency loss). LorentzNet embeds the symmetry instead of
+acquiring it, so it is trained at baseline only, three runs in all. Hyperparameters come from the
+studies under ``logs/optuna/hls4ml/``, one per cell, named ``<model>_nconst<N>_<method>_<scheme>``;
+a block whose study is missing or empty carries no ``algorithm.*`` overrides and trains the
+experiment config's own values, which is the transferred-hyperparameter ablation. ``--transferred``
+forces that for every block, into ``run<model>_{train,eval}_transferred.sh``, so the ablation runs
+alongside the tuned catalogues rather than over them.
 
-The hyperparameters come from the Optuna studies under ``logs/optuna/hls4ml/``,
-one study per (model, constituent count, regime), named
-``<model>_nconst<N>_<method>_<scheme>``. A block whose study is missing or
-still empty carries no ``algorithm.*`` overrides at all: it trains the
-experiment config's own values, which is the transferred-hyperparameter
-ablation, and its banner says so. ``--transferred`` forces that state for every
-block and writes to ``run<model>_{train,eval}_transferred.sh``, so that the
-ablation can be run alongside the tuned catalogues rather than over them.
-
-The generated text is the record of what was run, so regenerate rather than
-edit by hand; ``--dry-run`` reports which files a regeneration would change
-without touching any of them.
-
-Usage (from anywhere; paths are anchored to the repository root)::
+The generated text is the record of what was run, so regenerate rather than edit by hand. Paths
+are anchored to the repository root, so this runs from anywhere::
 
     python3 scripts/optuna/make_train_catalogues.py
-    python3 scripts/optuna/make_train_catalogues.py --dry-run
+    python3 scripts/optuna/make_train_catalogues.py --dry-run      # what would change
     python3 scripts/optuna/make_train_catalogues.py --transferred
 """
 
@@ -39,7 +31,7 @@ MODELS = ["deepsets", "mlp", "jetformer", "lorentznet"]
 NCONSTITUENTS = [16, 50, 150]
 
 # (label, data.method, data.augmentation_scheme), in the order every catalogue,
-# every log directory and every results table uses.
+# log directory and results table uses.
 VARIANTS = [
     ("baseline", "augmentation", "none"),
     ("aug_so2", "augmentation", "so2"),
@@ -50,8 +42,12 @@ VARIANTS = [
     ("symm_lorentz", "symm_loss", "lorentz"),
 ]
 
-# Folds per training run. The searches use one fold; the catalogues use five,
-# which is what the paired bootstrap in scripts/analysis/add_pvalues.py needs.
+# LorentzNet embeds the symmetry rather than acquiring it, so it is the one architecture trained
+# at baseline alone, never under augmentation or the SCL.
+VARIANTS_OF = {model: VARIANTS[:1] if model == "lorentznet" else VARIANTS for model in MODELS}
+
+# The searches use one fold; five is what the paired bootstrap in
+# scripts/analysis/add_pvalues.py needs.
 N_FOLDS = 5
 
 BANNER = "# " + 72 * "="
@@ -78,8 +74,8 @@ def quote(value: str) -> str:
 def best_trial(db: Path, study: str) -> tuple[int, float, dict[str, str]] | None:
     """Best trial of ``study``, as (number, objective value, params), or None.
 
-    Optuna is imported here rather than at module scope so that the generator runs with no study
-    databases present, which is the state the checked-in catalogues were generated in.
+    Optuna is imported here, not at module scope, so the generator runs with no study database
+    present, which is the state the checked-in catalogues were generated in.
     """
     if not db.exists():
         return None
@@ -97,9 +93,8 @@ def best_trial(db: Path, study: str) -> tuple[int, float, dict[str, str]] | None
 def overrides_of(params: dict[str, str]) -> list[str]:
     """The search-space parameters as hydra override tokens, sorted by key.
 
-    The Optuna parameter names are already the override paths (the sweeper
-    takes them straight from ``hydra.sweeper.params``), so there is nothing to
-    remap: only the list values need quoting.
+    Optuna parameter names are already the override paths (taken straight from
+    ``hydra.sweeper.params``), so only the list values need quoting.
     """
     return [f"{k}={quote(params[k])}" for k in sorted(params)]
 
@@ -186,30 +181,34 @@ def eval_block(
 
 TRANSFERRED_NOTE = [
     "# No block carries hyperparameter overrides: this is the transferred-",
-    "# hyperparameter ablation, run at the experiment configs' own values.",
+    "# hyperparameter ablation, at the experiment configs' own values.",
 ]
 TUNED_NOTE = [
-    "# Each block carries the best trial of its own study. Blocks whose study is",
-    "# missing carry no overrides and say so: they are the transferred ablation.",
+    "# Each block carries the best trial of its own study under logs/optuna/hls4ml/;",
+    "# a block whose study is missing carries none and says so (transferred ablation).",
+]
+BASELINE_ONLY_NOTE = [
+    "# Baseline only: this architecture embeds the symmetry rather than acquiring it,",
+    "# so the augmentation and SCL regimes are not run on it.",
 ]
 
 
 def file_header(model: str, task: str, transferred: bool) -> list[str]:
     what = "TRAINING" if task == "train" else "EVALUATION"
+    nvariants = len(VARIANTS_OF[model])
+    grid = f"{len(NCONSTITUENTS)} x {nvariants} = {len(NCONSTITUENTS) * nvariants}"
     return [
         "#!/usr/bin/env bash",
         BANNER,
         f"# {model.upper()} {what} COMMANDS",
         BANNER,
-        f"# One block per (constituent count, regime): 3 x 7 = 21 {task} runs.",
-        "#",
-        "# Generated from the study databases under logs/optuna/hls4ml/ by",
-        "# scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.",
+        f"# One block per (constituent count, regime): {grid} {task} runs. Generated",
+        "# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.",
+        *([] if nvariants == len(VARIANTS) else BASELINE_ONLY_NOTE),
         *(TRANSFERRED_NOTE if transferred else TUNED_NOTE),
         "#",
-        "# Every command is commented out. Copy one to run it by hand, or feed the",
-        f"# whole file to scripts/cluster/submit_{task}.sh, which parses these blocks",
-        "# and can queue them on a GPU or send them to slurm.",
+        "# Every command is commented out: copy one to run it by hand, or feed the whole",
+        f"# file to scripts/cluster/submit_{task}.sh, which queues them on a GPU or slurm.",
         "",
     ]
 
@@ -221,7 +220,7 @@ def render(model: str, task: str, dbs: Path, transferred: bool) -> str:
     out = file_header(model, task, transferred)
     for nconst in NCONSTITUENTS:
         out += [BANNER, f"# {model}  nconst={nconst}", BANNER, ""]
-        for variant in VARIANTS:
+        for variant in VARIANTS_OF[model]:
             study = study_name(model, nconst, variant[1], variant[2])
             trial = None if transferred else best_trial(dbs / f"{model}.db", study)
             out += make_block(model, nconst, variant, trial, suffix)
@@ -231,8 +230,8 @@ def render(model: str, task: str, dbs: Path, transferred: bool) -> str:
 def count_commands(lib: Path, text: str) -> int:
     """Commands lib.sh's own parser finds in ``text``.
 
-    The submitters and this generator have to agree on what a block is, so the generated text is
-    fed back through the parser they use rather than through a second implementation of it here.
+    Fed back through the submitters' parser rather than a second implementation of it here, so the
+    two cannot disagree about what a block is.
     """
     with tempfile.NamedTemporaryFile("w", suffix=".sh") as fh:
         fh.write(text)
@@ -276,9 +275,9 @@ def main() -> int:
         except ValueError:
             return str(p)
 
-    expected = len(NCONSTITUENTS) * len(VARIANTS)
     stale = 0
     for model in MODELS:
+        expected = len(NCONSTITUENTS) * len(VARIANTS_OF[model])
         for task in ("train", "eval"):
             text = render(model, task, dbs, args.transferred)
             found = count_commands(lib, text)

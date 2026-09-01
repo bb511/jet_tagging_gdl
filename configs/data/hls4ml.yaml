@@ -1,18 +1,14 @@
-# The hls4ml LHC jets, read from the published record. The record ships the split, the
-# pT sorting and the physics normalisation as a loader package of its own, so those
-# stages are fixed there and only the wrapper is configured here.
+# The hls4ml LHC jets. The record ships the split, the pT sorting and the normalisation in a loader
+# package of its own, so only the wrapper is configured here.
 _target_: src.data.hls4ml_datamodule.HLS4MLDataModule
 
-# A local directory of this name is read directly, which is how a mirror is checked
-# before it is uploaded.
+# A local directory of this name is read directly, which is how a mirror is checked before upload.
 repo_id: fastmachinelearning/hls4ml_lhc_jets_150p
 
-# The record ships executable code, so a run reads and executes whatever is at this
-# commit (null follows the head instead). Move it forward after a re-upload.
-revision: 8cfaed27b9d1df48987331a3e25cfda166aaabe3
+# The record ships executable code, so a run executes whatever is at this commit (null: the head).
+revision: fc7104f60a45d528ab597b220d5a7cd8e31cfff8
 
-# Its restricted, normalised caches per nconstituents land here. The download itself
-# goes to HF_HUB_CACHE.
+# Per-nconstituents caches, reused if the directory exists; the snapshot goes to HF_HUB_CACHE.
 cache_dir: ${paths.base_data_dir}/hf
 
 # augmentation: online so2/so3/lorentz on train batches | symm_loss: SCL, no augmentation

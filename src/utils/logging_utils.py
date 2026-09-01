@@ -15,9 +15,8 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 def log_hyperparameters(object_dict: dict[str, Any]) -> None:
     """Send the config, the parameter counts and the FLOP count to every attached logger.
 
-    :param object_dict: holds ``cfg`` (the composed config), ``algorithm`` (the LightningModule),
-        ``trainer``, and optionally ``fold_idx`` and ``run_stage``, which name the fold and the
-        pass this run belongs to and exist only at runtime.
+    :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``, plus the runtime-only
+        ``fold_idx`` and ``run_stage``.
     """
     if not object_dict["trainer"].logger:
         log.warning("Logger not found! Skipping hyperparameter logging...")
@@ -53,8 +52,7 @@ def _config_hparams(cfg: dict[str, Any], object_dict: dict[str, Any]) -> dict[st
 def _algorithm_hparams(cfg: dict[str, Any], algorithm: LightningModule) -> dict[str, Any]:
     """The algorithm's config, its parameter counts and its per-jet FLOP count.
 
-    The FLOP count is computed at construction, not present in the Hydra config, so it is read back
-    off the module's own hparams.
+    The FLOP count is computed at construction, so it is read off the module, not the config.
     """
     parameters = list(algorithm.parameters())
     return {

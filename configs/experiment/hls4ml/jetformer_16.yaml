@@ -1,7 +1,5 @@
 # @package _global_
-# JetFormer for 16 constituents. Method and symmetry group are CLI overrides:
-#   python src/train.py experiment=hls4ml/jetformer_16 data.method=symm_loss \
-#       data.augmentation_scheme=so2
+# JetFormer at 16 constituents; data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
   - override /data: hls4ml
   - override /algorithm: jetformer
@@ -20,8 +18,6 @@ data:
   batch_size: 2048
   n_folds: 5
 
-# The algorithm defaults are the published configuration, so nothing is overridden here
-# until the searches at this constituent count replace them.
-
+# No algorithm block: its defaults are the published configuration, until the searches replace them.
 trainer:
   max_epochs: 200

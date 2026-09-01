@@ -1,4 +1,3 @@
-# MLP algorithm: the tagger with no symmetry of any kind built in.
 """Flattened-input MLP jet tagger.
 
 The constituents are read as one long vector, so the model is not even invariant under their

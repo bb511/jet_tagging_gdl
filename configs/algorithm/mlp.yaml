@@ -1,24 +1,20 @@
 # Flattened-input MLP, the tagger with no symmetry built in at all.
 _target_: src.algorithms.mlp.MLPClassifier
-# The module stores the scheduler dict as it arrives and pops from it in
-# _set_up_scheduler, so it must be a plain dict holding a real partial, not a DictConfig.
-_convert_: all
-name: mlp # short label used by the results table and MLflow
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: mlp
 
 nconstituents: ${data.nconstituents}
 nbr_feats: ${len:${data.features}}
 output_dim: 5
 
-# One CLI override (data.method=symm_loss data.augmentation_scheme=so3) configures the
-# data and the algorithm together.
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 symm_loss_metric: l2
 lorentz_eta_max: ${data.lorentz_eta_max}
 
-# The input is the flattened (nconstituents x nbr_feats) grid, so the first layer grows
-# with the constituent count (64 columns at N = 16, 600 at N = 150) while these do not.
+# The flattened (N x F) input grows with N (64 columns at N=16, 600 at N=150); these widths do not.
 hidden_layers: [128, 64, 32]
 activation: relu
 batchnorm: false

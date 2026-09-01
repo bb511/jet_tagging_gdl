@@ -33,21 +33,11 @@ def test_a_fast_dev_run_reaches_the_end_of_the_loop(cfg_train: DictConfig) -> No
     assert object_dict["algorithm"].hparams["flops_total"] > 0
 
 
-def test_the_top_level_metrics_are_the_main_runs(cfg_train: DictConfig) -> None:
-    """Optuna maximises the top level, and must get the clean split's number, not a fold's."""
-    HydraConfig().set_config(cfg_train)
-
-    metric_dict, _ = train(cfg_train)
-
-    assert metric_dict["val/acc_best"] == metric_dict["main/val/acc_best"]
-    assert metric_dict["val/acc"] == metric_dict["main/val/acc"]
-
-
 def test_two_folds_leave_a_manifest_of_three_runs(cfg_train: DictConfig, tmp_path: Path) -> None:
     """eval.py finds its checkpoints only here: the main run, and one per fold.
 
-    The per-run checkpoint directories are checked in the same fit, since three fits of the real
-    record are the expensive part of this file.
+    The directories and the top-level metrics are checked in the same fit, since three fits of the
+    real record are the expensive part of this file.
     """
     HydraConfig().set_config(cfg_train)
     with open_dict(cfg_train):
@@ -68,6 +58,9 @@ def test_two_folds_leave_a_manifest_of_three_runs(cfg_train: DictConfig, tmp_pat
         "fold_1",
         "fold_2",
     }
+    # Optuna maximises the top level, and must get the clean split's number, not a fold's.
+    assert metric_dict["val/acc_best"] == metric_dict["main/val/acc_best"]
+    assert metric_dict["val/acc"] == metric_dict["main/val/acc"]
 
 
 @RunIf(min_gpus=1)
@@ -83,15 +76,12 @@ def test_a_fast_dev_run_reaches_the_end_of_the_loop_on_a_gpu(cfg_train: DictConf
 
 @pytest.mark.slow
 def test_a_run_resumes_from_its_own_last_checkpoint(cfg_train: DictConfig, tmp_path: Path) -> None:
-    """A queued training that dies overnight is restarted from the checkpoint it left.
-
-    Progress is read off the checkpoint rather than off the file names: ``save_top_k: 1``
-    on ``val/acc`` writes a new ``epoch_*.ckpt`` only when the accuracy improves, which a
-    one-epoch run on a fraction of the batches has no reason to do.
-    """
+    """A queued training that dies overnight is restarted from the checkpoint it left."""
     HydraConfig().set_config(cfg_train)
     train(cfg_train)
 
+    # Progress is read off the checkpoint, not the file names: save_top_k: 1 on val/acc writes a
+    # new epoch_*.ckpt only on an improvement, which one epoch of a few batches need not give.
     last = tmp_path / "checkpoints" / "main" / "last.ckpt"
     before = torch.load(last, weights_only=False)
 

@@ -1,15 +1,11 @@
 #!/bin/bash
 # Launch the Optuna drivers of a run*_search.sh catalogue.
 #
-# A search block already carries '-m' and its sweeper settings, so this adds
-# only what the catalogue cannot know: which GPU to pin to, a private sweep
-# directory, and, with --cluster, the submitit launcher. Each block is one
-# long-lived driver that keeps n_jobs trials in flight until its study reaches
-# n_trials, so the drivers are nohup'd and this command returns once they are up.
-#
-# Without --cluster the drivers run here, all 21 of them at once by default,
-# which is not what a four-GPU host wants: select a few blocks with --only and
-# pin them with --gpu, one invocation per GPU.
+# A search block already carries '-m' and its sweeper settings; this adds only
+# what the catalogue cannot know: the GPU, a private sweep directory and, with
+# --cluster, the submitit launcher. Each block becomes one long-lived nohup'd
+# driver, so without --cluster every block in the file starts on this host at
+# once: select a few with --only and pin them with --gpu, one invocation per GPU.
 #
 # Usage (from the repository root):
 #   bash scripts/cluster/submit_search.sh --list    scripts/hls4ml/rundeepsets_search.sh
@@ -27,17 +23,15 @@
 #   --n-jobs <n>     trials in flight per driver under --cluster (default 6)
 #   --hf-cache <p>   value for HF_HUB_CACHE; default is the one .env exports
 #
-# Any extra hydra overrides after the file name are appended to every driver.
-# Hydra takes the last of a duplicated override, so appending wins over the
-# value baked into the file.
+# Extra hydra overrides after the file name are appended to every driver; hydra
+# takes the last of a duplicated override, so they win over the file's value.
 set -eu
 
 # shellcheck source=scripts/cluster/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# Slurm time limit per trial. A 100-epoch trial at nconst=150 is the long case;
-# 720 min is also the `normal` partition cap on clariden, so a trial that needs
-# longer is killed rather than requeued.
+# Slurm time limit per trial: covers a 100-epoch trial at nconst=150, and is
+# also clariden's `normal` partition cap, so a longer trial is killed.
 TIMEOUT_MIN=720
 
 only=""
@@ -72,7 +66,6 @@ extra="$*"
 require_repo_root
 [ -f "$file" ] || { echo "no such file: $file" >&2; exit 1; }
 
-# Parsed once; every loop below reads from this list.
 cmds=$(extract_cmds "$file")
 n_total=$(printf "%s\n" "$cmds" | grep -c . || true)
 if [ "$n_total" -eq 0 ]; then
@@ -107,8 +100,7 @@ if [ -n "$cluster" ]; then
     command -v sbatch >/dev/null 2>&1 || echo "warning: sbatch not on PATH - are you on $cluster?" >&2
 fi
 
-# Override with PYTHON=/path/to/env/bin/python3 to skip activation entirely.
-# Skipped for --dry-run, which is meant to be usable off the cluster.
+# PYTHON=/path/to/env/bin/python3 skips activation; --dry-run needs no env.
 PYTHON=${PYTHON:-python3}
 [ "$dry" -eq 1 ] || require_imports "$PYTHON" "hydra, optuna" \
     "conda activate jet_tagging_gdl" \
@@ -120,7 +112,7 @@ sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 [ "$dry" -eq 1 ] || mkdir -p "$logdir"
 
 # The storage URL is not on the CLI: it lives in the hparams_search config the
-# block selects, and for the _scl_ variants in the base config it inherits.
+# block selects, or in the base config that one inherits.
 storage_in_file() {
     grep -oE "^[[:space:]]*storage:[[:space:]]*\S+" "$1" | head -1 | awk '{print $2}' || true
 }
@@ -132,8 +124,7 @@ storage_of() {
     if [ -z "$hp" ] || [ ! -f "$f" ]; then return 0; fi
     s=$(storage_in_file "$f")
     if [ -z "$s" ]; then
-        # A defaults entry is written either group-relative ('deepsets_optuna')
-        # or from the group root ('hls4ml/deepsets_optuna'); try both.
+        # A defaults entry is group-relative or from the group root; try both.
         while IFS= read -r d; do
             for base in "$(dirname "$f")" "configs/hparams_search"; do
                 if [ -f "$base/$d.yaml" ]; then s=$(storage_in_file "$base/$d.yaml"); fi
@@ -146,21 +137,17 @@ EOF
     printf "%s" "$s"
 }
 
-# Create each sqlite study database, serially, before any driver starts.
-# Drivers launched together against a not-yet-existing file all run optuna's
-# alembic bootstrap at once and lose the race, observed as 'UNIQUE constraint
-# failed: alembic_version.version_num' and 'database is locked', which kills
-# the driver seconds in. Idempotent: on an existing database this only opens it.
+# Create each sqlite study database serially before any driver starts: drivers
+# racing optuna's alembic bootstrap on a missing file die seconds in with
+# 'UNIQUE constraint failed: alembic_version.version_num'. Idempotent.
 if [ "$dry" -eq 0 ]; then
     printf "%s\n" "$cmds" | while IFS= read -r c; do storage_of "$c"; echo; done |
         sort -u | grep -v '^$' | while IFS= read -r url; do
         case "$url" in
             sqlite:///*)
                 path=${url#sqlite:///}
-                # The URLs carry a '?timeout=600' busy timeout (sqlite raises
-                # 'database is locked' immediately without one). SQLAlchemy
-                # strips the query itself; this check needs the bare path or it
-                # would never find an existing database.
+                # SQLAlchemy strips the URLs' '?timeout=600' busy timeout
+                # itself; this check needs the bare path to find the file.
                 path=${path%%\?*}
                 if [ ! -f "$path" ]; then
                     mkdir -p "$(dirname "$path")"
@@ -185,9 +172,8 @@ while IFS= read -r cmd; do
         cmd=$(pin_gpu "$cmd" "$gpu")
     fi
 
-    # Private sweep dir per driver: hydra's default second-resolution timestamp
-    # collides when several drivers start together, merging their outputs (and
-    # the slurm launchers nest submitit_folder under hydra.sweep.dir).
+    # Private sweep dir per driver: hydra's second-resolution timestamp collides
+    # when several start together, merging their outputs.
     sweep=" hydra.sweep.dir=logs/searches/multiruns/${sweep_ts}_${label}"
     full="$PYTHON $cmd$launcher$sweep${extra:+ $extra}"
 
@@ -198,13 +184,11 @@ while IFS= read -r cmd; do
         continue
     fi
     echo "[$i/$n_total] starting driver: $label"
-    # Keep the previous log: relaunching a driver that died is the main reason
-    # to re-run this script, and truncating would destroy the evidence of why.
+    # Keep the previous log: it is the evidence of why the driver died.
     log="$logdir/${i}_${label}.log"
     if [ -f "$log" ]; then mv "$log" "$log.$(date +%Y%m%d-%H%M%S)"; fi
     nohup bash -c "$full" > "$log" 2>&1 &
-    # Drivers sharing one sqlite file still contend while creating their study
-    # rows; stagger them rather than starting several in the same second.
+    # Drivers sharing one sqlite file contend while creating their study rows.
     sleep 5
 done <<EOF
 $cmds

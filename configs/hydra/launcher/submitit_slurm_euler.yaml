@@ -4,8 +4,7 @@
 defaults:
   - submitit_slurm
 
-# Under the sweep directory, so the submitit logs of a run sit beside its Hydra output
-# and no absolute scratch path is baked into the repository.
+# Under the sweep directory: the submitit logs then sit beside the Hydra output of their run.
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 
 account: null
@@ -21,9 +20,8 @@ array_parallelism: 200
 
 name: ${hydra.job.name}
 
-# Euler's SLURM takes the GPU count and the memory through generic parameters rather than
-# through --gpus-per-node. 4 x 20 GB covers the pooled k-fold tensors, which reach about
-# 15 GB of host RAM at nconstituents=150.
+# Euler's SLURM takes the GPU count and the memory through generic parameters, not --gpus-per-node.
+# 4 x 20 GB covers the pooled k-fold tensors, ~15 GB of host RAM at 150 constituents.
 additional_parameters:
   gpus: "1"
   mem_per_cpu: "20G"

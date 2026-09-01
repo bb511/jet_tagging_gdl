@@ -1,5 +1,3 @@
-# Symmetry-consistency loss: the penalty on how far a classifier's logits move under a
-# transformation of its input that should leave the label unchanged.
 """Symmetry-consistency loss (SCL).
 
 The training objective is
@@ -28,13 +26,9 @@ def validate_symmetry_group(method: str, group: str | None) -> None:
     """Reject an SCL run whose symmetry group names no transform.
 
     ``algorithm.group`` is interpolated from ``data.augmentation_scheme``, whose domain also holds
-    ``none``. That value is legitimate for an augmentation run, where the group is never read, so
-    it is rejected only under ``method="symm_loss"``, and at construction time rather than at the
-    first training step.
-
-    :param method: either ``augmentation`` or ``symm_loss``.
-    :param group: the symmetry group, or ``None``.
-    :raises ValueError: under ``symm_loss`` with a group outside :data:`SUPPORTED_GROUPS`.
+    ``none``; that value is legitimate for an augmentation run, where the group is never read, so
+    it is rejected only under ``method="symm_loss"``, and at construction rather than at the first
+    training step.
     """
     if method != "symm_loss":
         return
@@ -57,9 +51,8 @@ def build_symmetric_batch(
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Draw one transformation per jet and return the transformed partner batch.
 
-    :param x: batch of shape (jets, constituents, features).
-    :param group: one of :data:`SUPPORTED_GROUPS`.
-    :param feature_names: column names of *x*, in order.
+    :param x: batch of shape (jets, constituents, features), whose columns *feature_names* lists in
+        order.
     :param norm_scales: per-column factors returning the stored values to GeV.
     :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts.
     :param so3_apply_filter: drop jets rotated outside detector acceptance.
@@ -81,12 +74,9 @@ def symmetry_distance(
 ) -> torch.Tensor:
     """Mean per-jet discrepancy between the outputs on ``x`` and on ``T(x)``.
 
-    ``l1``, ``l2`` and ``mse`` act on the logits directly; ``cosine`` on their direction; ``js``
-    and ``kl`` on the softmax probabilities, symmetrised, with *eps* keeping the logarithms finite
-    where a probability underflows.
-
-    :param metric: one of :data:`SUPPORTED_METRICS`.
-    :raises ValueError: on a shape mismatch or an unknown metric.
+    ``l1``, ``l2`` and ``mse`` act on the logits directly, ``cosine`` on their direction, and
+    ``js`` and ``kl`` on the softmax probabilities, symmetrised, with *eps* keeping the logarithms
+    finite where a probability underflows.
     """
     if logits.shape != logits_sym.shape:
         raise ValueError(
@@ -136,7 +126,6 @@ class SymmetryConsistencyLoss(nn.Module):
         :param weight: the coefficient :math:`w` multiplying the symmetry term.
         :param metric: one of :data:`SUPPORTED_METRICS`.
         :param eps: floor on the probabilities of the divergence metrics.
-        :raises ValueError: on an unknown metric.
         """
         super().__init__()
         if metric.lower() not in SUPPORTED_METRICS:

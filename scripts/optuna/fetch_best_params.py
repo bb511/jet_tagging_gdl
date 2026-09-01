@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 """Report the best trial of an Optuna study, ready to paste into a config.
 
-A study is one (architecture, constituent count, regime) cell of the grid,
-named ``<model>_nconst<N>_<method>_<scheme>``, and its objective is the clean
-``val/acc_best`` of the main run. For each study this prints the best value,
-the parameters as hydra override tokens (list values quoted for the shell) and
-the same parameters as a YAML block, which is what
-``configs/experiment/hls4ml/<model>_<N>.yaml`` wants.
+A study is one (architecture, constituent count, regime) cell of the grid, named
+``<model>_nconst<N>_<method>_<scheme>``, and its objective is the main run's clean
+``val/acc_best``. Each is printed as the best value, hydra override tokens for a one-off rerun,
+and a YAML block for making the values ``configs/experiment/hls4ml/<model>_<N>.yaml``'s own.
 
     python3 scripts/optuna/fetch_best_params.py --db logs/optuna/hls4ml/mlp.db \\
         --study mlp_nconst16_augmentation_none
     python3 scripts/optuna/fetch_best_params.py --db logs/optuna/hls4ml/mlp.db --all
     python3 scripts/optuna/fetch_best_params.py --db logs/optuna/hls4ml/mlp.db --all --csv
-
-The overrides are for a one-off rerun; the YAML block is for making the values
-the config's own, after which ``scripts/optuna/make_train_catalogues.py`` picks
-them up on its next regeneration.
 """
 
 from __future__ import annotations
@@ -47,9 +41,8 @@ def study_names(storage: str, wanted: str | None) -> list[str]:
 def as_yaml(params: dict[str, object]) -> str:
     """The parameters as a nested YAML block.
 
-    The Optuna parameter names are dotted hydra paths ('algorithm.optimizer.lr'), so they are
-    turned back into nesting rather than printed flat. Leaf lists come out in flow style ('[128,
-    64, 32]'), which is how the experiment configs write layer widths.
+    Optuna parameter names are dotted hydra paths, so they are turned back into nesting; leaf lists
+    come out in flow style ('[128, 64, 32]'), as the experiment configs write widths.
     """
     dotlist = [f"{k}={v}" for k, v in sorted(params.items())]
     nested = OmegaConf.to_container(OmegaConf.from_dotlist(dotlist), resolve=True)

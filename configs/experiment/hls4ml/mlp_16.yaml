@@ -1,7 +1,5 @@
 # @package _global_
-# MLP for 16 constituents. Method and symmetry group are CLI overrides:
-#   python src/train.py experiment=hls4ml/mlp_16 data.method=symm_loss \
-#       data.augmentation_scheme=so2
+# MLP at 16 constituents; data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
   - override /data: hls4ml
   - override /algorithm: mlp
@@ -20,8 +18,7 @@ data:
   batch_size: 2048
   n_folds: 5
 
-# The published widths, unchanged across the constituent counts; only the flattened
-# input width, and with it the first layer, grows with N.
+# The published widths, spelled out here because the searches replace them per constituent count.
 algorithm:
   hidden_layers: [128, 64, 32]
 

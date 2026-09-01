@@ -1,9 +1,9 @@
 """Fixtures composing the project's own Hydra roots, cut down to one cheap CPU epoch.
 
-The record gate is read here rather than in each test module because importing
-``src.train`` runs ``rootutils.setup_root(dotenv=True)``, which copies ``.env``'s
-``HF_HUB_CACHE`` into the environment. A gate evaluated after that import would never
-skip, and the data tests would start a 3 GB download instead.
+The record gate is read here rather than in each test module because importing ``src.train`` runs
+``rootutils.setup_root(dotenv=True)``, which copies ``.env``'s ``HF_HUB_CACHE`` into the
+environment: a gate evaluated after that import would never skip, and the data tests would start a
+3 GB download.
 """
 
 import os
@@ -23,12 +23,12 @@ register_resolvers()
 
 ROOT = rootutils.find_root(indicator=".project-root")
 
-# Every path in configs/paths/default.yaml resolves against it. A run gets it from .env;
-# a bare pytest invocation may have neither .env nor the variable.
+# configs/paths/default.yaml resolves against it, and a bare pytest has neither .env nor the
+# variable.
 os.environ.setdefault("PROJECT_ROOT", str(ROOT))
 
-# The record's per-nconstituents caches survive between test runs: rebuilding one costs
-# more than every test in this suite together.
+# The record's per-nconstituents caches survive between runs: rebuilding one costs more than every
+# test in this suite together.
 CACHE_DIR = os.environ.get("HLS4ML_CACHE_DIR", str(ROOT / "data" / "hf"))
 
 needs_record = pytest.mark.skipif(
@@ -38,11 +38,7 @@ needs_record = pytest.mark.skipif(
 
 
 def _composed(config_name: str) -> DictConfig:
-    """Compose a root config, then trim it to what a test can afford to run.
-
-    :param config_name: name of the root config, either train.yaml or eval.yaml.
-    :return: the composed config, with its Hydra node kept so that tests can install one.
-    """
+    """Compose train.yaml or eval.yaml down to what a test can afford, Hydra node included."""
     with initialize(version_base="1.3", config_path="../configs"):
         cfg = compose(config_name=config_name, return_hydra_config=True, overrides=[])
 
@@ -72,8 +68,8 @@ def _per_test(cfg: DictConfig, tmp_path: Path) -> Iterator[DictConfig]:
         cfg.paths.output_dir = str(tmp_path)
         cfg.paths.log_dir = str(tmp_path)
         cfg.paths.results_dir = str(tmp_path / "results")
-        # run_name interpolates ${hydra:runtime.output_dir}, which resolves only against a
-        # live HydraConfig; a test that needs it calls HydraConfig().set_config(cfg).
+        # run_name interpolates ${hydra:runtime.output_dir}, which resolves only against a live
+        # HydraConfig; a test that needs it calls HydraConfig().set_config(cfg).
         cfg.hydra.runtime.output_dir = str(tmp_path)
 
     yield cfg
@@ -95,19 +91,11 @@ def cfg_eval_global() -> DictConfig:
 
 @pytest.fixture
 def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> Iterator[DictConfig]:
-    """A training config writing everything under this test's own directory.
-
-    :param cfg_train_global: the package-wide composition to copy from.
-    :param tmp_path: the directory this test may write to.
-    """
+    """A training config writing everything under this test's own directory."""
     yield from _per_test(cfg_train_global, tmp_path)
 
 
 @pytest.fixture
 def cfg_eval(cfg_eval_global: DictConfig, tmp_path: Path) -> Iterator[DictConfig]:
-    """An evaluation config writing everything under this test's own directory.
-
-    :param cfg_eval_global: the package-wide composition to copy from.
-    :param tmp_path: the directory this test may write to.
-    """
+    """An evaluation config writing everything under this test's own directory."""
     yield from _per_test(cfg_eval_global, tmp_path)

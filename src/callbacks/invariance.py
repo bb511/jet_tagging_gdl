@@ -1,16 +1,13 @@
-# Invariance probe: how far the logits move when a symmetry acts on the test jets.
 """Measure the invariance of a trained classifier under SO(2), SO(3) and Lorentz boosts.
 
-The probe runs on the test set only, and reports two families per group. The flip family
-is paired: it compares the prediction on a jet with the prediction on that same jet
-transformed, and its label-aware breakdown says whether a flip repaired a wrong
-prediction or broke a right one. The Wasserstein family is unpaired: it compares the two
-logit distributions over the whole test set, so a model that scrambles individual jets
-while preserving the ensemble scores well there and badly on the flips.
-
-Transforms come from :func:`~src.data.components.augmentation.make_transform`, the same
-factory the online augmentation and the symmetry-consistency loss draw from, so what is
-measured cannot drift from what was trained on.
+The probe runs on the test set alone, reporting two families per group. The flip family is
+paired, each jet against its own transform, and its label-aware breakdown says whether a flip
+repaired a wrong prediction or broke a right one. The Wasserstein family is unpaired, over the
+whole test set, so a model that scrambles individual jets while preserving the ensemble scores
+well there and badly on the flips. Transforms come from
+:func:`~src.data.components.augmentation.make_transform`, the factory the online augmentation and
+the symmetry-consistency loss also draw from, so what is measured cannot drift from what was
+trained on.
 """
 
 from collections.abc import Sequence
@@ -32,15 +29,13 @@ GROUPS = ("so2", "so3", "lorentz")
 class InvarianceMetricCallback(Callback):
     """Log ``invariance/*`` metrics for every symmetry group at the end of the test pass.
 
-    The metrics are the flip rate, the fraction of jets the SO(3) acceptance filter rejects, the
-    Wasserstein-1 distance between the original and transformed logit distributions (per class and
-    averaged over classes), and the label-aware flip breakdown.
+    The metrics are the flip rate and its label-aware breakdown, the fraction of jets the SO(3)
+    acceptance filter rejects, and the Wasserstein-1 distance between the original and transformed
+    logit distributions, per class and averaged over classes.
 
     :param lorentz_eta_max: half-width of the rapidity range the boosts are drawn from; it defines
         the probe, so it is never tuned.
-    :param compute_wasserstein: keep every test logit in host memory and compare the two
-        distributions at the end of the pass.
-    :param compute_flip_breakdown: count the label-aware transitions as well as the flips.
+    :param compute_wasserstein: keeps every test logit in host memory until the end of the pass.
     :param class_names: display names of the output classes, in column order.
     """
 
@@ -89,11 +84,10 @@ class InvarianceMetricCallback(Callback):
         log.info(f"Invariance probe ready on features {self._model_feature_names}.")
 
     def _names_for(self, width: int) -> list[str]:
-        """Name the columns of a batch of this width.
+        """Name the columns of a batch of this width, for the transforms to address by name.
 
         A test batch carries either the record's 16 columns (under ``keep_full_features_at_test``,
-        or always under the SCL) or the reduced set the network consumes, and the transforms
-        address px, py and pz by name.
+        or always under the SCL) or the reduced set the network consumes.
         """
         if self._full_feature_names is not None and width == len(self._full_feature_names):
             return self._full_feature_names
@@ -140,11 +134,11 @@ class InvarianceMetricCallback(Callback):
         if keep_mask is not None:
             self._record(f"{group}_reject_frac", 1.0 - keep_mask.float().mean().item())
             if not bool(keep_mask.any()):
-                # The SO(3) filter rejected the whole batch, leaving nothing to pair; a
-                # mean over the empty tensor would enter the epoch average as NaN.
+                # Nothing left to pair, and a mean over the empty tensor would enter the
+                # epoch average as NaN.
                 return
-        # SO(3) drops the jets it rotates out of acceptance, so the survivors' logits are
-        # what the transformed batch must be compared against.
+        # SO(3) drops the jets it rotates out of acceptance, so only the survivors' logits
+        # can be paired with the transformed batch.
         kept = logits if keep_mask is None else logits[keep_mask]
         kept_targets = targets if keep_mask is None else targets[keep_mask]
         logits_sym = pl_module(x_sym)
@@ -176,9 +170,8 @@ class InvarianceMetricCallback(Callback):
     def _wasserstein_metrics(self) -> dict[str, float]:
         """Distance between the original and transformed logit distributions per group.
 
-        Computed per class-logit channel over the whole test set and then averaged over the
-        channels. The comparison is unpaired, so it says nothing about which jet produced which
-        value.
+        Computed per class-logit channel over the whole test set and averaged over the channels.
+        The comparison is unpaired, so it says nothing about which jet produced which value.
         """
         if not self._orig_logits:
             return {}
@@ -199,8 +192,7 @@ class InvarianceMetricCallback(Callback):
         """Turn the transition counts into probabilities conditioned on being right.
 
         ``recover`` is P(correct after | wrong before), ``stable`` is P(correct after | correct
-        before) and ``degrade`` its complement. Unlike the plain flip rate, these distinguish a
-        transformation that repairs a prediction from one that breaks it.
+        before) and ``degrade`` its complement.
         """
         results: dict[str, float] = {}
         for group, counts in self._flip_counts.items():

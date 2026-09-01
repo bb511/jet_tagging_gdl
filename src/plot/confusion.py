@@ -24,9 +24,7 @@ def plot(
     :param labels: true class index per jet, shape (jets,).
     :param preds: predicted class index per jet, shape (jets,).
     :param class_names: display names of the classes, in label order.
-    :param save_dir: directory the PNG is written to.
     :param split: the split the predictions come from; it names the file and the title.
-    :return: the path written.
     """
     plt.style.use(hep.style.CMS)
     names = list(class_names)

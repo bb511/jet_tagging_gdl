@@ -1,13 +1,10 @@
-# Base LightningModule every jet-tagging architecture in this package subclasses.
 """Shared training logic for the jet-tagging architectures.
 
-A subclass supplies only the network: it implements :meth:`JetTaggingModule.build_net` and, if its
-inputs need a different parameterisation than the stored columns, overrides
-:meth:`JetTaggingModule._prepare_inputs` and :meth:`JetTaggingModule._on_features_resolved`.
-Everything else, the two training methods compared in this study included, lives here.
-
-The two methods are ``augmentation``, where the datamodule transforms the training batches online
-and the loss is plain cross-entropy, and ``symm_loss``, where the batches are left alone and a
+A subclass supplies only the network, through :meth:`JetTaggingModule.build_net`, overriding
+:meth:`JetTaggingModule._prepare_inputs` and :meth:`JetTaggingModule._on_features_resolved` when
+its inputs need a parameterisation other than the stored columns. Both methods compared in this
+study live here: ``augmentation``, where the datamodule transforms the training batches online and
+the loss is plain cross-entropy, and ``symm_loss``, where the batches are left alone and a
 symmetry-consistency term penalises the change in the logits under a transformation drawn per jet.
 """
 
@@ -38,8 +35,6 @@ def resolve_feature_indices(model_features: list[str], feature_names: list[str])
     """Column indices of *model_features* inside *feature_names*.
 
     Names match bare or with the record's ``j1_`` prefix, so ``px`` finds ``j1_px``.
-
-    :raises ValueError: naming the first requested feature the data do not carry.
     """
     index_of = {name: idx for idx, name in enumerate(feature_names)}
     indices = []
@@ -81,25 +76,20 @@ class JetTaggingModule(LightningModule):
         **net_kwargs,
     ) -> None:
         """
-        :param name: short label for the results table and the MLflow run.
-        :param nconstituents: constituents per jet, the second axis of a batch.
-        :param nbr_feats: feature columns the network consumes, the third axis.
-        :param output_dim: number of jet classes.
-        :param method: ``augmentation`` or ``symm_loss``.
-        :param group: symmetry group of the SCL, read only under ``symm_loss``.
-        :param symm_loss_weight: weight of the symmetry term relative to cross-entropy.
+        :param nconstituents: constituents per jet, the second axis of a batch; *nbr_feats* is the
+            third, the columns the network consumes.
+        :param group: symmetry group of the SCL, read only under ``method="symm_loss"``.
         :param symm_loss_metric: distance between the two logit sets; see
             :func:`~src.algorithms.losses.symmetry.symmetry_distance`.
         :param lorentz_eta_max: half-width of the rapidity range of the SCL boosts.
         :param optimizer: Hydra ``_partial_`` optimiser, called with ``params``.
         :param scheduler: Lightning scheduler dict whose ``scheduler`` entry is a Hydra
             ``_partial_``; ``None`` trains at a fixed learning rate.
-        :param compile: wrap the network in :func:`torch.compile` before fitting.
         :param net_kwargs: forwarded to :meth:`build_net`, and saved as hyperparameters.
         """
         super().__init__()
-        # The optimiser and scheduler partials stay out of hparams so that a checkpoint
-        # holds plain containers only and loads without add_safe_globals.
+        # Optimiser and scheduler partials out of hparams, so a checkpoint holds plain
+        # containers and loads without add_safe_globals.
         self.save_hyperparameters(logger=False, ignore=["optimizer", "scheduler"])
         if method not in SUPPORTED_METHODS:
             raise ValueError(f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}.")
@@ -121,8 +111,7 @@ class JetTaggingModule(LightningModule):
         self.norm_scales: dict[str, float] | None = None
 
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
-        # Counted here rather than in a callback: the network is complete, no trainer is
-        # needed, and hparams reach the loggers and the checkpoint from the first hook.
+        # Counted here, not in a callback, so hparams carry the FLOP count from the first hook.
         record_flops(self, nconstituents, nbr_feats)
 
     def _build_metrics(self, output_dim: int, method: str) -> None:
@@ -138,17 +127,11 @@ class JetTaggingModule(LightningModule):
         self.val_symm_loss = MeanMetric() if method == "symm_loss" else None
 
     def build_net(self, **net_kwargs) -> nn.Module:
-        """Return the network this algorithm trains.
-
-        Implemented by every subclass.
-        """
+        """Return the network this algorithm trains; every subclass implements it."""
         raise NotImplementedError(f"{type(self).__name__} must implement build_net().")
 
     def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
-        """Last transformation of a batch before the network sees it.
-
-        The identity here; a subclass overrides it to de-normalise or reorder columns.
-        """
+        """Last step before the network sees a batch; subclasses de-normalise or reorder here."""
         return x
 
     def _on_features_resolved(self) -> None:
@@ -157,11 +140,10 @@ class JetTaggingModule(LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits for a batch of shape (jets, constituents, features).
 
-        Load-bearing width guard: training and validation batches arrive already at
-        ``nbr_feats`` and pass straight through, whereas test batches (under
-        ``keep_full_features_at_test``) and every SCL batch arrive at the record's full
-        16-column width and are reduced here. Callbacks may therefore hand either width
-        to the same module.
+        Load-bearing width guard: train and validation batches arrive at ``nbr_feats`` and pass
+        through, whereas test batches (under ``keep_full_features_at_test``) and every SCL batch
+        arrive at the record's full 16-column width and are reduced here, so callbacks may hand
+        either width to the same module.
         """
         x = x.to(torch.float32)
         if self.model_feature_indices is not None and x.shape[-1] != self.hparams.nbr_feats:
@@ -171,9 +153,9 @@ class JetTaggingModule(LightningModule):
     def model_step(self, batch: tuple[torch.Tensor, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Run one forward pass and build the loss for it.
 
-        :param batch: the pair ``(x, y)``, with ``x`` of shape (jets, constituents, features) and
-            ``y`` a one-hot vector of shape (jets, classes).
-        :return: a dict of ``loss``, ``cls_loss``, ``logits``, ``preds`` and ``targets``, plus
+        :param batch: the pair ``(x, y)``, of shapes (jets, constituents, features) and one-hot
+            (jets, classes).
+        :return: dict of ``loss``, ``cls_loss``, ``logits``, ``preds``, ``targets``, plus
             ``symm_loss`` under ``method="symm_loss"``.
         """
         x, y = batch
@@ -209,9 +191,8 @@ class JetTaggingModule(LightningModule):
             lorentz_eta_max=self.hparams.lorentz_eta_max,
         )
         if keep_mask is not None and not bool(keep_mask.any()):
-            # The SO(3) acceptance filter rejected every jet, leaving no partner to
-            # compare against; a mean over the empty batch would poison the loss with a
-            # NaN, so this batch contributes cross-entropy alone.
+            # The SO(3) filter rejected every jet: a mean over the empty batch would be NaN, so
+            # this batch contributes cross-entropy alone.
             return cls_loss, cls_loss.new_zeros(())
 
         # SO(3) drops jets rotated out of acceptance, so keep only their partners' logits.
@@ -237,8 +218,7 @@ class JetTaggingModule(LightningModule):
             self.log("train/symm_loss", self.train_symm_loss, on_step=False, on_epoch=True)
         return out["loss"]
 
-    # The step dict is handed on to the callbacks: the plotting and invariance callbacks read
-    # its logits rather than running the forward pass a second time on every batch.
+    # The returned dict feeds the plotting and invariance callbacks, sparing a second forward pass.
     def validation_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> dict[str, torch.Tensor]:
@@ -282,8 +262,7 @@ class JetTaggingModule(LightningModule):
         """Resolve the feature layout from the datamodule, and compile the net if asked."""
         if self.hparams.compile and stage == "fit":
             self.net = torch.compile(self.net)
-        # _trainer rather than trainer: the public property raises when the module stands
-        # alone, which is how the unit tests exercise a bare model_step.
+        # _trainer rather than trainer: the public property raises when the module stands alone.
         datamodule = getattr(self._trainer, "datamodule", None)
         if datamodule is None:
             return
@@ -295,9 +274,8 @@ class JetTaggingModule(LightningModule):
         """Record which columns of the incoming batches the network consumes.
 
         Under the SCL, and whenever the datamodule keeps all 16 record columns at test time,
-        batches are wider than the network's input and the reduction indices are needed. Otherwise
-        the batch already has the right width, and only a network with :attr:`required_features`
-        reorders it.
+        batches are wider than the network's input and the reduction indices are needed; otherwise
+        only a network with :attr:`required_features` reorders anything.
         """
         model_features = self.required_features or list(datamodule.features)
         full_width = self.hparams.method == "symm_loss" or datamodule.keep_full_features_at_test
@@ -326,7 +304,7 @@ class JetTaggingModule(LightningModule):
     def _set_up_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
         """Instantiate the scheduler partial and return it inside its Lightning dict.
 
-        Schedulers that need the run length take it from the trainer, which knows it only inside
+        A scheduler needing the run length takes it from the trainer, which knows it only inside
         ``configure_optimizers``.
         """
         scheduler_cfg = dict(self._scheduler)
@@ -344,12 +322,10 @@ class JetTaggingModule(LightningModule):
 def _reject_mismatched_train_columns(model_features: list[str], data_features: list[str]) -> None:
     """Reject a ``data.features`` list the full-width reduction indices do not describe.
 
-    Those indices address the record's 16 columns, which is the width of the test and SCL batches.
-    Training batches are ``data.features`` wide and reach a network with
-    :attr:`JetTaggingModule.required_features` unreduced, so they have to be its own columns in its
-    own order already.
-
-    :raises ValueError: on any other feature list, naming the one the algorithm needs.
+    Those indices address the record's 16 columns, the width of the test and SCL batches, whereas
+    training batches are ``data.features`` wide and reach a network with
+    :attr:`JetTaggingModule.required_features` unreduced, so they must already be its own columns
+    in its own order.
     """
     if resolve_feature_indices(model_features, data_features) != list(range(len(data_features))):
         raise ValueError(

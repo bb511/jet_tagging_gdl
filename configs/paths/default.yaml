@@ -1,18 +1,15 @@
-# Path to the repository root. Set PROJECT_ROOT in .env (see scripts/setup.sh); every
-# other path below is relative to it, so nothing depends on the working directory.
+# Set PROJECT_ROOT in .env (see scripts/setup.sh). Every path below is relative to it, so nothing
+# depends on the working directory.
 root_dir: ${oc.env:PROJECT_ROOT}
 
-# Parent of the record's per-nconstituents caches. The hub snapshot itself goes to
-# HF_HUB_CACHE, not here.
+# Parent of the record's per-nconstituents caches; the hub snapshot goes to HF_HUB_CACHE.
 base_data_dir: ${paths.root_dir}/data
 
 log_dir: ${paths.root_dir}/logs
 
-# Created by hydra, one directory per run; the pattern is in configs/hydra/default.yaml.
-# Checkpoints go to ${paths.output_dir}/checkpoints/{main,fold_<i>}.
+# One directory per run, made by hydra; checkpoints go to its checkpoints/{main,fold_<i>}.
 output_dir: ${hydra:runtime.output_dir}
 
-# Where the results tables are written, so a run started from any directory finds them.
 results_dir: ${paths.root_dir}/results
 
 work_dir: ${hydra:runtime.cwd}

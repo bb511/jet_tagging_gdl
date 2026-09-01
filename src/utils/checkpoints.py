@@ -1,13 +1,8 @@
-# The checkpoint manifest: what a training run leaves behind for src/eval.py to read.
 """Manifest of the checkpoints one training run produced.
 
-``src/train.py`` fits a main run and, when ``data.n_folds >= 2``, one run per fold, then writes a
-single JSON manifest listing them. ``src/eval.py`` reads that manifest and tests every checkpoint
-in it, so the two entry points share no state beyond this file.
-
-Paths in the manifest are absolute: moving ``logs/`` after training breaks a later evaluation,
-which is why ``scripts/symbolink.sh`` is meant to be run before the first training rather than
-after.
+``src/train.py`` writes it, ``src/eval.py`` reads it, and the two entry points share no other
+state. Its paths are absolute, so moving ``logs/`` after training breaks a later evaluation: run
+``scripts/symbolink.sh`` before the first training, not after.
 """
 
 import json
@@ -57,9 +52,8 @@ def write_manifest(manifest: Manifest, output_dir: str | Path) -> Path:
 def read_manifest(path: str | Path) -> Manifest:
     """Load a manifest written by :func:`write_manifest`.
 
-    :raises FileNotFoundError: if *path* does not exist.
-    :raises ValueError: if the file was written by an incompatible version, since an older manifest
-        may name fields this reader would silently drop.
+    :raises ValueError: on a version mismatch, since an older manifest may name fields this reader
+        would silently drop.
     """
     payload = json.loads(Path(path).read_text())
     version = payload.get("version")
@@ -73,10 +67,9 @@ def read_manifest(path: str | Path) -> Manifest:
 
 
 def best_or_last_checkpoint(trainer: Trainer) -> str:
-    """Absolute path of the checkpoint a finished run should be evaluated from.
+    """Absolute path of the checkpoint a finished run is evaluated from.
 
-    The best checkpoint by ``val/acc``, or the last one when no ``ModelCheckpoint`` ran (a
-    fast_dev_run, or the search callbacks).
+    The best by ``val/acc``, or the last when no ``ModelCheckpoint`` ranked any.
 
     :raises RuntimeError: when the run wrote no checkpoint at all.
     """

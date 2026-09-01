@@ -2,16 +2,15 @@
 # ========================================================================
 # LORENTZNET TRAINING COMMANDS
 # ========================================================================
-# One block per (constituent count, regime): 3 x 7 = 21 train runs.
+# One block per (constituent count, regime): 3 x 1 = 3 train runs. Generated
+# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
+# Baseline only: this architecture embeds the symmetry rather than acquiring it,
+# so the augmentation and SCL regimes are not run on it.
+# Each block carries the best trial of its own study under logs/optuna/hls4ml/;
+# a block whose study is missing carries none and says so (transferred ablation).
 #
-# Generated from the study databases under logs/optuna/hls4ml/ by
-# scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
-# Each block carries the best trial of its own study. Blocks whose study is
-# missing carry no overrides and say so: they are the transferred ablation.
-#
-# Every command is commented out. Copy one to run it by hand, or feed the
-# whole file to scripts/cluster/submit_train.sh, which parses these blocks
-# and can queue them on a GPU or send them to slurm.
+# Every command is commented out: copy one to run it by hand, or feed the whole
+# file to scripts/cluster/submit_train.sh, which queues them on a GPU or slurm.
 
 # ========================================================================
 # lorentznet  nconst=16
@@ -30,84 +29,6 @@
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/baseline
 
-# ------------------------------------------------------------------------
-# lorentznet  nconst=16  aug_so2  (method=augmentation, group=so2)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_16 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=so2 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/aug_so2
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=16  aug_so3  (method=augmentation, group=so3)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_16 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=so3 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/aug_so3
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=16  aug_lorentz  (method=augmentation, group=lorentz)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_16 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=lorentz \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/aug_lorentz
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=16  symm_so2  (method=symm_loss, group=so2)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_16 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=so2 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/symm_so2
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=16  symm_so3  (method=symm_loss, group=so3)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_16 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=so3 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/symm_so3
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=16  symm_lorentz  (method=symm_loss, group=lorentz)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_16 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=lorentz \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst16/symm_lorentz
-
 # ========================================================================
 # lorentznet  nconst=50
 # ========================================================================
@@ -125,84 +46,6 @@
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/baseline
 
-# ------------------------------------------------------------------------
-# lorentznet  nconst=50  aug_so2  (method=augmentation, group=so2)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_50 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=so2 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/aug_so2
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=50  aug_so3  (method=augmentation, group=so3)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_50 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=so3 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/aug_so3
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=50  aug_lorentz  (method=augmentation, group=lorentz)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_50 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=lorentz \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/aug_lorentz
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=50  symm_so2  (method=symm_loss, group=so2)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_50 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=so2 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/symm_so2
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=50  symm_so3  (method=symm_loss, group=so3)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_50 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=so3 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/symm_so3
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=50  symm_lorentz  (method=symm_loss, group=lorentz)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_50 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=lorentz \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst50/symm_lorentz
-
 # ========================================================================
 # lorentznet  nconst=150
 # ========================================================================
@@ -219,81 +62,3 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/baseline
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=150  aug_so2  (method=augmentation, group=so2)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_150 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=so2 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/aug_so2
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=150  aug_so3  (method=augmentation, group=so3)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_150 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=so3 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/aug_so3
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=150  aug_lorentz  (method=augmentation, group=lorentz)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_150 \
-#     data.method=augmentation \
-#     data.augmentation_scheme=lorentz \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/aug_lorentz
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=150  symm_so2  (method=symm_loss, group=so2)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_150 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=so2 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/symm_so2
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=150  symm_so3  (method=symm_loss, group=so3)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_150 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=so3 \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/symm_so3
-
-# ------------------------------------------------------------------------
-# lorentznet  nconst=150  symm_lorentz  (method=symm_loss, group=lorentz)
-# transferred from experiment config (no study yet)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     experiment=hls4ml/lorentznet_150 \
-#     data.method=symm_loss \
-#     data.augmentation_scheme=lorentz \
-#     data.n_folds=5 \
-#     trainer=gpu \
-#     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/lorentznet/nconst150/symm_lorentz

@@ -1331,6 +1331,7 @@ python-versions = ">=3.10"
 groups = ["main"]
 files = [
     {file = "google_auth-2.57.0-py3-none-any.whl", hash = "sha256:180dafe015cfb62193bea26b677500fab5b9fd51a1e825ebf3ad9b182047ae59"},
+    {file = "google_auth-2.57.0.tar.gz", hash = "sha256:9b4f96d6a1feb5f7201231f47cfb3de08d8f176f8a61f9e461555116e95a8789"},
 ]
 
 [package.dependencies]
@@ -4287,18 +4288,6 @@ test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.18.*)", "pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 
 [[package]]
-name = "sh"
-version = "2.4.0"
-description = "Python subprocess replacement"
-optional = false
-python-versions = "<4.0,>=3.10"
-groups = ["dev"]
-files = [
-    {file = "sh-2.4.0-py3-none-any.whl", hash = "sha256:98eba32eeb5ecdd310668737d7461e668afc42b273550d0bc198a1c5c2b1ab36"},
-    {file = "sh-2.4.0.tar.gz", hash = "sha256:a250aef68509ed93419c9a1d90b0647cd5cbe26107ba94d3717ef5b6d595ffd9"},
-]
-
-[[package]]
 name = "six"
 version = "1.17.0"
 description = "Python 2 and 3 compatibility utilities"
@@ -4968,4 +4957,4 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.13"
-content-hash = "0e565f8210d72876e2bfcc844c2089ec79513612b33528f977f2f550c74ddaf0"
+content-hash = "e7587f1cd9d41127984488795806eeb51957d992ad2af366cbc13ba88251a83b"

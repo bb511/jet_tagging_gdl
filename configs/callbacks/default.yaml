@@ -1,7 +1,6 @@
 # @package callbacks
 
-# Everything a full training run needs: the Lightning built-ins under util, and the four
-# project callbacks under main.
+# Everything a full training run needs: the Lightning built-ins, and this project's own.
 defaults:
   - util@model_checkpoint: model_checkpoint
   - util@early_stopping: early_stopping
@@ -15,8 +14,7 @@ defaults:
   - _self_
 
 model_checkpoint:
-  # Under the run's own Hydra directory; train.py adds a subdirectory per fold.
-  dirpath: ${paths.output_dir}/checkpoints
+  dirpath: ${paths.output_dir}/checkpoints # train.py adds a subdirectory per fold
   filename: "epoch_{epoch:03d}"
   monitor: val/acc
   mode: max

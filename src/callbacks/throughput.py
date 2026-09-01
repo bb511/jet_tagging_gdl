@@ -1,16 +1,11 @@
-# Throughput of the training loop: how fast the epochs run and how busy the GPU is.
 """Log the wall-clock cost of each training epoch.
 
-The metrics answer whether a run is limited by the GPU or by the input pipeline, which is the
-question an augmentation run raises: its transforms run inside the collate function, in the worker
-processes, where the training step cannot time them. They surface instead as the gap between one
-batch ending and the next beginning, ``perf/avg_data_ms``, which is comparable with the pure
-input/output wait of a symmetry-consistency run.
-
-Logged under ``perf/``: ``train_epoch_s`` (wall time of the epoch), ``train_steps_per_sec`` and
-``train_samples_per_sec``, ``avg_step_ms`` (mean time in a training step, the forward and backward
-pass without the data wait), ``avg_data_ms``, ``gpu_util_pct`` and ``gpu_mem_alloc_gb``, both
-sampled once at the end of the epoch.
+The metrics answer whether a run is limited by the GPU or by the input pipeline, the question an
+augmentation run raises: its transforms run in the worker processes, where the training step
+cannot time them, and surface instead as the gap between one batch ending and the next beginning,
+``perf/avg_data_ms``, which is comparable with the pure input/output wait of a
+symmetry-consistency run. ``avg_step_ms`` is the complement, the forward and backward pass without
+that wait; ``gpu_util_pct`` and ``gpu_mem_alloc_gb`` are sampled once at the end of the epoch.
 """
 
 import time
@@ -24,10 +19,7 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def _gpu_utilization() -> float:
-    """Percentage of the last sampling period the GPU was busy.
-
-    Zero on a CPU run, NaN when the driver cannot be queried.
-    """
+    """Percentage of the last sampling period the GPU was busy; 0 on CPU, NaN if unqueryable."""
     if not torch.cuda.is_available():
         return 0.0
     try:
@@ -50,7 +42,7 @@ class ThroughputCallback(Callback):
         self._epoch_samples: int = 0
 
     def on_train_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Start the epoch's accumulators; the clock runs from here."""
+        """Reset the epoch's accumulators; the clock runs from here."""
         self._step_times = []
         self._data_times = []
         self._epoch_samples = 0

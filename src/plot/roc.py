@@ -23,10 +23,7 @@ def plot(
 
     :param labels: true class index per jet, shape (jets,).
     :param probs: class probabilities, shape (jets, classes), columns ordered as *class_names*.
-    :param class_names: display names of the classes.
-    :param save_dir: directory the PNG is written to.
     :param split: the split the scores come from; it names the file and the title.
-    :return: the path written.
     """
     plt.style.use(hep.style.CMS)
     n_classes = probs.shape[1]
@@ -48,7 +45,6 @@ def _draw(ax: Axes, truth: np.ndarray, score: np.ndarray, name: str) -> None:
     false_positive, true_positive, _ = roc_curve(truth, score)
     area = auc(false_positive, true_positive)
     ax.plot(false_positive, true_positive, linewidth=2, label=f"AUC = {area:.4f}")
-    # The diagonal is the no-skill classifier, the reference every curve is read against.
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
     ax.set_title(name)
     ax.set_xlabel("False positive rate")

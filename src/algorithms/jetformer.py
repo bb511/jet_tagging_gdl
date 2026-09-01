@@ -1,4 +1,3 @@
-# JetFormer algorithm: the attention-based tagger of this study.
 """JetFormer jet tagger, a replica of the reference architecture (arXiv:2601.17215).
 
 The blocks are built from scratch rather than from :class:`torch.nn.TransformerEncoderLayer` so

@@ -1,4 +1,3 @@
-# DeepSets algorithm: the permutation-invariant tagger of this study.
 """DeepSets jet tagger.
 
 The network is invariant under a permutation of the constituents by construction, but under nothing

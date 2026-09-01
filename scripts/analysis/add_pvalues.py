@@ -19,26 +19,15 @@ Interpret p-values qualitatively alongside effect sizes.
 
 Usage
 -----
-Results tables live under results/<features>/ (e.g. results/pt_etarel_phirel/,
-results/px_py_pz_etarel_phirel/), split by the literal input feature list used
-for training. Baseline (augmentation_scheme=none) rows only ever exist in the
-pt_etarel_phirel bucket, so tables in other feature buckets have no "none"
-rows of their own. When --baseline is omitted, a sibling
-results_table_baseline.csv is auto-discovered (same directory first, then any
-results/*/results_table_baseline.csv) and used.
+Results tables live under results/<features>/, split by the literal input
+feature list used for training. Baseline (augmentation_scheme=none) rows only
+ever exist in the pt_etarel_phirel bucket, so when --baseline is omitted a
+sibling results_table_baseline.csv is auto-discovered (same directory first,
+then any results/*/results_table_baseline.csv) and used.
 
-Single table (baseline rows auto-discovered if not present in the file):
-    python3 scripts/analysis/add_pvalues.py results/pt_etarel_phirel/results_table_augmentation.csv
-
-Cross-feature comparison (lorentz-trained models vs the 3-feature baseline):
-    python3 scripts/analysis/add_pvalues.py results/px_py_pz_etarel_phirel/results_table_augmentation.csv
-
-Explicit/cross-table baseline override (e.g. symm_loss vs augmentation baseline):
+    python3 scripts/analysis/add_pvalues.py results/*/results_table_*.csv
     python3 scripts/analysis/add_pvalues.py results/pt_etarel_phirel/results_table_symm_loss.csv \
         --baseline results/pt_etarel_phirel/results_table_augmentation.csv
-
-Multiple tables at once:
-    python3 scripts/analysis/add_pvalues.py results/*/results_table_*.csv
 
 Outputs are written next to each input CSV with a _pvalues suffix, and a
 corresponding _pvalues.tex LaTeX table is also written.

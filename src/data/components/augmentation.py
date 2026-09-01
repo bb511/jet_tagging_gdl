@@ -1,22 +1,14 @@
-# SO(2), SO(3) and Lorentz transforms of jet constituents, used online during training,
-# by the symmetry-consistency loss and by the invariance probe.
 """Transforms of the constituent four-vectors of a jet.
 
-All functions take and return torch tensors of shape ``(batch, constituents, features)`` and keep
-every intermediate on the device of the input, so a GPU batch never makes a CPU round trip.
-Matrices are built in float32 and cast to the input dtype at the end.
+Functions take and return ``(batch, constituents, features)`` tensors on the device of the input,
+matrices built in float32 and cast back at the end. One matrix is drawn per jet and applied through
+a batched einsum, ``"bij,bcj->bci"`` over jets, constituents and momentum components.
 
-One matrix is drawn per jet and applied through a single batched einsum, ``"bij,bcj->bci"`` over
-jets, constituents and momentum components, so no Python loop runs over the batch. This is the
-online route: no transformed copy of the data set is ever written to disk.
+Feature columns are addressed by name, bare or with the record's ``j1_`` prefix, and every
+transform first undoes the normalisation with ``norm_scales``, the per-column factors back to GeV,
+since the acceptance cuts and the boost rapidities are defined in physical units (GeV, radians).
 
-Feature columns are addressed by name, bare or with the record's ``j1_`` prefix. Every transform
-first undoes the normalisation with ``norm_scales``, since the acceptance cuts and the boost
-rapidities are defined in physical units.
-
-Transforms draw from the global torch RNG, so ``lightning.seed_everything`` fixes them, but there
-is no generator of their own; threading a device-matched ``torch.Generator`` through the three
-samplers is the single-point change if one is ever needed.
+Transforms draw from the global torch RNG, so ``lightning.seed_everything`` fixes them.
 """
 
 import math
@@ -43,8 +35,8 @@ def compute_eta(
     px: torch.Tensor, py: torch.Tensor, pz: torch.Tensor, eps: float = 1e-8
 ) -> torch.Tensor:
     p = torch.sqrt(px**2 + py**2 + pz**2)
-    # eps keeps a purely longitudinal constituent, and a padded all-zero row, off the
-    # singularity of the logarithm; it sends both to eta = 0 rather than to +/- inf.
+    # eps keeps a purely longitudinal constituent, and a padded all-zero row, off the log
+    # singularity: both go to eta = 0 rather than to +/- inf.
     return 0.5 * torch.log((p + pz + eps) / (p - pz + eps))
 
 
@@ -52,19 +44,8 @@ def wrap_phi(dphi: torch.Tensor) -> torch.Tensor:
     return (dphi + math.pi) % (2 * math.pi) - math.pi
 
 
-def px_py_pz_to_pt_eta_phi(
-    px: torch.Tensor, py: torch.Tensor, pz: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    return compute_pt(px, py), compute_eta(px, py, pz), compute_phi(px, py)
-
-
 def feature_index(feature_names: list[str], *candidate_names: str) -> int | None:
-    """Return the column of the first candidate name the batch carries.
-
-    :param feature_names: column names of a batch, in order.
-    :param candidate_names: names to try, each bare and then with the record's ``j1_`` prefix.
-    :return: the column index, or None when no candidate is present.
-    """
+    """Return the column of the first candidate present, each tried bare and ``j1_``-prefixed."""
     index_map = {name: idx for idx, name in enumerate(feature_names)}
     for name in candidate_names:
         if name in index_map:
@@ -89,13 +70,11 @@ def sample_so2_rot_matrices(
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample *nbr_rot* SO(2) rotation matrices about the beam (z) axis.
+    """Sample *nbr_rot* SO(2) rotation matrices about the beam (z) axis, one per jet.
 
-    :param nbr_rot: matrices to draw, one per jet of the batch.
     :param min_angle: lower end of the uniform angle range, in radians.
     :param max_angle: upper end of that range, in radians.
-    :return: the matrices and the angles they turn through, of shapes (nbr_rot, 3, 3) and
-        (nbr_rot,).
+    :return: matrices of shape (nbr_rot, 3, 3) and the angles they turn through, (nbr_rot,).
     """
     if nbr_rot <= 0:
         return (
@@ -120,11 +99,7 @@ def sample_haar_so3_rot_matrices(
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
-    """Create Haar-random SO(3) matrices from unit quaternions on *device*.
-
-    :param num_rotations: matrices to draw, one per jet of the batch.
-    :return: the matrices, shape (num_rotations, 3, 3).
-    """
+    """Create Haar-random SO(3) matrices from unit quaternions, shape (num_rotations, 3, 3)."""
     if num_rotations <= 0:
         return torch.empty((0, 3, 3), dtype=dtype, device=device)
 
@@ -166,16 +141,13 @@ def so3_jet_filter(
 ) -> torch.Tensor:
     """Mark the jets whose constituents all pass the SO(3) detector-acceptance cuts.
 
-    The constituent quantities and the ``*_max`` thresholds are all in physical, un-normalised
-    units (GeV for the momenta, radians for the azimuth), so this runs before normalisation is
-    reapplied and no threshold ever has to be rescaled by a norm scale.
+    The constituent quantities are of shape (jets, constituents) and, like the ``*_max``
+    thresholds, in physical un-normalised units (GeV, radians), so no threshold ever has to be
+    rescaled by a norm scale. *etarel* and *phirel* are measured from the jet axis, *phirel*
+    wrapped to [-pi, pi).
 
-    :param pt: transverse momentum per constituent, shape (jets, constituents).
-    :param eta: pseudorapidity per constituent, same shape.
-    :param etarel: pseudorapidity of a constituent relative to the jet axis.
-    :param phirel: azimuth of a constituent relative to the jet axis, wrapped to [-pi, pi).
     :param active: True for a real constituent; a padded slot never fails a cut.
-    :return: boolean mask of shape (jets,), True where every real constituent passes.
+    :return: mask of shape (jets,), True where every real constituent passes.
     """
     ok = (
         (pt >= 0)
@@ -197,15 +169,13 @@ def sample_lorentz_boosts(
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
-    """Sample *nbr_rot* random Lorentz boost matrices on *device*.
+    """Sample *nbr_rot* random Lorentz boost matrices, one per jet.
 
-    The direction is isotropic in three dimensions and the rapidity is uniform on
-    ``[-eta_max, eta_max]``. An isotropic boost is not a symmetry of a pp collision, where only
-    boosts along the beam are: it probes a property of the model, not one of the data.
+    The direction is isotropic and the rapidity uniform on ``[-eta_max, eta_max]``. An isotropic
+    boost is not a symmetry of a pp collision, where only boosts along the beam are: it probes a
+    property of the model, not one of the data.
 
-    :param nbr_rot: matrices to draw, one per jet of the batch.
-    :param eta_max: half-width of the uniform rapidity range.
-    :return: the matrices, shape (nbr_rot, 4, 4), acting on [E, px, py, pz].
+    :return: matrices of shape (nbr_rot, 4, 4), acting on [E, px, py, pz].
     """
     if nbr_rot <= 0:
         return torch.empty((0, 4, 4), dtype=dtype, device=device)
@@ -247,10 +217,7 @@ def apply_so2_batched(
 ) -> torch.Tensor:
     """Rotate every jet of the batch about the beam axis by its own matrix.
 
-    :param x: the batch, shape (jets, constituents, features), normalised.
     :param mats: one rotation per jet, shape (jets, 3, 3).
-    :param feature_names: column names of *x*, bare or ``j1_``-prefixed.
-    :param norm_scales: per-column factors that return the stored values to GeV.
     :return: the rotated batch, of the shape and the normalisation of *x*. Whichever of px, py, pz,
         pt and phi it carries are rewritten; every other column is left alone.
     """
@@ -303,16 +270,12 @@ def apply_so3_batched(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Rotate every jet of the batch in three dimensions by its own matrix.
 
-    :param x: the batch, shape (jets, constituents, features), normalised.
     :param mats: one rotation per jet, shape (jets, 3, 3).
-    :param feature_names: column names of *x*, bare or ``j1_``-prefixed.
-    :param norm_scales: per-column factors that return the stored values to GeV.
-    :param apply_filter: drop the jets a rotation carries outside detector acceptance. They are
-        dropped rather than reverted to their unrotated values: reverting would make T(x) equal
-        to x for them and deflate every invariance metric measured against the rotated batch.
-    :return: ``(x_new, keep_mask)``. ``x_new`` holds the surviving jets alone, while
-        ``keep_mask`` has the length of the input batch, so the caller can subset the labels,
-        and anything else aligned with that batch, the same way.
+    :param apply_filter: drop the jets a rotation carries outside detector acceptance rather than
+        revert them, since reverting would make T(x) equal x for them and deflate every invariance
+        metric measured against the rotated batch.
+    :return: the surviving jets alone, and a mask over the input batch, so the caller can subset
+        the labels, and anything else aligned with that batch, the same way.
     """
     px_idx = feature_index(feature_names, "j1_px", "px")
     py_idx = feature_index(feature_names, "j1_py", "py")
@@ -360,10 +323,6 @@ def apply_so3_batched(
     delta_r = torch.sqrt(eta_rel**2 + phi_rel**2)
     pt_rel = pt_r / jet_pt.clamp(min=1e-8)
 
-    # Acceptance filter runs on the PHYSICAL (pre-normalisation) quantities
-    # computed above, so its pt_max/eta_max/etarel_max/phirel_max thresholds
-    # are always compared against values in the same physical units they're
-    # defined in, so no norm-scale rescaling can be got wrong.
     if apply_filter:
         keep_mask = so3_jet_filter(pt_r, eta_r, eta_rel, phi_rel, active=pad_mask)
     else:
@@ -406,10 +365,7 @@ def apply_lorentz_batched(
 
     No compensating rotation follows, so the jet azimuth is left where the boost puts it.
 
-    :param x: the batch, shape (jets, constituents, features), normalised.
     :param boosts: one boost per jet, shape (jets, 4, 4), acting on [E, px, py, pz].
-    :param feature_names: column names of *x*, bare or ``j1_``-prefixed.
-    :param norm_scales: per-column factors that return the stored values to GeV.
     :return: the boosted batch, of the shape and the normalisation of *x*. Constituents whose
         boosted energy is not positive keep their stored values.
     """
@@ -508,13 +464,9 @@ def apply_random_so2(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Apply an independently sampled SO(2) rotation to each jet of the batch.
 
-    :param x: the batch, shape (jets, constituents, features), normalised.
-    :param feature_names: column names of *x*, bare or ``j1_``-prefixed.
     :param min_angle: lower end of the uniform angle range, in radians.
     :param max_angle: upper end of that range, in radians.
-    :param norm_scales: per-column factors that return the stored values to GeV.
     :return: the rotated batch and the angles it was turned through, shape (jets,).
-    :raises ValueError: if *x* is not three-dimensional.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
@@ -538,16 +490,11 @@ def apply_random_so3(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Apply an independently sampled Haar-random SO(3) rotation to each jet of the batch.
 
-    :param x: the batch, shape (jets, constituents, features), normalised.
-    :param feature_names: column names of *x*, bare or ``j1_``-prefixed.
-    :param norm_scales: per-column factors that return the stored values to GeV.
     :param apply_filter: drop the jets a rotation carries outside the acceptance bounds of
         :func:`so3_jet_filter`, rather than revert them to their unrotated values.
-    :return: the rotated batch, the matrices it was rotated by, and the acceptance mask. The first
-        two are already subset to the surviving jets, while the mask has the length of the input
-        batch, so the caller can subset the labels, and anything else aligned with that batch, the
-        same way.
-    :raises ValueError: if *x* is not three-dimensional.
+    :return: the rotated batch and the matrices it was rotated by, both already subset to the
+        surviving jets, and the acceptance mask over the input batch, so the caller can subset the
+        labels, and anything else aligned with that batch, the same way.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
@@ -569,12 +516,8 @@ def apply_random_lorentz(
     No compensating rotation follows, so the jet azimuth is left where the boost puts it. A batch
     whose columns hold no momentum is returned unchanged, with a warning.
 
-    :param x: the batch, shape (jets, constituents, features), normalised.
-    :param feature_names: column names of *x*, bare or ``j1_``-prefixed.
     :param eta_max: half-width of the uniform rapidity range the boosts are drawn from.
-    :param norm_scales: per-column factors that return the stored values to GeV.
     :return: the boosted batch and the matrices it was boosted by, shape (jets, 4, 4).
-    :raises ValueError: if *x* is not three-dimensional.
     """
     if x.ndim != 3:
         raise ValueError(f"Expected x.ndim == 3, got shape={tuple(x.shape)}")
@@ -610,17 +553,13 @@ def make_transform(
 
     :param scheme: ``so2``, ``so3`` or ``lorentz``. ``none`` names no transform and is
         rejected: the caller decides whether to transform at all.
-    :param feature_names: column names of the batches the transform will receive, in
-        order; bare or ``j1_``-prefixed.
-    :param norm_scales: per-column factors that return the stored values to GeV, or
-        ``None`` when the batch is already physical.
+    :param feature_names: column names of the batches the transform will receive, in order.
+    :param norm_scales: None when the batch is already physical.
     :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts.
-    :param so3_apply_filter: drop jets rotated outside detector acceptance.
     :return: a callable from a ``(batch, constituents, features)`` tensor to
         ``(transformed, keep_mask)``. ``keep_mask`` is ``None`` for the groups that drop
         no jets; for filtered SO(3) it marks, over the input batch, the jets that
         survive, and the transformed batch is already subset by it.
-    :raises ValueError: if *scheme* names no transform.
     """
     names = list(feature_names)
     if scheme == "so2":

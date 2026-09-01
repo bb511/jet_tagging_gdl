@@ -50,11 +50,13 @@ two hooks. The steps:
   optimiser and scheduler as Hydra partials.
 - Add `configs/experiment/hls4ml/<name>_{16,50,150}.yaml`, the search configs
   `configs/hparams_search/hls4ml/<name>_optuna.yaml` and `<name>_scl_optuna.yaml`, and the
-  three catalogues `scripts/hls4ml/run<name>_{search,train,eval}.sh`.
+  three catalogues `scripts/hls4ml/run<name>_{search,train,eval}.sh`. An architecture with an
+  embedded symmetry follows LorentzNet instead: the baseline regime alone, so no
+  `_scl_optuna` config and three blocks per catalogue rather than 21.
 - Extend `tests/test_algorithms.py`, which exercises every algorithm config under both
   methods.
 
-Two things every one of the removed modules will need on the way in. They import
+Every one of the removed modules will need two things on the way in. They import
 `pytorch_lightning.utilities.memory.garbage_collection_cuda`; the `pytorch_lightning`
 namespace is not used anywhere in this repository any more, and the base class handles memory
 without it. They also accept `method="equivariance"`, which no longer exists: the supported
@@ -103,7 +105,7 @@ the symmetry-handling method throughout.
 
 A small single-block PELICAN, configured but never implemented: the config pointed at
 `src.models.nano_pelican.PELICANModule`, a module that was never written, so
-`model=nano_pelican` never instantiated. A search config sat beside it regardless, with its
+`model=nano_pelican` could never be instantiated. A search config sat beside it regardless, with its
 study database hard-coded to another user's home directory.
 
 Files: `configs/model/nano_pelican.yaml`, `configs/hparams_search/nano_pelican_optuna.yaml`.
@@ -126,7 +128,7 @@ comparison.
 Porting notes. The config's scheduler was `src.utils.utils.get_cosine_schedule_with_warmup`,
 which the refactor retired along with `get_onecycle_schedule`; use
 `torch.optim.lr_scheduler.OneCycleLR` with `interval: step`, as `configs/algorithm/jetformer.yaml`
-does, and `_set_up_scheduler` injects `total_steps` from
+does; `_set_up_scheduler` injects `total_steps` from
 `trainer.estimated_stepping_batches`. The module ran with `use_mask: false`, so padded
 constituents were attended to like any other token; that is a deliberate choice of the
 reference architecture, worth revisiting at 150 constituents where most slots are empty.
@@ -164,9 +166,9 @@ teaches.
 
 Porting notes. It needs three named columns rather than four momenta, so
 `required_features = ["pt", "etarel", "phirel"]` and `data.features` must contain them; with
-the default `[px, py, pz, e]` the pT fraction cannot be formed. Note that the augmentation
-transforms act on the momenta, so an angular-input model under `symm_loss` sees the full
-16-column batch and reduces it in `forward` like any other.
+the default `[px, py, pz, e]` the pT fraction cannot be formed. The augmentation transforms
+act on the momenta, so an angular-input model under `symm_loss` sees the full 16-column
+batch and reduces it in `forward` like any other.
 
 ## The permutation check
 

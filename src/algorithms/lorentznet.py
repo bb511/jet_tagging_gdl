@@ -1,11 +1,9 @@
-# LorentzNet as a jet-tagging algorithm: the Lorentz-invariant baseline of this study.
 """LorentzNet, wired into the shared training loop.
 
 The network reads four-momenta in GeV, not the normalised columns the datamodule stores, and in the
-order [E, px, py, pz]. Both changes happen in the algorithm's ``_prepare_inputs``, so the rest of
-the pipeline handles this algorithm like any other. Its logits are invariant under the Lorentz
-group by construction, which makes it the reference against which the augmented and SCL-trained
-networks are read.
+order [E, px, py, pz]; ``_prepare_inputs`` makes both changes, so the rest of the pipeline handles
+this algorithm like any other. Its logits are Lorentz invariant by construction, which makes it the
+reference against which the augmented and SCL-trained networks are read.
 """
 
 import torch
@@ -29,17 +27,10 @@ class LorentzNet(JetTaggingModule):
         c_weight: float = 1e-3,
         dropout: float = 0.0,
     ) -> nn.Module:
-        """Build the graph network, and the buffer that returns a batch to GeV.
-
-        :param n_hidden: width of the node scalars inside the blocks.
-        :param n_layers: number of blocks.
-        :param c_weight: step size of the coordinate updates.
-        :param dropout: dropout rate in the classification head.
-        """
-        # Registered here rather than in an __init__ the subclass does not have: the base
-        # class collects these arguments by walking the frame of save_hyperparameters.
-        # Ones until setup() reads the datamodule, and persistent, so that a checkpoint
-        # carries the scales its weights were trained with.
+        """Build the graph network; the arguments are documented on :class:`LorentzNetGraph`."""
+        # Registered here rather than in an __init__ the subclass must not have, since the base
+        # class collects these arguments by walking the frame of save_hyperparameters. Persistent,
+        # so a checkpoint carries the scales its weights were trained with; ones until setup().
         self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
         return LorentzNetGraph(
             n_hidden=n_hidden,
@@ -59,8 +50,8 @@ class LorentzNet(JetTaggingModule):
         """Undo the normalisation of a batch and hand it over as four-momenta.
 
         :param x: (jets, constituents, 4), the columns [px, py, pz, e] as stored.
-        :return: (jets, constituents, 4), the columns [E, px, py, pz] in GeV. The Minkowski
-            invariants the network builds are dimensionful, so a normalised batch would put them at
-            the wrong scale rather than merely rescale them.
+        :return: (jets, constituents, 4), the columns [E, px, py, pz] in GeV. The network's
+            Minkowski invariants are dimensionful, so a normalised batch would sit at the wrong
+            scale rather than merely be rescaled.
         """
         return (x * self.denorm_scales)[..., [3, 0, 1, 2]]

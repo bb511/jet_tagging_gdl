@@ -1,7 +1,6 @@
 # @package _global_
 
-# One epoch under Lightning's simple profiler; "advanced" and "pytorch" are the finer
-# alternatives, at a much higher overhead.
+# One epoch under Lightning's simple profiler; "advanced" and "pytorch" are finer but far costlier.
 
 defaults:
   - default

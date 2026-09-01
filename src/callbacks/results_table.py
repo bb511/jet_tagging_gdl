@@ -1,15 +1,12 @@
-# Results table: one row per run, aggregating its folds' accuracy, invariance and FLOPs.
 """Append the summary row of a run to the results table of its regime.
 
-One row per run rather than per fold: the callback stays attached across the k folds, collects each
-fold's test accuracy, invariance metrics and FLOP count, and writes the row once the last fold has
-been tested. Tables are split by the input feature list and by the regime, so
-``results/px_py_pz_e/results_table_symm_loss.csv`` holds every symmetry-consistency run on the
-four-momentum features, whatever the architecture or the constituent count.
-
-Most quantities occupy four columns: the mean over the folds, its standard deviation, the two
-joined as a ``mean +/- std`` string for a paper table, and the fold values joined by ';'. The
-column order is the one the tables already on disk use, so a new row can be appended to them.
+One row per run rather than per fold: the callback stays attached across the k folds and writes the
+row once the last fold has been tested. Tables are split by the input feature list and by the
+regime, so ``results/px_py_pz_e/results_table_symm_loss.csv`` holds every symmetry-consistency run
+on the four-momentum features, whatever the architecture or the constituent count. Most quantities
+occupy four columns (the mean over the folds, its standard deviation, the two joined as
+``mean +/- std``, and the fold values joined by ';'), in the column order the tables already on
+disk carry, so a new row can be appended to them.
 """
 
 import csv
@@ -49,10 +46,7 @@ def _join(values: Sequence[float]) -> str:
 
 
 def _check_header(path: Path, fieldnames: list[str]) -> None:
-    """Refuse to append under a header with other columns, which would misalign the row.
-
-    :raises ValueError: naming both column sets; the fix is to move the old table aside.
-    """
+    """Refuse to append under a header with other columns, which would misalign the row."""
     with open(path, newline="") as table:
         header = next(csv.reader(table), None)
     if header is None or header == fieldnames:
@@ -66,13 +60,10 @@ def _check_header(path: Path, fieldnames: list[str]) -> None:
 class ResultsTableCallback(Callback):
     """Aggregate the folds of one run into a single row of the results table.
 
-    :param output_path: base name of the table; the regime and the feature list are woven into it
-        by :func:`_table_path`.
+    :param output_path: base name of the table; :func:`_table_path` weaves the regime and the
+        feature list into it.
     :param n_folds: folds to wait for before the row is written.
-    :param method: the regime the data config sets, ``augmentation`` or ``symm_loss``.
     :param model_name: short architecture label, ``algorithm.name``.
-    :param augmentation_scheme: symmetry group of the run, ``none`` for a baseline.
-    :param nconstituents: constituents per jet.
     :param features: the input feature list, which names the subdirectory.
     :param selected_metric_mode: with ``scheme`` the run is judged on the group it was trained on,
         and on the mean over the three groups when it was trained on none; ``mean_all`` always
@@ -164,8 +155,8 @@ class ResultsTableCallback(Callback):
     def _selected_metric_for_fold(self, inv: dict[str, float]) -> tuple[str, float]:
         """The invariance value the run is judged on, and the key naming it.
 
-        A run trained on one group is judged on that group; a baseline belongs to none, so the
-        three groups are averaged instead.
+        A run trained on one group is judged on it; a baseline belongs to none, so the three
+        groups are averaged instead.
         """
         metric = self.invariance_metric
         if self.selected_metric_mode == "scheme" and self.augmentation_scheme in GROUPS:
@@ -193,8 +184,8 @@ class ResultsTableCallback(Callback):
     def _group_flip_columns(self, inv_folds: list[dict[str, float]]) -> dict[str, object]:
         """The flip breakdown of every group, whichever the run was trained on.
 
-        A baseline's selected columns collapse to a mean over the three groups, so these are what
-        lets a baseline be compared with an SO(2)-trained run on SO(2) alone.
+        A baseline's selected columns collapse to a mean over the three groups, so only these let
+        it be compared with an SO(2)-trained run on SO(2) alone.
         """
         columns: dict[str, object] = {}
         for suffix in self.FLIP_BREAKDOWN_SUFFIXES:
@@ -245,8 +236,8 @@ class ResultsTableCallback(Callback):
         """How many folds are complete, and so how many the row would average over.
 
         An eval-only pass never fires ``on_fit_end``, so the invariance metrics and the FLOP count
-        are picked up in ``on_test_end`` instead and may lag the accuracy by a fold; the row is
-        still written when only the accuracy is in.
+        come from ``on_test_end`` instead and may lag the accuracy by a fold; the row is still
+        written when only the accuracy is in.
         """
         n_test = len(self._fold_test_acc)
         if self._fold_invariance and self._fold_flops:

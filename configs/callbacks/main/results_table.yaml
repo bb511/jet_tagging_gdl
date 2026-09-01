@@ -1,8 +1,7 @@
 # One row per run in the results table of its regime.
 
 _target_: src.callbacks.results_table.ResultsTableCallback
-# Anchored to the repository, not to the working directory: a run launched from a queue
-# or a batch job must still find the table.
+# Anchored to the repository: a run launched from a queue or a batch job must still find the table.
 output_path: ${paths.results_dir}/results_table.csv
 n_folds: ${data.n_folds}
 method: ${data.method}
@@ -11,4 +10,4 @@ augmentation_scheme: ${data.augmentation_scheme}
 nconstituents: ${data.nconstituents}
 features: ${data.features}
 selected_metric_mode: scheme # scheme: judge the run on the group it was trained on | mean_all
-invariance_metric: wasserstein # which invariance family fills the selected and per-group columns
+invariance_metric: wasserstein # the family filling the selected and per-group columns

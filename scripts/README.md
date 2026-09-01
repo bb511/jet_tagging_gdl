@@ -22,11 +22,14 @@ self-contained and copy-pasteable, covering the full grid of three constituent
 counts (16, 50, 150) crossed with seven regimes: the unaugmented `baseline`,
 `aug_so2`, `aug_so3` and `aug_lorentz` for data augmentation, and `symm_so2`,
 `symm_so3` and `symm_lorentz` for the symmetry-consistency loss. That is 21
-blocks per file, in that order, and 12 files.
+blocks per file, in that order, for the `deepsets`, `mlp` and `jetformer`
+triples. The `lorentznet` triple holds the three `baseline` blocks alone,
+because LorentzNet, the symmetry-embedded class, is trained in the baseline
+regime only.
 
 - `*_search.sh` holds one Optuna driver per grid cell. Hand-maintained: no tool
-  regenerates them, and they are the canonical record of what each sweep asked
-  for. The study name is never on the command line, since
+  regenerates them, and they are the canonical record of what was asked of each
+  sweep. The study name is never on the command line, since
   `configs/hparams_search/hls4ml/<model>_optuna.yaml` derives it from the
   regime as `<model>_nconst<N>_<method>_<scheme>`.
 - `*_train.sh` and `*_eval.sh` are **generated** by
@@ -101,13 +104,13 @@ them up.
 
 Two things about the checked-in catalogues look wrong and are not.
 
-Every block says `trainer.devices=[0]`, on a host with four GPUs. The device is
+Every block carries `trainer.devices=[0]`, on a host with four GPUs. The device is
 a property of the queue, not of the experiment, so the submitters rewrite it
 from `--gpu`, and under `--cluster` each slurm job sees one GPU anyway.
 
-Every train and eval block currently carries no `algorithm.*` overrides and
-says `transferred from experiment config`. No study has been run yet, so the
-grid trains at the experiment configs' own values. That state is itself the
+Every train and eval block currently carries no `algorithm.*` overrides, and
+its banner reads `transferred from experiment config`. No study has been run
+yet, so the grid trains at the experiment configs' own values. That state is itself the
 transferred-hyperparameter ablation, which is kept as a comparison once the
 searches have replaced the values, and `make_train_catalogues.py --transferred`
 reproduces it deliberately into `*_transferred.sh` files.
@@ -161,10 +164,10 @@ makes them the way to check a catalogue before committing a batch to it.
 
 ### `optuna/`
 
-| File                       |                                                                                                                                                                                                                                                                                               |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fetch_best_params.py`     | A study's best trial as hydra overrides and as a YAML block. `--all` reports every study in the database, `--csv` dumps the trials.                                                                                                                                                           |
-| `make_train_catalogues.py` | The study databases to the `run*_{train,eval}.sh` catalogues. `--dry-run` reports which files a regeneration would change; `--transferred` writes the no-overrides ablation. Feeds its own output back through `lib.sh`'s parser and refuses to write a file that does not yield 21 commands. |
+| File                       |                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetch_best_params.py`     | A study's best trial as hydra overrides and as a YAML block. `--all` reports every study in the database, `--csv` dumps the trials.                                                                                                                                                                                                                                   |
+| `make_train_catalogues.py` | The study databases to the `run*_{train,eval}.sh` catalogues. `--dry-run` reports which files a regeneration would change; `--transferred` writes the no-overrides ablation. Feeds its own output back through `lib.sh`'s parser and will not write a file that does not yield its model's block count, 21 for `deepsets`, `mlp` and `jetformer`, 3 for `lorentznet`. |
 
 ### `analysis/`
 

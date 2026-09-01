@@ -1,39 +1,32 @@
 # Jet tagging with geometric deep learning
 
-Two ways of teaching a jet tagger a symmetry are compared here. Data augmentation transforms
-the jets the network sees during training and leaves the loss alone; a symmetry-consistency
-loss (SCL) leaves the batches alone and penalises the change in the logits under a
-transformation of the input. Four architectures (DeepSets, MLP, JetFormer and LorentzNet)
-are trained on the hls4ml LHC jet data set at 16, 50 and 150 constituents, under three
-groups (SO(2) rotations about the beam axis, SO(3) rotations, and Lorentz boosts in a random
-direction with rapidity up to 2), and the invariance each acquires is measured on the test set.
+Are symmetry-based inductive biases useful for jet tagging?
+This repository contains a series of experiments attempting to answer this question.
+Three different ways of teaching symmetries to a neural network are studied: data augmentation, symmetry-consistency loss (SCL),
+and embedded symmetries at the level of the architecture.
+Data augmentation transforms the jets the network sees during training.
+The symmetry-consistency loss (SCL) penalises the change in the logits under a transformation of the input.
+The embedded symmetries make the networks that possess them naturally invariant under a transformation, by construction.
+Three architectures are used to study the first two ways of learning symmetries: an MLP, a DeepSets, and a JetFormer.
+The embedded symmetries are studied separately, through implementations of LorentzNet (add other architectures when implemented).
+
+All of the above architectures are trained on the hls4ml LHC jet data set at 16, 50 and 150 constituents.
+The augmentation and SCL methods are applied under three groups (SO(2) rotations about the beam axis, SO(3) rotations, and Lorentz boosts in a random
+direction with rapidity up to 2).
+The invariance each acquires is measured on the test data set.
 The boosts are deliberately not restricted to the beam axis: an isotropic boost is not a
 symmetry of a pp collision, so it probes a property of the model rather than of the data.
 
-The stack is [Lightning](https://lightning.ai/) for the training loop and
-[Hydra](https://hydra.cc/) for config composition, laid out as in the
-[lightning-hydra-template](https://github.com/ashleve/lightning-hydra-template).
-
-Architectures studied earlier and removed from this codebase, with the recipe for putting
-them back, are recorded in [`ARCHITECTURES.md`](ARCHITECTURES.md).
-
 ## Setup
 
-Dependencies are managed with [Poetry](https://python-poetry.org/). From the repository
-root:
+Dependencies are managed with [Poetry](https://python-poetry.org/).
+From the repository root:
 
 ```bash
 poetry install --no-root
 ```
 
-`pip install -r requirements.txt` installs the same pinned set for anyone not using Poetry.
-That file is generated, not edited by hand:
-
-```bash
-poetry self add poetry-plugin-export    # once, if poetry export is not available
-poetry export -f requirements.txt --without-hashes -o requirements.txt
-```
-
+Alternatively, `pip install -r requirements.txt` installs the same pinned set for anyone not using Poetry.
 Both routes take `torch` from the CUDA 12.6 index declared in `pyproject.toml`.
 
 Next, create the working directories and the `.env` file:
@@ -42,51 +35,41 @@ Next, create the working directories and the `.env` file:
 bash scripts/setup.sh
 ```
 
-Nothing composes without it, since `configs/paths/default.yaml` resolves
-`${oc.env:PROJECT_ROOT}` out of `.env`. The file also carries `HF_HUB_CACHE`, which sets
-where the record snapshot is downloaded, and `MLFLOW_ALLOW_FILE_STORE=true`, without which
-MLflow 3 refuses the file-based tracking store the experiments log to. Re-running the script never overwrites an existing
-`.env`. To keep `data/`, `logs/`, `outputs/` and `results/` on another filesystem, edit
-`RES_DIR` in `.env` and run `bash scripts/symbolink.sh`, which replaces those four
-directories with symlinks. That step deletes any real directory in the way, so run it before
-the first training rather than after; it asks for confirmation unless given `--force`.
+The `configs/paths/default.yaml` configuration file resolves `${oc.env:PROJECT_ROOT}`  out of `.env`.
+The file also has `HF_HUB_CACHE`, which sets where the record snapshot is downloaded, and `MLFLOW_ALLOW_FILE_STORE=true`, without which
+MLflow 3 refuses the file-based tracking store the experiments log to.
+Re-running the script never overwrites an existing `.env`.
+To keep `data/`, `logs/`, `outputs/` and `results/` on another filesystem, edit `RES_DIR` in `.env` and run `bash scripts/symbolink.sh`,
+which replaces those four directories with symlinks.
+That step deletes any real directory in the way, so run it before the first training.
 
 ## Data
 
-The [hls4ml LHC jet data set](https://doi.org/10.5281/zenodo.3602260) (Zenodo record 3602260,
-CC-BY-4.0) holds jets of five classes with up to 150 constituents each, 620 000 of them for
-training and validation and 260 000 for testing. They are read through the record
-[`fastmachinelearning/hls4ml_lhc_jets_150p`](https://huggingface.co/datasets/fastmachinelearning/hls4ml_lhc_jets_150p),
-which is the only route this repository supports. The record ships its own loader, and a run
-executes that loader, so no data path is configured anywhere; what a run needs instead is
-`HF_HUB_CACHE` pointing somewhere with room for the 3 GB snapshot.
+We use the [hls4ml LHC jet data set](https://doi.org/10.5281/zenodo.3602260) (Zenodo record 3602260,
+CC-BY-4.0) HuggingFace mirror and loader [`fastmachinelearning/hls4ml_lhc_jets_150p`](https://huggingface.co/datasets/fastmachinelearning/hls4ml_lhc_jets_150p).
+A run needs `HF_HUB_CACHE` pointing somewhere with room for the 3 GB snapshot.
 
-Because the record carries executable code, `data.revision` pins the commit that a run
-reads. Setting it to `null` follows the head of the record instead, so what a run trained on
-then depends on when it was launched.
+Because the record carries executable code, `data.revision` pins the commit that a run reads.
+Setting it to `null` follows the head of the record instead, so what a run trained on then depends on when it was launched.
+The loader restricts each jet to `data.nconstituents` leading constituents by pT and normalises the features.
+The result is cached under `data/hf/nconst_<N>/`.
 
-The loader restricts each jet to `data.nconstituents` leading constituents by pT, normalises
-the features, and caches the result under `data/hf/nconst_<N>/`. It tests for that cache by
-existence alone, so a changed `data.revision` rebuilds nothing: point `data.cache_dir` at a
-fresh directory when the record itself changes.
-
-`data.nconstituents` takes 16, 50 or 150 in the experiments (150 is every constituent the
-record carries). `data.features` takes any subset of the record's 16 columns and defaults to
-`[px, py, pz, e]`; LorentzNet requires exactly those four, in that order. The test split
-keeps all 16 columns whatever the model reads, so the invariance probes can find the momenta
-they transform.
+The `data.nconstituents` parameter is set to 16, 50 or 150 in the experiments.
+The `data.features` parameter takes any subset of the record's 16 columns and defaults to `[px, py, pz, e]`.
+LorentzNet requires exactly those four, in that order.
 
 ## Running
 
-`src/train.py` fits and `src/eval.py` tests. Both are driven by an experiment config, one
-per (architecture, constituent count) pair:
+The entry nodes of the code are in `src/train.py` for the training and `src/eval.py` for the testing.
+These are configured through an experiment config:
 
 ```bash
 python src/train.py experiment=hls4ml/deepsets_16 trainer=gpu trainer.devices=[0]
 ```
 
-The method and the symmetry group stay command-line overrides, so one experiment config
-covers all seven regimes of the comparison:
+The method and the symmetry group are command-line overrides in the scripts.
+One experiment config covers all seven regimes over which the first two classes, data
+augmentation and the SCL, are compared:
 
 ```bash
 # Baseline: nothing is transformed anywhere.
@@ -99,8 +82,15 @@ python src/train.py experiment=hls4ml/deepsets_16 \
 ```
 
 `data.method` is `augmentation` or `symm_loss` and `data.augmentation_scheme` is `none`,
-`so2`, `so3` or `lorentz`. The algorithm configs interpolate both, so a single override
-configures the data and the model together and they cannot disagree.
+`so2`, `so3` or `lorentz`.
+The algorithm configs interpolate both.
+A single override configures the data and the model together and they cannot disagree.
+
+The seven regimes are run for the MLP, the DeepSets and the JetFormer.
+LorentzNet constitutes the symmetry embedded class so it is trained in the baseline regime only, at 16, 50 and 150 constituents.
+The same test-time invariance probes run on those baseline runs, which is what puts the embedded class
+on the same axis as the other two, and its rows land in `results_table_baseline.csv` beside
+every other unaugmented run.
 
 `data.n_folds` sets the cross-validation. The experiment configs use 5, the searches and the
 debug configs 1. With `n_folds >= 2`, `train.py` fits the main run on the record's own split
@@ -132,8 +122,10 @@ bound, and a loose one at 150 constituents.
 
 ## Hyperparameter search
 
-There is one TPE study per (architecture, constituent count, regime), 84 in all, each with
-the same space and the same budget so that the regimes stay comparable:
+There is one TPE study per (architecture, constituent count, regime), 66 in all: the MLP, the
+DeepSets and the JetFormer over three constituent counts and seven regimes, plus the three
+LorentzNet baseline studies. Every study has the same space and the same budget, so that the
+regimes stay comparable:
 
 ```bash
 python src/train.py -m \
@@ -145,9 +137,10 @@ python src/train.py -m \
 
 The study name is derived from the regime inside the search config, so nothing names it on
 the command line, and the databases are written to `logs/optuna/hls4ml/<model>.db`. The
-`_scl_optuna` variant of each config adds `algorithm.symm_loss_weight` to the space and
-serves the three SCL regimes; the other four use the plain `<model>_optuna`. Under
-`callbacks=search` a trial draws no plots and never touches `results/`.
+`_scl_optuna` variant of a config adds `algorithm.symm_loss_weight` to the space and serves
+the three SCL regimes; the other four regimes, and every LorentzNet study, use the plain
+`<model>_optuna`. Under `callbacks=search` a trial draws no plots and never touches
+`results/`.
 
 The best trial of a finished study is read back as Hydra overrides and as a YAML block to
 paste into an experiment config:

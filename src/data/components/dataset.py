@@ -9,20 +9,19 @@ from torch.utils.data import IterableDataset
 class HLS4MLDataset(IterableDataset):
     """Yield pre-batched jets from tensors held in memory.
 
-    The whole split fits in RAM, so batching and shuffling are done here rather than by
-    a sampler: the DataLoader is configured with ``batch_size=1`` and each of its items
-    is one batch. Shuffling draws from a ``torch.Generator`` of the caller's, which
-    ``lightning.seed_everything`` fixes.
+    The whole split fits in RAM, so batching and shuffling are done here rather than by a
+    sampler: the DataLoader is configured with ``batch_size=1`` and each of its items is one
+    batch.
 
     :param x: the constituents, shape (jets, constituents, features).
     :param y: the one-hot flavour labels, shape (jets, classes).
-    :param batch_size: jets per yielded batch. A trailing partial batch is dropped, so
-        ``len(self)`` is exact and OneCycleLR can be given a step count.
-    :param shuffler: seeded generator for the per-epoch permutation, or None to keep
-        the stored order, which is what the evaluation splits want.
+    :param batch_size: a trailing partial batch is dropped, so ``len(self)`` is exact and
+        OneCycleLR can be given a step count.
+    :param shuffler: seeded generator for the per-epoch permutation, or None to keep the stored
+        order, which is what the evaluation splits want.
     :param max_batches: cap on the batches each worker yields, for debug runs.
-    :param transform: online augmentation, from a batch to ``(x, keep_mask)``. The mask
-        marks the jets that survive an acceptance cut, and the labels follow it.
+    :param transform: online augmentation, from a batch to ``(x, keep_mask)``. The mask marks the
+        jets that survive an acceptance cut, and the labels follow it.
     """
 
     def __init__(

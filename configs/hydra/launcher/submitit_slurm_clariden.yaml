@@ -4,8 +4,7 @@
 defaults:
   - submitit_slurm
 
-# Under the sweep directory, so the submitit logs of a run sit beside its Hydra output
-# and no absolute scratch path is baked into the repository.
+# Under the sweep directory: the submitit logs then sit beside the Hydra output of their run.
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 
 account: a0166
@@ -17,9 +16,7 @@ cpus_per_task: 4
 gpus_per_node: 1
 tasks_per_node: 1
 nodes: 1
-# The pooled k-fold tensors reach about 15 GB of host RAM at nconstituents=150, before
-# the dataloader's own copies.
-mem_gb: 100
+mem_gb: 100 # the pooled k-fold tensors reach ~15 GB of host RAM at 150 constituents, before copies
 
 array_parallelism: 96
 

@@ -1,13 +1,10 @@
 # @package _global_
 
-# One full epoch on the CPU, with the callbacks and the loggers switched off. The other
-# debug configs inherit from this one.
+# One full epoch on the CPU, callbacks and loggers off. The other debug configs inherit from this.
 
-# Debug runs keep their logs out of logs/train/.
-task_name: "debug"
+task_name: "debug" # keeps these logs out of logs/train/
 
-# No checkpoints are written without the callbacks, so train.py records an empty manifest
-# and eval.py has nothing to read; that is intended for a debug run.
+# Without the callbacks nothing is checkpointed, so the manifest train.py writes is empty.
 callbacks: null
 logger: null
 
@@ -30,5 +27,4 @@ trainer:
 data:
   num_workers: 0 # debuggers do not like multiprocessing
   pin_memory: False
-  # One split rather than the experiment's five, so a debug run fits one model, not six.
-  n_folds: 1
+  n_folds: 1 # one split, so a debug run fits one model rather than the experiment's six

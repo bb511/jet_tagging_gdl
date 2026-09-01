@@ -1,17 +1,13 @@
-# JetFormer, the attention-based tagger, a replica of the reference architecture
-# (arXiv:2601.17215) down to its missing padding mask.
+# JetFormer, the attention tagger: a replica of arXiv:2601.17215 down to its missing padding mask.
 _target_: src.algorithms.jetformer.JetFormer
-# The module stores the scheduler dict as it arrives and pops from it in
-# _set_up_scheduler, so it must be a plain dict holding a real partial, not a DictConfig.
-_convert_: all
-name: jetformer # short label used by the results table and MLflow
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: jetformer
 
 nconstituents: ${data.nconstituents}
 nbr_feats: ${len:${data.features}}
 output_dim: 5
 
-# One CLI override (data.method=symm_loss data.augmentation_scheme=so3) configures the
-# data and the algorithm together.
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
@@ -21,9 +17,7 @@ lorentz_eta_max: ${data.lorentz_eta_max}
 embed_dim: 64
 num_heads: 2
 num_transformers: 3
-# Layer normalisation rather than the reference's batch normalisation, which is what
-# every run of this study passed on the command line.
-normalization: layer
+normalization: layer # rather than the reference's batch norm, as every run of this study used
 activation: relu
 dropout: 0.0
 
@@ -33,10 +27,8 @@ optimizer:
   lr: 1.0e-3
   weight_decay: 1.0e-2
 
-# One cycle over the whole run: the learning rate ramps up over the first fifth of the
-# steps and anneals afterwards, so it is stepped per batch rather than per epoch.
-# total_steps is injected by JetTaggingModule._set_up_scheduler, since the run length is
-# known only once the trainer is attached.
+# One cycle over the whole run, hence stepped per batch. total_steps is injected by
+# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
 scheduler:
   scheduler:
     _target_: torch.optim.lr_scheduler.OneCycleLR

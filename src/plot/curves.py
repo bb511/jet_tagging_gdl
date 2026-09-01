@@ -12,11 +12,8 @@ from src.plot import save_figure
 def plot(history: dict[str, list[float]], save_dir: Path) -> Path:
     """Plot the training history of one run as three panels.
 
-    :param history: the ``epoch`` series and the ``train/loss``, ``train/acc``, ``val/loss``,
-        ``val/acc`` and ``lr`` series, all of the same length, one entry per training epoch. A
-        series holds NaN for an epoch in which its metric was not logged.
-    :param save_dir: directory the PNG is written to.
-    :return: the path written.
+    :param history: the ``epoch``, ``train/loss``, ``train/acc``, ``val/loss``, ``val/acc`` and
+        ``lr`` series, one entry per training epoch and NaN where a metric was not logged.
     """
     plt.style.use(hep.style.CMS)
     epochs = np.asarray(history["epoch"])
@@ -33,7 +30,7 @@ def plot(history: dict[str, list[float]], save_dir: Path) -> Path:
 
 
 def _draw(ax: Axes, epochs: np.ndarray, series: dict[str, list[float]], ylabel: str) -> None:
-    """Draw one panel, with every series of *series* against the epoch."""
+    """Draw one panel, every series of *series* against the epoch."""
     for label, values in series.items():
         ax.plot(epochs, values, "o-", label=label, linewidth=2, markersize=4)
     ax.set_ylabel(ylabel)
