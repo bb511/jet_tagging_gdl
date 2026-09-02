@@ -3,7 +3,7 @@
 # MLP HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
 # One Optuna driver per (constituent count, regime): 3 x 7 = 21 studies, same
-# search space and same 100-trial budget throughout so the regimes stay
+# search space and same 200-trial budget throughout so the regimes stay
 # comparable. The objective is the main run's clean val/acc_best; the invariance
 # metrics are never tuned on, since that would select for the probe rather than
 # for the symmetry.
@@ -29,7 +29,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=1 \
@@ -46,7 +46,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=1 \
@@ -63,7 +63,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=1 \
@@ -80,7 +80,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=1 \
@@ -97,7 +97,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=1 \
@@ -114,7 +114,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=1 \
@@ -131,7 +131,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_16 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=1 \
@@ -152,7 +152,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=1 \
@@ -169,7 +169,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=1 \
@@ -186,7 +186,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=1 \
@@ -203,7 +203,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=1 \
@@ -220,7 +220,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=1 \
@@ -237,7 +237,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=1 \
@@ -254,7 +254,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_50 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=1 \
@@ -275,7 +275,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=1 \
@@ -292,7 +292,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=1 \
@@ -309,7 +309,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=1 \
@@ -326,7 +326,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=1 \
@@ -343,7 +343,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=1 \
@@ -360,7 +360,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=1 \
@@ -377,7 +377,7 @@
 #     -m \
 #     experiment=hls4ml/mlp_150 \
 #     hparams_search=hls4ml/mlp_scl_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=symm_loss \
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=1 \

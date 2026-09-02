@@ -101,7 +101,7 @@ def test_a_train_block_names_its_regime_and_its_evaluation_reads_its_manifest() 
 
 
 def test_a_search_block_names_the_right_space_and_stays_out_of_results() -> None:
-    """The three symm_* regimes have one hyperparameter more than the other four, and a hundred
+    """The three symm_* regimes have one hyperparameter more than the other four, and two hundred
     trials with the full callbacks would fill results/ with untuned rows."""
     for command in _submit("search", "deepsets"):
         space, method = _override(command, "hparams_search"), _override(command, "data.method")

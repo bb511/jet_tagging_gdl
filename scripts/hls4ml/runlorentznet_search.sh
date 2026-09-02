@@ -3,7 +3,7 @@
 # LORENTZNET HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
 # One Optuna driver per constituent count: 3 studies, on the same search space
-# and the same 100-trial budget the other architectures get, so the baselines
+# and the same 200-trial budget the other architectures get, so the baselines
 # stay comparable. LorentzNet embeds the symmetry rather than acquiring it, so
 # it is searched at baseline only, never under augmentation or the SCL. The
 # objective is the main run's clean val/acc_best; the invariance metrics are
@@ -30,7 +30,7 @@
 #     -m \
 #     experiment=hls4ml/lorentznet_16 \
 #     hparams_search=hls4ml/lorentznet_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=1 \
@@ -51,7 +51,7 @@
 #     -m \
 #     experiment=hls4ml/lorentznet_50 \
 #     hparams_search=hls4ml/lorentznet_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=1 \
@@ -72,7 +72,7 @@
 #     -m \
 #     experiment=hls4ml/lorentznet_150 \
 #     hparams_search=hls4ml/lorentznet_optuna \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=200 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=1 \
