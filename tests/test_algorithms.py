@@ -127,7 +127,7 @@ def test_every_algorithm_records_hparams_and_reduces_a_full_width_batch(name: st
     assert module.hparams.name == name
     assert module.hparams.nbr_feats == len(FOUR_MOMENTUM)
     assert ARCHITECTURE_KEYS[name] <= set(module.hparams)
-    assert module.hparams["flops_total"] > 0
+    assert module.flops_total > 0
 
     # Under keep_full_features_at_test the probe's batches are 16 columns wide.
     _attach(module, _StubDataModule(keep_full_features_at_test=True))

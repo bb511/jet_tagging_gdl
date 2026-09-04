@@ -110,6 +110,7 @@ def _first_batch(loader: DataLoader) -> tuple[torch.Tensor, torch.Tensor]:
         ("augmentation", "none", True, 4, 16),
         ("augmentation", "none", False, 4, 4),
         ("augmentation", "so3", True, 4, 16),
+        ("augmentation", "lorentz_iso", True, 4, 16),
         # The SCL transforms inside model_step, so its batches are full width whatever the flag.
         ("symm_loss", "so2", False, 16, 16),
     ],
@@ -130,7 +131,7 @@ def test_the_batch_widths_follow_the_method_and_the_test_flag(
     assert x_val.shape[-1] == fit_width
     assert x_test.shape == (8, NCONSTITUENTS, test_width)
     assert x_train.dtype == torch.float32
-    # Online SO(3) drops rotated-out jets from the batch, and their labels with them.
+    # The labels follow the batch, whether or not a transform dropped jets from it.
     assert y_train.shape == (x_train.shape[0], 5)
 
 

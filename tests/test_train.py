@@ -30,7 +30,7 @@ def test_a_fast_dev_run_reaches_the_end_of_the_loop(cfg_train: DictConfig) -> No
     metric_dict, object_dict = train(cfg_train)
 
     assert "train/loss" in metric_dict
-    assert object_dict["algorithm"].hparams["flops_total"] > 0
+    assert object_dict["algorithm"].flops_total > 0
 
 
 def test_two_folds_leave_a_manifest_of_three_runs(cfg_train: DictConfig, tmp_path: Path) -> None:
@@ -61,6 +61,44 @@ def test_two_folds_leave_a_manifest_of_three_runs(cfg_train: DictConfig, tmp_pat
     # Optuna maximises the top level, and must get the clean split's number, not a fold's.
     assert metric_dict["val/acc_best"] == metric_dict["main/val/acc_best"]
     assert metric_dict["val/acc"] == metric_dict["main/val/acc"]
+
+
+def test_one_fold_alone_leaves_a_manifest_of_that_fold(
+    cfg_train: DictConfig, tmp_path: Path
+) -> None:
+    """One fold per process is what lets k folds run side by side: under fold=<i> the main run is
+    skipped, the datamodule serves fold i of n, and the manifest names that fold alone for
+    merge_manifests to join."""
+    HydraConfig().set_config(cfg_train)
+    with open_dict(cfg_train):
+        cfg_train.data.n_folds = 2
+        cfg_train.fold = 2
+
+    metric_dict, object_dict = train(cfg_train)
+    manifest = json.loads((tmp_path / MANIFEST_FILENAME).read_text())
+
+    assert manifest["n_folds"] == 2
+    assert [(run["fold_label"], run["fold_idx"]) for run in manifest["runs"]] == [("fold_2", 2)]
+    assert {path.name for path in (tmp_path / "checkpoints").iterdir()} == {"fold_2"}
+    assert (object_dict["datamodule"].n_folds, object_dict["datamodule"].fold_idx) == (2, 1)
+    assert "main/val/acc" not in metric_dict
+    # With no main run in the process, the fold's own number is what the top level carries.
+    assert metric_dict["val/acc_best"] == metric_dict["fold2/val/acc_best"]
+
+
+@pytest.mark.parametrize("n_folds, fold", [(1, 1), (2, 0), (2, 3)])
+def test_a_fold_without_folds_or_past_them_is_refused(
+    cfg_train: DictConfig, n_folds: int, fold: int
+) -> None:
+    """Refused before the data is touched: each would fit something and label it as a fold it is
+    not."""
+    HydraConfig().set_config(cfg_train)
+    with open_dict(cfg_train):
+        cfg_train.data.n_folds = n_folds
+        cfg_train.fold = fold
+
+    with pytest.raises(ValueError, match="fold="):
+        train(cfg_train)
 
 
 @RunIf(min_gpus=1)

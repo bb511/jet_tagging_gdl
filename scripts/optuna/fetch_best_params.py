@@ -64,7 +64,26 @@ def report(study: optuna.Study) -> None:
     print()
 
 
-def main() -> int:
+def _dump_csv(study: optuna.Study, name: str) -> None:
+    """Every trial of one study as CSV on stdout, the study name as the first column."""
+    frame = study.trials_dataframe()
+    frame.insert(0, "study", name)
+    frame.to_csv(sys.stdout, index=False)
+
+
+def _report_one(study: optuna.Study, name: str, as_csv: bool) -> None:
+    """Report one study, as its trials or as its best trial."""
+    if as_csv:
+        _dump_csv(study, name)
+        return
+    try:
+        report(study)
+    except ValueError:  # no completed trial yet
+        print(f"# {name}: no completed trial yet\n")
+
+
+def _parse_args() -> argparse.Namespace:
+    """Command line: the database, the studies to report and the shape of the report."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--db", required=True, help="Path to the study database.")
     parser.add_argument("--study", help="Study name; omit together with --all for a listing.")
@@ -75,26 +94,21 @@ def main() -> int:
         help="Write every trial of the selected studies as CSV to stdout.",
     )
     args = parser.parse_args()
+    if not args.all and not args.study:
+        sys.exit("pass --study <name> or --all")
+    return args
 
+
+def main() -> int:
+    """Report every study the command line selects."""
+    args = _parse_args()
     db = Path(args.db).expanduser()
     if not db.exists():
         sys.exit(f"no such database: {db}")
-    if not args.all and not args.study:
-        sys.exit("pass --study <name> or --all")
-
     storage = f"sqlite:///{db}"
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     for name in study_names(storage, None if args.all else args.study):
-        study = optuna.load_study(study_name=name, storage=storage)
-        if args.csv:
-            frame = study.trials_dataframe()
-            frame.insert(0, "study", name)
-            frame.to_csv(sys.stdout, index=False)
-            continue
-        try:
-            report(study)
-        except ValueError:  # no completed trial yet
-            print(f"# {name}: no completed trial yet\n")
+        _report_one(optuna.load_study(study_name=name, storage=storage), name, args.csv)
     return 0
 
 

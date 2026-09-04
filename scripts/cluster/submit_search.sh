@@ -2,7 +2,7 @@
 # Launch the Optuna drivers of a run*_search.sh catalogue.
 #
 # A search block already carries '-m' and its sweeper settings; this adds only
-# what the catalogue cannot know: the GPU, a private sweep directory and, with
+# what the catalogue does not carry: the GPU, a private sweep directory and, with
 # --cluster, the submitit launcher. Each block becomes one long-lived nohup'd
 # driver, so without --cluster every block in the file starts on this host at
 # once: select a few with --only and pin them with --gpu, one invocation per GPU.
@@ -22,6 +22,13 @@
 #   --cluster <c>    euler | clariden: prepend the submitit launcher
 #   --n-jobs <n>     trials in flight per driver under --cluster (default 6)
 #   --hf-cache <p>   value for HF_HUB_CACHE; default is the one .env exports
+#   --tag <t>        suffix for this driver's log name and sweep directory. One
+#                    study may be swept by several drivers at once (the optuna
+#                    sweeper opens its study with load_if_exists), and on the NGT
+#                    pods logs/ is one shared volume, so without a tag per driver
+#                    the second worker rotates the first one's live log, and two
+#                    starting in the same second share a sweep directory as well.
+#                    See submit_search_ngt.sh.
 #
 # Extra hydra overrides after the file name are appended to every driver; hydra
 # takes the last of a duplicated override, so they win over the file's value.
@@ -41,6 +48,7 @@ gpu=""
 cluster=""
 n_jobs=6
 hf_cache=""
+tag=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -51,6 +59,7 @@ while [ $# -gt 0 ]; do
         --cluster) cluster="${2:?--cluster needs a name}"; shift 2 ;;
         --n-jobs) n_jobs="${2:?--n-jobs needs a number}"; shift 2 ;;
         --hf-cache) hf_cache="${2:?--hf-cache needs a path}"; shift 2 ;;
+        --tag) tag="${2:?--tag needs a value}"; shift 2 ;;
         --) shift; break ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *) break ;;
@@ -58,7 +67,7 @@ while [ $# -gt 0 ]; do
 done
 
 usage="usage: submit_search.sh [--list|--dry-run] [--only sel] [--gpu i] [--cluster c]"
-usage="$usage [--n-jobs n] [--hf-cache p] <run*_search.sh> [overrides...]"
+usage="$usage [--n-jobs n] [--hf-cache p] [--tag t] <run*_search.sh> [overrides...]"
 file=${1:?$usage}
 shift || true
 extra="$*"
@@ -174,7 +183,7 @@ while IFS= read -r cmd; do
 
     # Private sweep dir per driver: hydra's second-resolution timestamp collides
     # when several start together, merging their outputs.
-    sweep=" hydra.sweep.dir=logs/searches/multiruns/${sweep_ts}_${label}"
+    sweep=" hydra.sweep.dir=logs/searches/multiruns/${sweep_ts}_${label}${tag:+_$tag}"
     full="$PYTHON $cmd$launcher$sweep${extra:+ $extra}"
 
     n_sub=$((n_sub + 1))
@@ -185,7 +194,7 @@ while IFS= read -r cmd; do
     fi
     echo "[$i/$n_total] starting driver: $label"
     # Keep the previous log: it is the evidence of why the driver died.
-    log="$logdir/${i}_${label}.log"
+    log="$logdir/${i}_${label}${tag:+_$tag}.log"
     if [ -f "$log" ]; then mv "$log" "$log.$(date +%Y%m%d-%H%M%S)"; fi
     nohup bash -c "$full" > "$log" 2>&1 &
     # Drivers sharing one sqlite file contend while creating their study rows.

@@ -11,11 +11,13 @@ Three architectures are used to study the first two ways of learning symmetries:
 The embedded symmetries are studied separately, through implementations of LorentzNet (add other architectures when implemented).
 
 All of the above architectures are trained on the hls4ml LHC jet data set at 16, 50 and 150 constituents.
-The augmentation and SCL methods are applied under three groups (SO(2) rotations about the beam axis, SO(3) rotations, and Lorentz boosts in a random
-direction with rapidity up to 2).
+The augmentation and SCL methods are applied under three groups (SO(2) rotations about the beam axis, SO(3) rotations, and Lorentz boosts along the beam
+with rapidity uniform in [-1, 1]).
 The invariance each acquires is measured on the test data set.
-The boosts are deliberately not restricted to the beam axis: an isotropic boost is not a
-symmetry of a pp collision, so it probes a property of the model rather than of the data.
+The boost is along the beam because that is the symmetry of the collision: the longitudinal momentum of the colliding partons is unknown event by event,
+so a beam boost shifts every constituent's pseudorapidity by one common amount and leaves its pt and phi alone.
+The isotropic boost is a transformation of the full Lorentz group rather than a symmetry of the data.
+It is kept as `lorentz_iso` and probed at test time, as the full-group check LorentzNet embeds.
 
 ## Setup
 
@@ -35,7 +37,7 @@ Next, create the working directories and the `.env` file:
 bash scripts/setup.sh
 ```
 
-The `configs/paths/default.yaml` configuration file resolves `${oc.env:PROJECT_ROOT}`  out of `.env`.
+The `configs/paths/default.yaml` configuration file resolves `${oc.env:PROJECT_ROOT}` out of `.env`.
 The file also has `HF_HUB_CACHE`, which sets where the record snapshot is downloaded, and `MLFLOW_ALLOW_FILE_STORE=true`, without which
 MLflow 3 refuses the file-based tracking store the experiments log to.
 Re-running the script never overwrites an existing `.env`.
@@ -82,7 +84,7 @@ python src/train.py experiment=hls4ml/deepsets_16 \
 ```
 
 `data.method` is `augmentation` or `symm_loss` and `data.augmentation_scheme` is `none`,
-`so2`, `so3` or `lorentz`.
+`so2`, `so3`, `lorentz` or `lorentz_iso`; the scripted grid uses the first four.
 The algorithm configs interpolate both.
 A single override configures the data and the model together and they cannot disagree.
 
@@ -158,16 +160,30 @@ submits them and harvests the studies. See [`scripts/README.md`](scripts/README.
 
 ## Analysis
 
+The deltas against the baseline are computed by the evaluation, not afterwards. An
+evaluation of a run trained under augmentation or the SCL takes a second manifest, the
+baseline run of the same architecture and constituent count:
+
+```bash
+python src/eval.py experiment=hls4ml/deepsets_16 \
+    data.method=augmentation data.augmentation_scheme=so2 \
+    checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/aug_so2/checkpoint_manifest.json \
+    baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json
+```
+
+Both models then see the same transformed test batches and the results table gains the
+delta, bootstrap confidence-interval and p-value columns. A baseline run, and LorentzNet,
+which is trained in the baseline regime alone, name no baseline and hold NaN there.
+
 Once every run of a feature set has been evaluated:
 
 ```bash
-python scripts/analysis/add_pvalues.py results/<features>/results_table_*.csv
 python scripts/analysis/make_figures.py --features <features>
+python scripts/analysis/make_latex_table.py results/<features>/results_table_*.csv
 ```
 
-The first adds the deltas against the baseline, with bootstrap confidence intervals and
-p-values, writing `*_pvalues.csv` beside each table. The second turns those into the
-comparison figures.
+The first draws the comparison figures. The second is optional and purely presentational:
+it renders whatever columns a results table already holds as a LaTeX table beside it.
 
 ## Layout
 

@@ -39,7 +39,7 @@ log = RankedLogger(__name__, rank_zero_only=True)
 # src.algorithms.losses.symmetry.SUPPORTED_GROUPS, rather than imported, so that the data
 # package does not depend on the algorithms package.
 SUPPORTED_METHODS = ("augmentation", "symm_loss")
-SUPPORTED_SCHEMES = ("none", "so2", "so3", "lorentz")
+SUPPORTED_SCHEMES = ("none", "so2", "so3", "lorentz", "lorentz_iso")
 
 # Lightning warns that an IterableDataset defining __len__ is unreliable under several
 # workers. It is exact here: the workers stride through one grid of batches, so their
@@ -69,6 +69,20 @@ def compose_record_config(root: str, overrides: list) -> DictConfig:
             GlobalHydra.instance().initialize(outer)
 
 
+def _reduce_after(transform: Transform, indices: list[int]) -> Transform:
+    """Wrap *transform* so that the batch it returns is narrowed to the model's columns.
+
+    A transform reads px, py and pz whatever the model consumes, so it is handed the full record
+    width and the reduction happens on its output.
+    """
+
+    def reduced(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+        x_sym, keep_mask = transform(x)
+        return x_sym[:, :, indices], keep_mask
+
+    return reduced
+
+
 def _validate_run(method: str, augmentation_scheme: str) -> None:
     """Reject a configuration the pipeline cannot run, before anything is downloaded."""
     if method not in SUPPORTED_METHODS:
@@ -87,18 +101,20 @@ class HLS4MLDataModule(LightningDataModule):
 
     Nothing reaches the hub until :meth:`prepare_data`, so instantiating this class is offline.
 
-    :param repo_id: the hub repository, or an existing local directory of that name, which is how
-        a mirror is tested before it is uploaded.
-    :param revision: a commit to pin, or None to follow the head. The record ships executable
-        code, so a run executes whatever is at this commit.
+    :param repo_id: the hub repository, or an existing local directory of that name, which is how a
+        mirror is tested before it is uploaded.
+    :param revision: a commit to pin, or None to follow the head. The record ships executable code,
+        so a run executes whatever is at this commit.
     :param cache_dir: the record's ``paths.base_data_dir``, where its restricted and normalised
         caches are built; the hub snapshot itself goes to ``HF_HUB_CACHE``.
-    :param method: ``augmentation`` transforms the training batches here, ``symm_loss`` leaves
-        them alone and the model penalises the change in its logits under a transform of its own.
-    :param augmentation_scheme: the symmetry group. Under ``symm_loss`` it names the group the
-        model draws from and is never rewritten here, so ``${data.augmentation_scheme}`` and the
-        results table agree on what a run did.
-    :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts.
+    :param method:``augmentation`` transforms the training batches here, ``symm_loss`` leaves them
+        alone and the model penalises the change in its logits under a transform of its own.
+    :param augmentation_scheme: the symmetry group, one of :data:`SUPPORTED_SCHEMES`, where
+        ``lorentz`` boosts along the beam and ``lorentz_iso`` in a random direction. Under
+        ``symm_loss`` it names the group the model draws from and is never rewritten here, so
+        ``${data.augmentation_scheme}`` and the results table agree on what a run did.
+    :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts, along the beam
+        for ``lorentz``, in a random direction for ``lorentz_iso``.
     :param nconstituents: leading constituents by pT to keep, 150 being all the record carries. A
         change of this value builds a new cache directory.
     :param features: the record columns the model consumes, in the order it expects them.
@@ -116,7 +132,7 @@ class HLS4MLDataModule(LightningDataModule):
         cache_dir: str = "data/hf",
         method: str = "augmentation",
         augmentation_scheme: str = "none",
-        lorentz_eta_max: float = 2.0,
+        lorentz_eta_max: float = 1.0,
         nconstituents: int = 16,
         features: tuple[str, ...] = ("px", "py", "pz", "e"),
         batch_size: int = 256,
@@ -262,8 +278,8 @@ class HLS4MLDataModule(LightningDataModule):
         # Deterministic after lightning.seed_everything, and advanced by every epoch's
         # permutation, so the epochs of one run differ from each other.
         shuffler.manual_seed(torch.initial_seed())
-        # A transform reads px, py and pz whatever the model consumes, so it takes the full
-        # width and reduces to self.features itself, after transforming.
+        # A transform is handed the full record width whatever the model consumes, so the
+        # training split keeps it and the reduction happens on the transform's output.
         x_train = self._reduce(x_train, indices, self._keeps_full_width or transform is not None)
         x_val = self._reduce(x_val, indices, self._keeps_full_width)
         self.data_train = self._dataset(x_train, y_train, shuffler=shuffler, transform=transform)
@@ -295,14 +311,8 @@ class HLS4MLDataModule(LightningDataModule):
         transform = make_transform(
             self.augmentation_scheme, self.feature_names, self.norm_scales, self.lorentz_eta_max
         )
-        if indices is None:
-            return transform
 
-        def reduce_after(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
-            x_sym, keep_mask = transform(x)
-            return x_sym[:, :, indices], keep_mask
-
-        return reduce_after
+        return transform if indices is None else _reduce_after(transform, indices)
 
     def _fit_arrays(self, record) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """The training and validation tensors for the current fold, normalisation baked in."""

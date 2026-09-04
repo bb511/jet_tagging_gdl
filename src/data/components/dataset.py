@@ -6,6 +6,12 @@ import torch
 from torch.utils.data import IterableDataset
 
 
+def _worker_slice() -> tuple[int, int]:
+    """This worker's index and the worker count, (0, 1) in the main process."""
+    info = torch.utils.data.get_worker_info()
+    return (0, 1) if info is None else (info.id, info.num_workers)
+
+
 class HLS4MLDataset(IterableDataset):
     """Yield pre-batched jets from tensors held in memory.
 
@@ -50,26 +56,26 @@ class HLS4MLDataset(IterableDataset):
         return min(self.num_batches, self.max_batches)
 
     def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
-        worker_id = 0 if worker_info is None else worker_info.id
-        num_workers = 1 if worker_info is None else worker_info.num_workers
-
-        if self.shuffler is not None:
-            perm = torch.randperm(self.n, generator=self.shuffler)
-        else:
-            perm = torch.arange(self.n)
-
-        nb = 0
+        order = self._order()
+        worker_id, num_workers = _worker_slice()
+        emitted = 0
         # Workers stride through the batches, so each batch is emitted exactly once.
         for i in range(worker_id, self.num_batches, num_workers):
-            if self.max_batches is not None and nb >= self.max_batches:
+            if self.max_batches is not None and emitted >= self.max_batches:
                 break
-            idx = perm[i * self.batch_size : (i + 1) * self.batch_size]
-            x = self.X[idx]
-            y = self.y[idx]
-            if self.transform is not None:
-                x, keep_mask = self.transform(x)
-                if keep_mask is not None:
-                    y = y[keep_mask]
-            yield x, y
-            nb += 1
+            yield self._batch(order[i * self.batch_size : (i + 1) * self.batch_size])
+            emitted += 1
+
+    def _order(self) -> torch.Tensor:
+        """The jet order of one epoch: a fresh permutation, or the order the tensors are in."""
+        if self.shuffler is None:
+            return torch.arange(self.n)
+        return torch.randperm(self.n, generator=self.shuffler)
+
+    def _batch(self, idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """One batch of jets and labels, transformed when the dataset carries a transform."""
+        x, y = self.X[idx], self.y[idx]
+        if self.transform is None:
+            return x, y
+        x, keep_mask = self.transform(x)
+        return (x, y) if keep_mask is None else (x, y[keep_mask])

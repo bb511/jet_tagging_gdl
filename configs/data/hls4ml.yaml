@@ -14,11 +14,13 @@ cache_dir: ${paths.base_data_dir}/hf
 # augmentation: online so2/so3/lorentz on train batches | symm_loss: SCL, no augmentation
 method: augmentation
 
-# none | so2 | so3 | lorentz. Under symm_loss it names the group the SCL draws from.
+# none | so2 | so3 | lorentz | lorentz_iso, the last two being the boost along the beam and the
+# boost of isotropic direction. Under symm_loss it names the group the SCL draws from.
 augmentation_scheme: none
 
-# Half-width of the uniform rapidity range the boosts are drawn from.
-lorentz_eta_max: 2.0
+# Half-width of the uniform rapidity of the beam boost, JetCLR's shift range; the sample's jets sit
+# within |eta| <~ 1.65. The isotropic probe boost (lorentz_iso) shares it.
+lorentz_eta_max: 1.0
 
 # Experiments use 16, 50 and 150; 150 is every constituent the record carries.
 nconstituents: 16

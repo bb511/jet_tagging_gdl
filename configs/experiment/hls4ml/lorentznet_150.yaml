@@ -27,3 +27,9 @@ data:
 trainer:
   max_epochs: 200
   precision: 32
+
+# TF32 matmuls on Ampere and later. The fp32 range that made these experiments force precision 32
+# is kept (the de-normalised Minkowski invariants are elementwise anyway); only the linear layers
+# lose mantissa. Set per experiment so searches, trainings and evaluations agree; a no-op on a V100.
+extras:
+  matmul_precision: high

@@ -37,16 +37,13 @@ def resolve_feature_indices(model_features: list[str], feature_names: list[str])
     Names match bare or with the record's ``j1_`` prefix, so ``px`` finds ``j1_px``.
     """
     index_of = {name: idx for idx, name in enumerate(feature_names)}
-    indices = []
-    for feature in model_features:
-        idx = index_of.get(feature, index_of.get(f"j1_{feature}"))
-        if idx is None:
-            raise ValueError(
-                f"Feature {feature!r} is absent from the data columns {feature_names}. "
-                f"data.features must contain {', '.join(model_features)}."
-            )
-        indices.append(idx)
-    return indices
+    missing = [f for f in model_features if f not in index_of and f"j1_{f}" not in index_of]
+    if missing:
+        raise ValueError(
+            f"Feature {missing[0]!r} is absent from the data columns {feature_names}. "
+            f"data.features must contain {', '.join(model_features)}."
+        )
+    return [index_of.get(f, index_of.get(f"j1_{f}")) for f in model_features]
 
 
 class JetTaggingModule(LightningModule):
@@ -59,6 +56,11 @@ class JetTaggingModule(LightningModule):
     # Columns the network needs, in its own order; None means "whatever the data give".
     required_features: list[str] | None = None
 
+    # Filled by setup() from the datamodule, so None until the trainer attaches one.
+    feature_names: list[str] | None = None
+    model_feature_indices: list[int] | None = None
+    norm_scales: dict[str, float] | None = None
+
     def __init__(
         self,
         name: str,
@@ -69,7 +71,7 @@ class JetTaggingModule(LightningModule):
         group: str = "none",
         symm_loss_weight: float = 0.1,
         symm_loss_metric: str = "l2",
-        lorentz_eta_max: float = 2.0,
+        lorentz_eta_max: float = 1.0,
         optimizer: Callable | None = None,
         scheduler: dict | None = None,
         compile: bool = False,
@@ -81,7 +83,8 @@ class JetTaggingModule(LightningModule):
         :param group: symmetry group of the SCL, read only under ``method="symm_loss"``.
         :param symm_loss_metric: distance between the two logit sets; see
             :func:`~src.algorithms.losses.symmetry.symmetry_distance`.
-        :param lorentz_eta_max: half-width of the rapidity range of the SCL boosts.
+        :param lorentz_eta_max: half-width of the rapidity range of the SCL boosts, along the
+            beam under ``lorentz``, in a random direction under ``lorentz_iso``.
         :param optimizer: Hydra ``_partial_`` optimiser, called with ``params``.
         :param scheduler: Lightning scheduler dict whose ``scheduler`` entry is a Hydra
             ``_partial_``; ``None`` trains at a fixed learning rate.
@@ -91,28 +94,24 @@ class JetTaggingModule(LightningModule):
         # Optimiser and scheduler partials out of hparams, so a checkpoint holds plain
         # containers and loads without add_safe_globals.
         self.save_hyperparameters(logger=False, ignore=["optimizer", "scheduler"])
-        if method not in SUPPORTED_METHODS:
-            raise ValueError(f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}.")
-        validate_symmetry_group(method, group)
+        self._validate(method, group)
 
         self._optimizer = optimizer
         self._scheduler = scheduler
         self.net = self.build_net(**net_kwargs)
-        self.symm_loss = (
-            SymmetryConsistencyLoss(symm_loss_weight, symm_loss_metric)
-            if method == "symm_loss"
-            else None
-        )
+        self.symm_loss = _build_symm_loss(method, symm_loss_weight, symm_loss_metric)
         self._build_metrics(output_dim, method)
-
-        # Filled by setup() from the datamodule, so None until the trainer attaches one.
-        self.feature_names: list[str] | None = None
-        self.model_feature_indices: list[int] | None = None
-        self.norm_scales: dict[str, float] | None = None
 
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
         # Counted here, not in a callback, so hparams carry the FLOP count from the first hook.
         record_flops(self, nconstituents, nbr_feats)
+
+    @staticmethod
+    def _validate(method: str, group: str) -> None:
+        """Reject an unknown training method, and an SCL run whose group names no transform."""
+        if method not in SUPPORTED_METHODS:
+            raise ValueError(f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}.")
+        validate_symmetry_group(method, group)
 
     def _build_metrics(self, output_dim: int, method: str) -> None:
         """Register the metric objects; the SCL trackers exist only under ``symm_loss``."""
@@ -162,42 +161,40 @@ class JetTaggingModule(LightningModule):
         if y.ndim > 1 and y.shape[1] > 1:
             y = y.argmax(dim=1)
         logits = self(x)
-        cls_loss = F.cross_entropy(logits, y)
-        out = {
-            "loss": cls_loss,
-            "cls_loss": cls_loss,
-            "logits": logits,
-            "preds": logits.argmax(dim=1),
-            "targets": y,
-        }
+        out = _classification_outputs(logits, y)
         if self.symm_loss is not None:
-            out["loss"], out["symm_loss"] = self._symmetry_branch(x, logits, cls_loss)
+            out["loss"], out["symm_loss"] = self._symmetry_branch(x, logits, out["cls_loss"])
         return out
 
     def _symmetry_branch(
         self, x: torch.Tensor, logits: torch.Tensor, cls_loss: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Add the SCL term, comparing the logits on *x* with those on a random T(x)."""
+        x_sym, keep_mask = self._partner_batch(x)
+        if keep_mask is not None and not bool(keep_mask.any()):
+            # The SO(3) filter, when it is on, rejected every jet: a mean over the empty batch
+            # would be NaN, so this batch contributes cross-entropy alone.
+            return cls_loss, cls_loss.new_zeros(())
+
+        # With the SO(3) filter on, jets rotated out of acceptance are dropped, so only the
+        # survivors' logits can be paired with the partner batch.
+        kept = logits if keep_mask is None else logits[keep_mask]
+        return self.symm_loss(cls_loss, kept, self(x_sym))
+
+    def _partner_batch(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Draw one transformation per jet and return ``(T(x), keep_mask)``.
+
+        :raises RuntimeError: when :meth:`setup` has not named the columns of *x*.
+        """
         if self.feature_names is None:
             raise RuntimeError(
                 "feature_names is unset, so the columns of x cannot be named. Run under "
                 "a trainer whose datamodule setup() has resolved the feature layout."
             )
-        x_sym, keep_mask = build_symmetric_batch(
-            x,
-            self.hparams.group,
-            self.feature_names,
-            self.norm_scales,
-            lorentz_eta_max=self.hparams.lorentz_eta_max,
+        eta_max = self.hparams.lorentz_eta_max
+        return build_symmetric_batch(
+            x, self.hparams.group, self.feature_names, self.norm_scales, lorentz_eta_max=eta_max
         )
-        if keep_mask is not None and not bool(keep_mask.any()):
-            # The SO(3) filter rejected every jet: a mean over the empty batch would be NaN, so
-            # this batch contributes cross-entropy alone.
-            return cls_loss, cls_loss.new_zeros(())
-
-        # SO(3) drops jets rotated out of acceptance, so keep only their partners' logits.
-        kept = logits if keep_mask is None else logits[keep_mask]
-        return self.symm_loss(cls_loss, kept, self(x_sym))
 
     def on_train_start(self) -> None:
         """Discard the sanity-check values so they never enter ``val/acc_best``."""
@@ -278,16 +275,19 @@ class JetTaggingModule(LightningModule):
         only a network with :attr:`required_features` reorders anything.
         """
         model_features = self.required_features or list(datamodule.features)
-        full_width = self.hparams.method == "symm_loss" or datamodule.keep_full_features_at_test
-        if not full_width:
-            self.feature_names = list(datamodule.features)
-            self.model_feature_indices = (
-                resolve_feature_indices(model_features, self.feature_names)
-                if self.required_features
-                else None
-            )
+        if self.hparams.method == "symm_loss" or datamodule.keep_full_features_at_test:
+            self._resolve_full_width_features(model_features, datamodule)
             return
 
+        self.feature_names = list(datamodule.features)
+        self.model_feature_indices = (
+            resolve_feature_indices(model_features, self.feature_names)
+            if self.required_features
+            else None
+        )
+
+    def _resolve_full_width_features(self, model_features: list[str], datamodule) -> None:
+        """Index the record's 16 columns, the width the test and SCL batches arrive at."""
         self.feature_names = list(datamodule.feature_names)
         self.model_feature_indices = resolve_feature_indices(model_features, self.feature_names)
         _reject_undetectable_reorder(self.model_feature_indices, len(self.feature_names))
@@ -317,6 +317,29 @@ class JetTaggingModule(LightningModule):
             kwargs["T_max"] = int(self.trainer.estimated_stepping_batches)
         scheduler_cfg["scheduler"] = scheduler_fn(optimizer=optimizer, **kwargs)
         return scheduler_cfg
+
+
+def _build_symm_loss(method: str, weight: float, metric: str) -> SymmetryConsistencyLoss | None:
+    """Return the SCL term, or None under ``method="augmentation"``, where nothing penalises it."""
+    return SymmetryConsistencyLoss(weight, metric) if method == "symm_loss" else None
+
+
+def _classification_outputs(
+    logits: torch.Tensor, targets: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    """Cross-entropy loss, beside the tensors the plotting and invariance callbacks read back.
+
+    ``loss`` is the total the training steps optimise, and equals ``cls_loss`` until the SCL branch
+    overwrites it.
+    """
+    cls_loss = F.cross_entropy(logits, targets)
+    return {
+        "loss": cls_loss,
+        "cls_loss": cls_loss,
+        "logits": logits,
+        "preds": logits.argmax(dim=1),
+        "targets": targets,
+    }
 
 
 def _reject_mismatched_train_columns(model_features: list[str], data_features: list[str]) -> None:

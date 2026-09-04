@@ -22,4 +22,4 @@ early_stopping:
   monitor: val/acc
   mode: max
   min_delta: 1.0e-4
-  patience: 30 # shorter than a training run's: a trial is judged on its best epoch, not its last
+  patience: 15 # shorter than a training run's: a trial is judged on its best epoch, not its last

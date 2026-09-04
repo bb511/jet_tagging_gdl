@@ -23,5 +23,4 @@ def register_resolvers() -> None:
     """Register every resolver; ``replace=True`` makes a second call harmless."""
     # ${len:${data.features}} derives nbr_feats from the feature list, so the two cannot disagree.
     OmegaConf.register_new_resolver("len", len, replace=True)
-    OmegaConf.register_new_resolver("eval", eval, replace=True)
     OmegaConf.register_new_resolver("short_hash", short_hash, replace=True)

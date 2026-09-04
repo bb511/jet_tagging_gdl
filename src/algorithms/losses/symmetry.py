@@ -4,13 +4,14 @@ The training objective is
 
 .. math:: L = L_\\mathrm{cls} + w \\, d\\bigl(f(x), f(T x)\\bigr),
 
-with :math:`T` drawn independently per jet from one of SO(2), SO(3) or the Lorentz
-boosts, and :math:`d` one of the distances in :func:`symmetry_distance`. The transforms
-themselves come from :mod:`src.data.components.augmentation`, which is the single source
-of truth shared with the online augmentation and the invariance probe.
+with :math:`T` drawn independently per jet from one of SO(2), SO(3), the boosts along the beam
+(``lorentz``) or the boosts of isotropic direction (``lorentz_iso``), and :math:`d` one of the
+distances in :func:`symmetry_distance`. Only the beam boost is a symmetry of a pp collision. The
+transforms themselves come from :mod:`src.data.components.augmentation`, which is the single
+source of truth shared with the online augmentation and the invariance probe.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -18,8 +19,7 @@ from torch import nn
 
 from src.data.components.augmentation import make_transform
 
-SUPPORTED_GROUPS = ("so2", "so3", "lorentz")
-SUPPORTED_METRICS = ("l1", "l2", "mse", "cosine", "js", "kl")
+SUPPORTED_GROUPS = ("so2", "so3", "lorentz", "lorentz_iso")
 
 
 def validate_symmetry_group(method: str, group: str | None) -> None:
@@ -46,19 +46,21 @@ def build_symmetric_batch(
     feature_names: Sequence[str],
     norm_scales: dict[str, float] | None = None,
     *,
-    lorentz_eta_max: float = 2.0,
-    so3_apply_filter: bool = True,
+    lorentz_eta_max: float = 1.0,
+    so3_apply_filter: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Draw one transformation per jet and return the transformed partner batch.
 
     :param x: batch of shape (jets, constituents, features), whose columns *feature_names* lists in
         order.
     :param norm_scales: per-column factors returning the stored values to GeV.
-    :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts.
-    :param so3_apply_filter: drop jets rotated outside detector acceptance.
+    :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts, along the beam
+        for ``lorentz``, in a random direction for ``lorentz_iso``.
+    :param so3_apply_filter: drop jets rotated outside detector acceptance; off by default, so
+        SO(3) is learned under the Haar measure.
     :return: the pair ``(x_sym, keep_mask)``. Under filtered SO(3), ``x_sym`` holds fewer jets than
         *x*, and ``keep_mask``, of the input batch length, selects the rows of any batch-aligned
-        tensor that survive; it is ``None`` for the groups that drop none.
+        tensor that survive; it is ``None`` whenever no jet is dropped.
     """
     transform = make_transform(
         group, feature_names, norm_scales, lorentz_eta_max, so3_apply_filter
@@ -84,38 +86,50 @@ def symmetry_distance(
             f"{tuple(logits.shape)} vs {tuple(logits_sym.shape)}."
         )
 
-    m = metric.lower()
-    if m == "l1":
-        return (logits - logits_sym).abs().sum(dim=1).mean()
-    if m == "l2":
-        return (logits - logits_sym).norm(dim=1).mean()
-    if m == "mse":
-        return F.mse_loss(logits, logits_sym)
-    if m == "cosine":
-        return (1.0 - F.cosine_similarity(logits, logits_sym, dim=1)).mean()
-    if m in ("js", "kl"):
-        return _divergence(logits, logits_sym, m, eps)
-
-    raise ValueError(f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}.")
+    distance = _METRICS.get(metric.lower())
+    if distance is None:
+        raise ValueError(f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}.")
+    return distance(logits, logits_sym, eps)
 
 
-def _divergence(
-    logits: torch.Tensor, logits_sym: torch.Tensor, metric: str, eps: float
-) -> torch.Tensor:
-    """Symmetrised Jensen-Shannon or Kullback-Leibler divergence of the two softmaxes."""
+def _relative_entropy(p: torch.Tensor, q: torch.Tensor, eps: float) -> torch.Tensor:
+    """Per-jet :math:`\\sum_c p_c \\log(p_c / q_c)`, with *eps* keeping both logarithms finite."""
+    return (p * (p.add(eps).log() - q.add(eps).log())).sum(dim=1)
+
+
+def _jensen_shannon(logits: torch.Tensor, logits_sym: torch.Tensor, eps: float) -> torch.Tensor:
+    """Jensen-Shannon divergence between the two softmaxes.
+
+    Clamped at zero, which the sum of two relative entropies can undercut by a rounding once *eps*
+    has shifted the probabilities.
+    """
     p = F.softmax(logits, dim=-1)
     q = F.softmax(logits_sym, dim=-1)
-    if metric == "js":
-        mix = 0.5 * (p + q)
-        js = 0.5 * (
-            (p * (p.add(eps).log() - mix.add(eps).log())).sum(dim=1)
-            + (q * (q.add(eps).log() - mix.add(eps).log())).sum(dim=1)
-        )
-        return js.clamp_min(0.0).mean()
+    mix = 0.5 * (p + q)
+    js = 0.5 * (_relative_entropy(p, mix, eps) + _relative_entropy(q, mix, eps))
+    return js.clamp_min(0.0).mean()
 
+
+def _symmetrised_kl(logits: torch.Tensor, logits_sym: torch.Tensor, eps: float) -> torch.Tensor:
+    """Mean of the two Kullback-Leibler divergences between the two softmaxes."""
+    p = F.softmax(logits, dim=-1)
+    q = F.softmax(logits_sym, dim=-1)
     kl_pq = F.kl_div(p.add(eps).log(), q, reduction="none").sum(dim=1)
     kl_qp = F.kl_div(q.add(eps).log(), p, reduction="none").sum(dim=1)
     return 0.5 * (kl_pq + kl_qp).mean()
+
+
+# Every distance takes (logits, logits_sym, eps) and returns a scalar, whether or not it has a
+# logarithm to keep finite, so that symmetry_distance can dispatch on the name alone.
+_METRICS: dict[str, Callable[[torch.Tensor, torch.Tensor, float], torch.Tensor]] = {
+    "l1": lambda a, b, eps: (a - b).abs().sum(dim=1).mean(),
+    "l2": lambda a, b, eps: (a - b).norm(dim=1).mean(),
+    "mse": lambda a, b, eps: F.mse_loss(a, b),
+    "cosine": lambda a, b, eps: (1.0 - F.cosine_similarity(a, b, dim=1)).mean(),
+    "js": _jensen_shannon,
+    "kl": _symmetrised_kl,
+}
+SUPPORTED_METRICS = tuple(_METRICS)
 
 
 class SymmetryConsistencyLoss(nn.Module):

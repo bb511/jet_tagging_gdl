@@ -38,7 +38,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ========================================================================
 # lorentznet  nconst=50
@@ -59,7 +59,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ========================================================================
 # lorentznet  nconst=150
@@ -80,4 +80,4 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50

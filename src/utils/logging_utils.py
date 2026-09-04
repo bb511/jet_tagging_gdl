@@ -63,5 +63,5 @@ def _algorithm_hparams(cfg: dict[str, Any], algorithm: LightningModule) -> dict[
         "algorithm/params/non_trainable": sum(
             p.numel() for p in parameters if not p.requires_grad
         ),
-        "algorithm/flops": algorithm.hparams.get("flops_total", algorithm.hparams.get("flops")),
+        "algorithm/flops": getattr(algorithm, "flops_total", None),
     }

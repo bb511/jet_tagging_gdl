@@ -37,7 +37,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=16  aug_so2  (method=augmentation, group=so2)
@@ -54,7 +54,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=16  aug_so3  (method=augmentation, group=so3)
@@ -71,7 +71,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=16  aug_lorentz  (method=augmentation, group=lorentz)
@@ -88,7 +88,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=16  symm_so2  (method=symm_loss, group=so2)
@@ -105,7 +105,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=16  symm_so3  (method=symm_loss, group=so3)
@@ -122,7 +122,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=16  symm_lorentz  (method=symm_loss, group=lorentz)
@@ -139,7 +139,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ========================================================================
 # mlp  nconst=50
@@ -160,7 +160,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=50  aug_so2  (method=augmentation, group=so2)
@@ -177,7 +177,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=50  aug_so3  (method=augmentation, group=so3)
@@ -194,7 +194,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=50  aug_lorentz  (method=augmentation, group=lorentz)
@@ -211,7 +211,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=50  symm_so2  (method=symm_loss, group=so2)
@@ -228,7 +228,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=50  symm_so3  (method=symm_loss, group=so3)
@@ -245,7 +245,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=50  symm_lorentz  (method=symm_loss, group=lorentz)
@@ -262,7 +262,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ========================================================================
 # mlp  nconst=150
@@ -283,7 +283,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=150  aug_so2  (method=augmentation, group=so2)
@@ -300,7 +300,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=150  aug_so3  (method=augmentation, group=so3)
@@ -317,7 +317,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=150  aug_lorentz  (method=augmentation, group=lorentz)
@@ -334,7 +334,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=150  symm_so2  (method=symm_loss, group=so2)
@@ -351,7 +351,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=150  symm_so3  (method=symm_loss, group=so3)
@@ -368,7 +368,7 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50
 
 # ------------------------------------------------------------------------
 # mlp  nconst=150  symm_lorentz  (method=symm_loss, group=lorentz)
@@ -385,4 +385,4 @@
 #     logger=none \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     trainer.max_epochs=100
+#     trainer.max_epochs=50

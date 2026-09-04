@@ -164,6 +164,22 @@ class LGEB(nn.Module):
         return x + self.c_weight * unsorted_segment_mean(trans, src, x.shape[0])
 
 
+def _build_blocks(n_hidden: int, n_layers: int, c_weight: float) -> nn.ModuleList:
+    """Stack the message-passing blocks, the last of them without its coordinate update."""
+    blocks = [
+        LGEB(
+            n_hidden,
+            n_hidden,
+            n_hidden,
+            n_node_attr=N_SCALAR,
+            c_weight=c_weight,
+            last_layer=(layer == n_layers - 1),
+        )
+        for layer in range(n_layers)
+    ]
+    return nn.ModuleList(blocks)
+
+
 class LorentzNetGraph(nn.Module):
     """LorentzNet over a batch of jets held as a fixed-width four-momentum tensor.
 
@@ -184,19 +200,7 @@ class LorentzNetGraph(nn.Module):
         super().__init__()
         self.n_hidden = n_hidden
         self.embedding = nn.Linear(N_SCALAR, n_hidden)
-        self.blocks = nn.ModuleList(
-            [
-                LGEB(
-                    n_hidden,
-                    n_hidden,
-                    n_hidden,
-                    n_node_attr=N_SCALAR,
-                    c_weight=c_weight,
-                    last_layer=(layer == n_layers - 1),
-                )
-                for layer in range(n_layers)
-            ]
-        )
+        self.blocks = _build_blocks(n_hidden, n_layers, c_weight)
         self.graph_dec = nn.Sequential(
             nn.Linear(n_hidden, n_hidden),
             nn.ReLU(),

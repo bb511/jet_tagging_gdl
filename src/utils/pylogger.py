@@ -7,7 +7,7 @@ from lightning_utilities.core.rank_zero import rank_prefixed_message, rank_zero_
 
 
 class RankedLogger(logging.LoggerAdapter):
-    """A multi-GPU-friendly python command line logger."""
+    """A logger for multi-process runs, prefixing each message with the rank that emitted it."""
 
     def __init__(
         self,
@@ -15,41 +15,30 @@ class RankedLogger(logging.LoggerAdapter):
         rank_zero_only: bool = False,
         extra: Mapping[str, object] | None = None,
     ) -> None:
-        """Initializes a multi-GPU-friendly python command line logger that logs on all processes
-        with their rank prefixed in the log message.
-
-        :param name: The name of the logger. Default is ``__name__``.
-        :param rank_zero_only: Whether to force all logs to only occur on the rank zero process.
-            Default is `False`.
-        :param extra: (Optional) A dict-like object which provides contextual information. See
-            `logging.LoggerAdapter`.
-        """
+        """Log on every process, or on rank 0 alone when *rank_zero_only* is set."""
         logger = logging.getLogger(name)
         super().__init__(logger=logger, extra=extra)
         self.rank_zero_only = rank_zero_only
 
-    def log(self, level: int, msg: str, rank: int | None = None, *args, **kwargs) -> None:
-        """Delegate a log call to the underlying logger, after prefixing its message with the rank
-        of the process it's being logged from. If `'rank'` is provided, then the log will only
-        occur on that rank/process.
+    def _emits(self, current_rank: int, rank: int | None) -> bool:
+        """Whether this process logs the message: rank 0 alone, or the rank *rank* names."""
+        if self.rank_zero_only:
+            return current_rank == 0
+        return rank is None or current_rank == rank
 
-        :param level: The level to log at. Look at `logging.__init__.py` for more information.
-        :param msg: The message to log.
-        :param rank: The rank to log at.
-        :param args: Additional args to pass to the underlying logging function.
-        :param kwargs: Any additional keyword args to pass to the underlying logging function.
+    def log(self, level: int, msg: str, rank: int | None = None, *args, **kwargs) -> None:
+        """Log *msg* at *level*, prefixed with the rank of the process it is logged from.
+
+        :param rank: log on that process alone; ``None`` logs on every process, subject to
+            ``rank_zero_only``.
+        :raises RuntimeError: before Lightning has set ``rank_zero_only.rank``, without which the
+            rank of this process is unknown.
         """
-        if self.isEnabledFor(level):
-            msg, kwargs = self.process(msg, kwargs)
-            current_rank = getattr(rank_zero_only, "rank", None)
-            if current_rank is None:
-                raise RuntimeError("The `rank_zero_only.rank` needs to be set before use")
-            msg = rank_prefixed_message(msg, current_rank)
-            if self.rank_zero_only:
-                if current_rank == 0:
-                    self.logger.log(level, msg, *args, **kwargs)
-            else:
-                if rank is None:
-                    self.logger.log(level, msg, *args, **kwargs)
-                elif current_rank == rank:
-                    self.logger.log(level, msg, *args, **kwargs)
+        if not self.isEnabledFor(level):
+            return
+        msg, kwargs = self.process(msg, kwargs)
+        current_rank = getattr(rank_zero_only, "rank", None)
+        if current_rank is None:
+            raise RuntimeError("The `rank_zero_only.rank` needs to be set before use")
+        if self._emits(current_rank, rank):
+            self.logger.log(level, rank_prefixed_message(msg, current_rank), *args, **kwargs)

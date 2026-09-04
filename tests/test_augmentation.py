@@ -14,6 +14,8 @@ from src.data.components.augmentation import (
     apply_random_lorentz,
     apply_random_so2,
     apply_random_so3,
+    compute_eta,
+    compute_phi,
     compute_pt,
     feature_index,
     get_norm_scale,
@@ -42,6 +44,17 @@ def _jets(n_jets: int = 6, n_slots: int = 8, n_real: int = 5, seed: int = 0) -> 
     energy = torch.sqrt((momenta**2).sum(-1, keepdim=True) + MASS**2)
     jets = torch.cat([momenta, energy], dim=-1)
     jets[:, n_real:, :] = 0.0
+
+    return jets
+
+
+def _massless_jets(n_jets: int = 6, n_slots: int = 8, n_real: int = 5) -> torch.Tensor:
+    """As :func:`_jets`, but with the energy set to the momentum magnitude.
+
+    Only for a massless constituent is a beam boost a rigid shift in pseudorapidity.
+    """
+    jets = _jets(n_jets, n_slots, n_real)
+    jets[:, :n_real, 3] = jets[:, :n_real, :3].norm(dim=-1)
 
     return jets
 
@@ -112,10 +125,42 @@ def test_the_so3_filter_drops_the_rejected_jets_rather_than_reverting_them() -> 
     assert not torch.allclose(jets[keep_mask][..., :3], rotated[..., :3])
 
 
-def test_a_lorentz_boost_leaves_the_masses_alone_and_the_padding_at_zero() -> None:
+def test_a_beam_boost_shifts_eta_rigidly_and_leaves_pt_and_phi_alone() -> None:
+    """The symmetry of a pp collision, and the reason `lorentz` means the beam boost.
+
+    One rapidity is drawn per jet, so every constituent of a jet moves by the same -xi in eta while
+    its pt and phi stay put. Only the real constituents are checked: a padded row is left at zero,
+    which compute_eta sends to 0 before and after.
+    """
+    torch.manual_seed(0)
+    jets = _massless_jets()
+    boosted, boosts = apply_random_lorentz(jets, FOUR_MOMENTUM, eta_max=1.0)
+    # cosh(xi) sits on the (E, E) entry and -sinh(xi) on (E, pz).
+    xi = torch.atanh(-boosts[:, 0, 3] / boosts[:, 0, 0])
+
+    real = slice(None, 5)
+    d_eta = (
+        compute_eta(boosted[..., 0], boosted[..., 1], boosted[..., 2])
+        - compute_eta(jets[..., 0], jets[..., 1], jets[..., 2])
+    )[:, real]
+
+    assert torch.allclose(
+        compute_pt(boosted[..., 0], boosted[..., 1]), compute_pt(jets[..., 0], jets[..., 1])
+    )
+    assert torch.allclose(
+        compute_phi(boosted[..., 0], boosted[..., 1]), compute_phi(jets[..., 0], jets[..., 1])
+    )
+    assert torch.allclose(d_eta, -xi.unsqueeze(1).expand_as(d_eta), atol=1e-4)
+    assert xi.abs().max() <= 1.0
+    # Drawn per jet, so two jets are not shifted by the same amount.
+    assert (xi - xi[0]).abs().max() > 1e-3
+
+
+@pytest.mark.parametrize("isotropic", [False, True])
+def test_a_lorentz_boost_leaves_the_masses_alone_and_the_padding_at_zero(isotropic: bool) -> None:
     """The invariant mass is what a boost may not touch, whatever it does to E and p."""
     jets = _jets(n_slots=8, n_real=5)
-    boosted, _ = apply_random_lorentz(jets, FOUR_MOMENTUM, eta_max=2.0)
+    boosted, _ = apply_random_lorentz(jets, FOUR_MOMENTUM, 2.0, None, isotropic)
 
     assert torch.allclose(_mass_squared(boosted)[:, :5], _mass_squared(jets)[:, :5], rtol=1e-4)
     # A padded slot that acquired an energy would be read as a constituent downstream.
@@ -136,11 +181,19 @@ def test_the_factory_builds_one_transform_per_group_and_refuses_none() -> None:
     """Datamodule, SCL and invariance probe all draw from here, so they cannot drift; 'none' is a
     legitimate value of data.augmentation_scheme, but the caller must not ask for it."""
     jets = _jets()
-    for scheme in ("so2", "so3", "lorentz"):
+    for scheme in ("so2", "so3", "lorentz", "lorentz_iso"):
         transformed, keep_mask = make_transform(scheme, FOUR_MOMENTUM)(jets)
 
-        assert transformed.shape[1:] == jets.shape[1:]
-        assert (keep_mask is None) == (scheme != "so3")
+        assert transformed.shape == jets.shape
+        # The SO(3) acceptance filter is opt-in, so by default no scheme drops a jet.
+        assert keep_mask is None
 
-    with pytest.raises(ValueError, match="so2"):
+    torch.manual_seed(0)
+    filtered, keep_mask = make_transform("so3", RECORD_COLUMNS, so3_apply_filter=True)(
+        _collimated_jets(64)
+    )
+
+    assert keep_mask is not None and filtered.shape[0] == int(keep_mask.sum())
+
+    with pytest.raises(ValueError, match="lorentz_iso"):
         make_transform("none", FOUR_MOMENTUM)

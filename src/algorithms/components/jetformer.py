@@ -8,11 +8,11 @@ reference, where it is defined but commented out.
 """
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class SeqNorm(nn.Module):
-    """BatchNorm1d or LayerNorm over the channel dim of a (B, N, C) sequence."""
+    """BatchNorm1d or LayerNorm over the channel axis of a (jets, tokens, channels) batch."""
 
     def __init__(self, dim: int, normalization: str = "batch") -> None:
         super().__init__()
@@ -121,14 +121,8 @@ class JetFormerNet(nn.Module):
         self.embedding = nn.Linear(in_dim, embed_dim)
         self.input_norm = SeqNorm(embed_dim, normalization)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.blocks = nn.ModuleList(
-            [
-                JetFormerBlock(
-                    embed_dim, num_heads, num_tokens, dropout, activation, normalization
-                )
-                for _ in range(num_transformers)
-            ]
-        )
+        block_args = (embed_dim, num_heads, num_tokens, dropout, activation, normalization)
+        self.blocks = nn.ModuleList([JetFormerBlock(*block_args) for _ in range(num_transformers)])
         self.classifier = nn.Linear(embed_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -11,7 +11,7 @@ KNOWN_CLUSTERS="euler clariden"
 
 # A block opens at a commented 'python3 src/{train,eval}.py' line and runs to
 # the first line without a trailing continuation. Emits one flat command per
-# block, entry point first, so a caller need not know which of the two it holds.
+# block, entry point first, so the caller need not branch on which of the two it holds.
 extract_cmds() {
     awk '
         /^# python3 src\/(train|eval)\.py/ {
@@ -38,7 +38,16 @@ extract_cmds() {
 }
 
 # The value of an override, e.g. field "$cmd" 'data\.method'. Empty when absent.
-field() { printf "%s" "$1" | grep -oE "$2=[^ ]+" | head -1 | cut -d= -f2- || true; }
+# The key is a regex, and it has to sit at the start of the command or behind a
+# space: unanchored, 'checkpoint_manifest_path' would also match the tail of
+# 'baseline_checkpoint_manifest_path' and return the wrong manifest.
+field() {
+    printf "%s" "$1" |
+        grep -oE "(^|[[:space:]])$2=[^ ]+" |
+        head -1 |
+        sed -E 's/^[[:space:]]+//' |
+        cut -d= -f2- || true
+}
 
 # The block's grid position, '<model>_nconst<N>_<variant>', rebuilt from the
 # overrides: what --only matches on and what names the driver logs. The variant
@@ -115,12 +124,15 @@ pin_gpu() {
 }
 
 # Turn a single-run command into a multirun one. Hydra writes a multirun job to
-# <sweep.dir>/<job number>, so the eval blocks' manifest path has to gain the
-# same '/0/' that the train job's checkpoints did.
+# <sweep.dir>/<job number>, so both manifest paths of an eval block have to gain
+# the same '/0/' that the train job's checkpoints did. The alternation is
+# anchored and the substitution global: without the 'g', sed would rewrite
+# whichever of checkpoint_manifest_path and baseline_checkpoint_manifest_path
+# came first and leave the other pointing one directory too high.
 to_sweep_dir() {
     printf "%s" "$1" |
         sed -E 's#hydra\.run\.dir=#hydra.sweep.dir=#' |
-        sed -E 's#checkpoint_manifest_path=([^ ]*)/checkpoint_manifest\.json#checkpoint_manifest_path=\1/0/checkpoint_manifest.json#'
+        sed -E 's#(^|[[:space:]])(baseline_)?checkpoint_manifest_path=([^ ]*)/checkpoint_manifest\.json#\1\2checkpoint_manifest_path=\3/0/checkpoint_manifest.json#g'
 }
 
 # $1 = cluster, $2 = slurm time limit in minutes (the launcher's own default of

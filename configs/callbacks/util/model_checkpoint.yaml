@@ -6,7 +6,7 @@ filename: null
 monitor: null
 verbose: false
 save_last: null
-save_top_k: 1 # how many of the best models to keep, ranked by the monitored metric
+save_top_k: 1 # ranked by the monitored metric
 mode: "min"
 auto_insert_metric_name: true
 save_weights_only: false

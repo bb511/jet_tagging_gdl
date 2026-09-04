@@ -66,6 +66,80 @@ def read_manifest(path: str | Path) -> Manifest:
     return Manifest(runs=runs, **payload)
 
 
+def _fold_number(path: Path) -> int:
+    """Sort key of a ``fold_<i>/`` manifest: its index, so that fold_10 follows fold_2."""
+    return int(path.parent.name.removeprefix("fold_"))
+
+
+def _main_manifest(base_dir: Path) -> Manifest:
+    """The main run's manifest, at the top of *base_dir*.
+
+    :raises FileNotFoundError: when it is missing: the merge takes the run's name and directory
+        from it, and the folds are the uncertainty on it, not a run of their own.
+    """
+    path = base_dir / MANIFEST_FILENAME
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"No main run manifest at {path}. A fold=null process with data.n_folds=1 writes it "
+            "there; the fold_<i>/ directories beside it hold the folds alone."
+        )
+    return read_manifest(path)
+
+
+def _one_fold_manifest(path: Path) -> Manifest:
+    """The manifest a ``fold=<i>`` process wrote, holding that one fold and nothing else.
+
+    :raises ValueError: otherwise, as for a sequential k-fold manifest dropped into a ``fold_<i>/``
+        directory, whose folds would then be counted twice.
+    """
+    manifest = read_manifest(path)
+    if len(manifest.runs) != 1 or manifest.runs[0].fold_idx is None:
+        labels = [run.fold_label for run in manifest.runs]
+        raise ValueError(
+            f"{path} lists {labels}, but a fold manifest holds exactly one fold run, as a "
+            "fold=<i> process writes it."
+        )
+    return manifest
+
+
+def _fold_manifests(base_dir: Path) -> list[Manifest]:
+    """The manifests of the folds trained beside the main run, in fold order.
+
+    A fold still training has written none, so it is left out, with a warning, rather than waited
+    for.
+    """
+    paths = sorted(base_dir.glob(f"fold_*/{MANIFEST_FILENAME}"), key=_fold_number)
+    folds = [_one_fold_manifest(path) for path in paths]
+    if any(fold.n_folds != len(folds) for fold in folds):
+        log.warning(
+            f"{len(folds)} fold manifest(s) under {base_dir}, but the folds were trained as "
+            f"{folds[0].n_folds}: one is still running, or died."
+        )
+    log.info(f"Merging the main manifest in {base_dir} with {[str(path) for path in paths]}")
+    return folds
+
+
+def merge_manifests(base_dir: str | Path) -> Manifest:
+    """Join the manifest of a main run with those of the folds trained beside it as processes.
+
+    The layout is the one ``scripts/cluster/submit_train.sh --folds`` launches: the main run
+    (``fold=null``, ``data.n_folds=1``) in *base_dir*, fold i (``fold=i``) in ``fold_<i>/`` under
+    it.
+
+    :return: the main run first, then the folds by index. ``n_folds`` counts the fold manifests
+        found.
+    """
+    base_dir = Path(base_dir)
+    main = _main_manifest(base_dir)
+    folds = _fold_manifests(base_dir)
+    return Manifest(
+        n_folds=len(folds),
+        hydra_output_dir=main.hydra_output_dir,
+        experiment_name=main.experiment_name,
+        runs=[*main.runs, *(fold.runs[0] for fold in folds)],
+    )
+
+
 def best_or_last_checkpoint(trainer: Trainer) -> str:
     """Absolute path of the checkpoint a finished run is evaluated from.
 

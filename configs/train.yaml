@@ -39,4 +39,8 @@ ckpt_path: null
 # What an Optuna study maximises: the main run's value, not a fold average.
 optimized_metric: val/acc_best
 
+# An integer in 1..data.n_folds trains that fold alone, skipping the main run, so the k folds can
+# run as k processes (scripts/cluster/submit_train.sh --folds). null: the main run, then every fold.
+fold: null
+
 seed: 12345

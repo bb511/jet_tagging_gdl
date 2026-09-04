@@ -2,9 +2,11 @@
 
 The main run keeps the record's own train/validation split; ``data.n_folds >= 2`` adds one run per
 fold over the pooled train and validation jets, which is where the quoted uncertainty comes from.
-Metrics come back under ``main/``, per fold under ``fold<i>/``, and once more at the top level,
-which is what an Optuna trial reads. Nothing is tested here: the run writes a checkpoint manifest
-that ``src/eval.py`` picks up.
+``fold=<i>`` fits that one fold in place of the main run and the loop, so the k folds can run as k
+processes, each in a run directory of its own, whose manifests ``src/eval.py`` merges. Metrics come
+back under ``main/``, per fold under ``fold<i>/``, and once more at the top level, which is what an
+Optuna trial reads. Nothing is tested here: the run writes a checkpoint manifest that
+``src/eval.py`` picks up.
 """
 
 from pathlib import Path
@@ -14,7 +16,7 @@ import hydra
 import lightning as L
 import rootutils
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
@@ -26,15 +28,12 @@ from src.utils.omegaconf import register_resolvers
 # Before Hydra composes: the configs interpolate ${len:} and ${short_hash:}.
 register_resolvers()
 
-from src.callbacks.plotting import PlottingCallback
 from src.callbacks.results_table import ResultsTableCallback
 from src.utils import (
     RankedLogger,
     extras,
     get_metric_value,
-    instantiate_callbacks,
     instantiate_loggers,
-    log_hyperparameters,
     task_wrapper,
 )
 from src.utils.checkpoints import (
@@ -43,57 +42,44 @@ from src.utils.checkpoints import (
     best_or_last_checkpoint,
     write_manifest,
 )
+from src.utils.runs import (
+    log_run_hyperparameters,
+    prepare_callbacks,
+    shared_results_callback,
+)
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
-
-def _shared_results_callback(cfg: DictConfig) -> ResultsTableCallback | None:
-    """One results table for every fold, so that k folds yield one row rather than k."""
-    if not cfg.get("callbacks") or not cfg.callbacks.get("results_table"):
-        return None
-    return hydra.utils.instantiate(cfg.callbacks.results_table)
+# What one fit leaves behind: the trainer, the fitted algorithm, its callbacks and its loggers.
+Fitted = tuple[Trainer, LightningModule, list[Callback], list[Logger]]
 
 
-def _fold_callbacks(
+def _fit_objects(
     cfg: DictConfig, results_callback: ResultsTableCallback | None, checkpoint_subdir: str
-) -> list[Callback]:
-    """Instantiate one run's callbacks, with its checkpoints in a directory of its own.
+) -> tuple[list[Callback], list[Logger]]:
+    """The callbacks and the loggers of one fit, its checkpoints under *checkpoint_subdir*.
 
-    :param results_callback: replaces the composed one so the folds share a table; ``None`` leaves
-        the composed callbacks untouched.
+    LearningRateMonitor is dropped when nothing is logging, since it raises at ``on_train_start``
+    rather than warning, and searches and debug runs compose the callbacks with ``logger=none``.
     """
-    callbacks = instantiate_callbacks(cfg.get("callbacks"))
-    if results_callback is not None:
-        callbacks = [
-            results_callback if isinstance(cb, ResultsTableCallback) else cb for cb in callbacks
-        ]
     checkpoint_dir = Path(cfg.paths.output_dir) / "checkpoints" / checkpoint_subdir
-    for callback in callbacks:
-        if isinstance(callback, ModelCheckpoint):
-            callback.dirpath = str(checkpoint_dir)
-        elif isinstance(callback, PlottingCallback):
-            # Without a subdirectory of its own, every fold would draw over the previous one.
-            callback.subdir = checkpoint_subdir
-    return callbacks
+    callbacks = prepare_callbacks(
+        cfg, results_callback, checkpoint_subdir, checkpoint_dir, keep_results_table=True
+    )
+    loggers: list[Logger] = instantiate_loggers(cfg.get("logger"))
+    if not loggers:
+        callbacks = [cb for cb in callbacks if not isinstance(cb, LearningRateMonitor)]
+    return callbacks, loggers
 
 
-def _drop_lr_monitor(callbacks: list[Callback]) -> list[Callback]:
-    """Remove LearningRateMonitor, which raises at on_train_start when there is no logger.
-
-    Searches and debug runs compose the callbacks with ``logger=none``, a crash rather than a
-    warning in Lightning, so the monitor is dropped here instead of from the configs.
-    """
-    return [cb for cb in callbacks if not isinstance(cb, LearningRateMonitor)]
-
-
-def _run_one_fold(
+def _fit_run(
     cfg: DictConfig,
     datamodule: LightningDataModule,
     results_callback: ResultsTableCallback | None,
     fold_label: str,
     checkpoint_subdir: str,
     ckpt_path: str | None = None,
-) -> tuple[Trainer, LightningModule, list[Callback], list[Logger]]:
+) -> Fitted:
     """Fit one model on whichever split *datamodule* currently holds.
 
     The datamodule is not rebuilt between folds: the pool is assembled once and ``set_fold`` alone
@@ -104,24 +90,11 @@ def _run_one_fold(
     """
     log.info(f"[{fold_label}] Instantiating algorithm <{cfg.algorithm._target_}>")
     algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)
-    callbacks = _fold_callbacks(cfg, results_callback, checkpoint_subdir)
-    loggers: list[Logger] = instantiate_loggers(cfg.get("logger"))
-    if not loggers:
-        callbacks = _drop_lr_monitor(callbacks)
+    callbacks, loggers = _fit_objects(cfg, results_callback, checkpoint_subdir)
     log.info(f"[{fold_label}] Instantiating trainer <{cfg.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=loggers)
-
     if loggers:
-        log_hyperparameters(
-            {
-                "cfg": cfg,
-                "algorithm": algorithm,
-                "trainer": trainer,
-                "fold_idx": fold_label,
-                "run_stage": "train",
-            }
-        )
-
+        log_run_hyperparameters(cfg, algorithm, trainer, fold_label, "train")
     log.info(f"[{fold_label}] Starting training")
     trainer.fit(model=algorithm, datamodule=datamodule, ckpt_path=ckpt_path)
     return trainer, algorithm, callbacks, loggers
@@ -145,6 +118,27 @@ def _manifest_run(
     return ManifestRun(fold_label, fold_idx, checkpoint_path, best)
 
 
+def _fit_fold(
+    cfg: DictConfig,
+    datamodule: LightningDataModule,
+    results_callback: ResultsTableCallback | None,
+    fold_idx: int,
+    n_folds: int,
+) -> tuple[dict[str, Any], ManifestRun | None]:
+    """Fit fold *fold_idx*, counting from zero, of the k-fold loop.
+
+    :return: its metrics keyed ``fold<i>/<metric>`` with i counting from one, and its manifest
+        entry when it saved a checkpoint.
+    """
+    label = f"fold_{fold_idx + 1}"
+    log.info(f"Fold {fold_idx + 1} of {n_folds}")
+    datamodule.set_fold(fold_idx)
+    trainer = _fit_run(cfg, datamodule, results_callback, label, label)[0]
+    fold_metrics = dict(trainer.callback_metrics)
+    metrics = {f"fold{fold_idx + 1}/{key}": value for key, value in fold_metrics.items()}
+    return metrics, _manifest_run(trainer, label, fold_idx + 1, fold_metrics)
+
+
 def _run_folds(
     cfg: DictConfig, datamodule: LightningDataModule, n_folds: int
 ) -> tuple[dict[str, Any], list[ManifestRun]]:
@@ -153,19 +147,87 @@ def _run_folds(
     :return: metrics keyed ``fold<i>/<metric>`` with i counting from one, and the manifest entries
         of the folds that saved a checkpoint.
     """
-    results_callback = _shared_results_callback(cfg)
+    results_callback = shared_results_callback(cfg)
     datamodule.n_folds = n_folds
     metrics: dict[str, Any] = {}
-    runs: list[ManifestRun | None] = []
+    runs: list[ManifestRun] = []
     for fold_idx in range(n_folds):
-        label = f"fold_{fold_idx + 1}"
-        log.info(f"Fold {fold_idx + 1} of {n_folds}")
-        datamodule.set_fold(fold_idx)
-        trainer = _run_one_fold(cfg, datamodule, results_callback, label, label)[0]
-        fold_metrics = dict(trainer.callback_metrics)
-        metrics.update({f"fold{fold_idx + 1}/{k}": v for k, v in fold_metrics.items()})
-        runs.append(_manifest_run(trainer, label, fold_idx + 1, fold_metrics))
-    return metrics, [run for run in runs if run is not None]
+        fold_metrics, run = _fit_fold(cfg, datamodule, results_callback, fold_idx, n_folds)
+        metrics.update(fold_metrics)
+        if run is not None:
+            runs.append(run)
+    return metrics, runs
+
+
+def _fold_to_train(cfg: DictConfig, n_folds: int) -> int | None:
+    """The one fold this process fits, or ``None`` for the main run and every fold in turn.
+
+    :raises ValueError: when ``fold`` is set with no folds to pick from, or names one past them.
+    """
+    fold = cfg.get("fold")
+    if fold is None:
+        return None
+    if n_folds < 2 or not 1 <= int(fold) <= n_folds:
+        raise ValueError(
+            f"fold={fold} needs data.n_folds >= 2 and 1 <= fold <= data.n_folds, "
+            f"but data.n_folds={n_folds}."
+        )
+    return int(fold)
+
+
+def _run_single_fold(
+    cfg: DictConfig, datamodule: LightningDataModule, n_folds: int, fold: int
+) -> tuple[dict[str, Any], list[ManifestRun], Fitted]:
+    """Fit fold *fold* of *n_folds* alone, in a process that owns no other run.
+
+    The main run is skipped: a sibling process launched with ``fold=null`` and ``data.n_folds=1``
+    supplies it, and :func:`src.utils.checkpoints.merge_manifests` joins the manifests at
+    evaluation time. ``ckpt_path`` resumes this fold, there being no other run it could mean.
+
+    :return: metrics keyed ``fold<i>/<metric>`` and mirrored at the top level, where
+        ``get_metric_value`` looks; the manifest entry, when a checkpoint was saved; the objects.
+    """
+    label = f"fold_{fold}"
+    log.info(f"Fold {fold} of {n_folds}, alone in this process")
+    datamodule.n_folds = n_folds
+    datamodule.set_fold(fold - 1)
+    fitted = _fit_run(cfg, datamodule, None, label, label, cfg.get("ckpt_path"))
+    fold_metrics = dict(fitted[0].callback_metrics)
+    metrics = {f"fold{fold}/{key}": value for key, value in fold_metrics.items()}
+    metrics.update(fold_metrics)
+    run = _manifest_run(fitted[0], label, fold, fold_metrics)
+    return metrics, [run] if run is not None else [], fitted
+
+
+def _folds_beside_main(
+    cfg: DictConfig, datamodule: LightningDataModule, n_folds: int
+) -> tuple[dict[str, Any], list[ManifestRun]]:
+    """The folds fitted after the main run, none of them below two."""
+    if n_folds < 2:
+        log.info(f"No cross-validation folds, since data.n_folds={n_folds} is below 2")
+        return {}, []
+    return _run_folds(cfg, datamodule, n_folds)
+
+
+def _run_main_and_folds(
+    cfg: DictConfig, datamodule: LightningDataModule, n_folds: int
+) -> tuple[dict[str, Any], list[ManifestRun], Fitted]:
+    """Fit the main run on the record's own split, then every fold in turn.
+
+    :return: metrics keyed ``main/<metric>`` and ``fold<i>/<metric>``, the main run's mirrored at
+        the top level, where ``get_metric_value`` and the Optuna sweeper look; the manifest
+        entries; and the main run's objects.
+    """
+    # The main run keeps the record's own split: a search then reads one clean number, not a mean.
+    datamodule.n_folds = 1
+    datamodule.set_fold(0)
+    fitted = _fit_run(cfg, datamodule, None, "main", "main", cfg.get("ckpt_path"))
+    main_metrics = dict(fitted[0].callback_metrics)
+    main_run = _manifest_run(fitted[0], "main", None, main_metrics)
+    fold_metrics, fold_runs = _folds_beside_main(cfg, datamodule, n_folds)
+    prefixed = {f"main/{key}": value for key, value in main_metrics.items()}
+    runs = ([main_run] if main_run is not None else []) + fold_runs
+    return prefixed | fold_metrics | main_metrics, runs, fitted
 
 
 def _write_manifest(cfg: DictConfig, n_folds: int, runs: list[ManifestRun]) -> None:
@@ -183,43 +245,21 @@ def _write_manifest(cfg: DictConfig, n_folds: int, runs: list[ManifestRun]) -> N
     write_manifest(manifest, cfg.paths.output_dir)
 
 
-@task_wrapper
-def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Fit the main run, then the folds when there are any, then write the manifest.
+def _fit_runs(
+    cfg: DictConfig, datamodule: LightningDataModule, n_folds: int, fold: int | None
+) -> tuple[dict[str, Any], list[ManifestRun], Fitted]:
+    """The main run with its folds, or the single fold *fold* names."""
+    if fold is None:
+        return _run_main_and_folds(cfg, datamodule, n_folds)
+    return _run_single_fold(cfg, datamodule, n_folds, fold)
 
-    :return: the metrics of all runs, and the objects of the main run.
-    """
-    if cfg.get("seed") is not None:
-        L.seed_everything(cfg.seed, workers=True)
 
-    log.info(f"Instantiating datamodule <{cfg.data._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
-    datamodule.prepare_data()
-    n_folds = int(cfg.data.get("n_folds") or 1)
-
-    # The main run keeps the record's own split: a search then reads one clean number, not a mean.
-    datamodule.n_folds = 1
-    datamodule.set_fold(0)
-    trainer, algorithm, callbacks, loggers = _run_one_fold(
-        cfg, datamodule, None, "main", "main", cfg.get("ckpt_path")
-    )
-    main_metrics = dict(trainer.callback_metrics)
-    metric_dict: dict[str, Any] = {f"main/{k}": v for k, v in main_metrics.items()}
-    main_run = _manifest_run(trainer, "main", None, main_metrics)
-    runs = [main_run] if main_run is not None else []
-
-    if n_folds >= 2:
-        fold_metrics, fold_runs = _run_folds(cfg, datamodule, n_folds)
-        metric_dict.update(fold_metrics)
-        runs += fold_runs
-    else:
-        log.info(f"No cross-validation folds, since data.n_folds={n_folds} is below 2")
-
-    # Mirrored at the top level, where get_metric_value and the Optuna sweeper look.
-    metric_dict.update(main_metrics)
-    _write_manifest(cfg, n_folds, runs)
-
-    object_dict = {
+def _object_dict(
+    cfg: DictConfig, datamodule: LightningDataModule, fitted: Fitted
+) -> dict[str, Any]:
+    """The objects of the run a caller is handed back, the main run's or the single fold's."""
+    trainer, algorithm, callbacks, loggers = fitted
+    return {
         "cfg": cfg,
         "datamodule": datamodule,
         "algorithm": algorithm,
@@ -227,7 +267,25 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         "logger": loggers,
         "trainer": trainer,
     }
-    return metric_dict, object_dict
+
+
+@task_wrapper
+def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fit the main run and then the folds, or one fold alone under ``fold``, then write the
+    manifest.
+
+    :return: the metrics of all runs, and the objects of the main run, or of the one fold.
+    """
+    n_folds = int(cfg.data.get("n_folds") or 1)
+    fold = _fold_to_train(cfg, n_folds)
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed, workers=True)
+    log.info(f"Instantiating datamodule <{cfg.data._target_}>")
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
+    datamodule.prepare_data()
+    metric_dict, runs, fitted = _fit_runs(cfg, datamodule, n_folds, fold)
+    _write_manifest(cfg, n_folds, runs)
+    return metric_dict, _object_dict(cfg, datamodule, fitted)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")

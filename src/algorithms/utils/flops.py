@@ -26,52 +26,72 @@ def count_flops(model: torch.nn.Module, example_input: torch.Tensor) -> float:
     train/eval mode and buffers are restored, and an untraceable model gives NaN with a warning
     rather than breaking training.
     """
-    from torch.utils.flop_counter import FlopCounterMode
-
     was_training = model.training
-    # Restored below: train mode would otherwise seed BatchNorm statistics with a batch of noise.
-    buffers = {name: value.clone() for name, value in model.named_buffers()}
+    buffers = _snapshot_buffers(model)
     model.train(True)
     try:
-        counter = FlopCounterMode(display=False)
-        with counter, torch.no_grad():
-            model(example_input)
-        total = float(counter.get_total_flops())
-        if total <= 0.0:
-            log.warning(
-                f"FLOP count for {type(model).__name__} is {total} - the forward pass "
-                "dispatched no ops FlopCounterMode recognises (a fused kernel, or a "
-                "model with no matmuls). Treat the reported FLOPs as unreliable."
-            )
-        return total
+        return _counted_forward(model, example_input)
     except Exception as exc:  # pragma: no cover - diagnostic path
         log.warning(f"FLOP counting failed for {type(model).__name__}: {exc}")
         return float("nan")
     finally:
-        model.train(was_training)
-        with torch.no_grad():
-            for name, value in model.named_buffers():
-                value.copy_(buffers[name])
+        _restore_state(model, was_training, buffers)
 
 
-def count_flops_per_jet(
-    model: torch.nn.Module,
-    nconstituents: int,
-    nbr_feats: int,
-    device: torch.device | None = None,
-) -> float:
+def count_flops_per_jet(model: torch.nn.Module, nconstituents: int, nbr_feats: int) -> float:
     """Forward FLOPs for a single jet of shape ``(nconstituents, nbr_feats)``."""
-    example = torch.randn(2, nconstituents, nbr_feats, device=device)
+    example = torch.randn(2, nconstituents, nbr_feats)
     return count_flops(model, example) / 2.0
 
 
 def record_flops(model: torch.nn.Module, nconstituents: int, nbr_feats: int) -> float:
-    """Count per-jet FLOPs and store them in ``model.hparams``.
+    """Count per-jet FLOPs and store them as ``model.flops_total``.
 
-    Writes both ``flops_total`` and ``flops``; ``ResultsTableCallback`` reads ``flops_total`` first
-    and falls back to ``flops``.
+    An attribute, not an hparam: ``save_hyperparameters`` has already run, and a key added to
+    ``hparams`` afterwards would reach ``__init__`` on ``load_from_checkpoint`` as an argument the
+    network does not take.
     """
-    flops = count_flops_per_jet(model, nconstituents, nbr_feats)
-    model.hparams["flops_total"] = flops
-    model.hparams["flops"] = flops
-    return flops
+    model.flops_total = count_flops_per_jet(model, nconstituents, nbr_feats)
+    return model.flops_total
+
+
+def _counted_forward(model: torch.nn.Module, example_input: torch.Tensor) -> float:
+    """Total FLOPs of one traced forward pass, warning when the count is not to be trusted."""
+    from torch.utils.flop_counter import FlopCounterMode
+
+    counter = FlopCounterMode(display=False)
+    with counter, torch.no_grad():
+        model(example_input)
+    total = float(counter.get_total_flops())
+    _warn_if_unrecognised(model, total)
+    return total
+
+
+def _warn_if_unrecognised(model: torch.nn.Module, total: float) -> None:
+    """Warn on a count of zero, which the counter also returns when it recognised no op at all."""
+    if total > 0.0:
+        return
+    log.warning(
+        f"FLOP count for {type(model).__name__} is {total} - the forward pass "
+        "dispatched no ops FlopCounterMode recognises (a fused kernel, or a "
+        "model with no matmuls). Treat the reported FLOPs as unreliable."
+    )
+
+
+def _snapshot_buffers(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    """Copy every buffer, so the counted pass can be undone.
+
+    That pass runs in train mode, which would otherwise seed the BatchNorm statistics with a batch
+    of noise.
+    """
+    return {name: value.clone() for name, value in model.named_buffers()}
+
+
+def _restore_state(
+    model: torch.nn.Module, was_training: bool, buffers: dict[str, torch.Tensor]
+) -> None:
+    """Put the train/eval mode and the buffer values back as the counted pass found them."""
+    model.train(was_training)
+    with torch.no_grad():
+        for name, value in model.named_buffers():
+            value.copy_(buffers[name])

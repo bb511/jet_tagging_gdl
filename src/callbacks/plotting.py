@@ -167,17 +167,32 @@ class PlottingCallback(Callback):
         plots = Path(trainer.default_root_dir) / "plots"
         return plots if self.subdir is None else plots / self.subdir
 
+    @staticmethod
+    def _scores(
+        predictions: _Predictions, split: str
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """The true classes, the probabilities and the predictions, None when nothing is plottable.
+
+        A pass that collected nothing, and one whose scores hold NaN because the run diverged, both
+        leave the figures undrawn rather than writing an empty or a blank one.
+        """
+        if not predictions.logits:
+            log.warning(f"No {split} predictions were collected, so those plots are skipped.")
+            return None
+        labels, probs, preds = predictions.as_arrays()
+        if np.isnan(probs).any():
+            log.warning(f"The {split} scores hold NaN, so the run diverged; plots skipped.")
+            return None
+        return labels, probs, preds
+
     def _draw_classification(
         self, trainer: Trainer, predictions: _Predictions, split: str
     ) -> None:
         """Draw the ROC curves and the confusion matrix of one split, if it has scores."""
-        if not predictions.logits:
-            log.warning(f"No {split} predictions were collected, so those plots are skipped.")
+        scores = self._scores(predictions, split)
+        if scores is None:
             return
-        labels, probs, preds = predictions.as_arrays()
-        if np.isnan(probs).any():
-            log.warning(f"The {split} scores hold NaN, so the run diverged; plots skipped.")
-            return
+        labels, probs, preds = scores
         save_dir = self._save_dir(trainer)
         paths = [
             roc.plot(labels, probs, self.class_names, save_dir, split),

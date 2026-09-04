@@ -16,6 +16,28 @@ from src.utils import pylogger
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
+def _ordered_fields(cfg: DictConfig, print_order: Sequence[str]) -> list[str]:
+    """The top-level fields of *cfg* to render, those of *print_order* first.
+
+    A field of *print_order* that the config does not hold is reported: the order is written by
+    hand, so a renamed config group would otherwise drop out of the tree unnoticed.
+    """
+    ordered = []
+    for field in print_order:
+        if field in cfg:
+            ordered.append(field)
+        else:
+            log.warning(f"Field '{field}' not found in config. Skipping '{field}' printing...")
+    return ordered + [field for field in cfg if field not in ordered]
+
+
+def _as_yaml(group: object, resolve: bool) -> str:
+    """One config group as the tree shows it, or its plain text when it is not a group."""
+    if isinstance(group, DictConfig):
+        return OmegaConf.to_yaml(group, resolve=resolve)
+    return str(group)
+
+
 @rank_zero_only
 def print_config_tree(
     cfg: DictConfig,
@@ -31,69 +53,45 @@ def print_config_tree(
     resolve: bool = False,
     save_to_file: bool = False,
 ) -> None:
-    """Prints the contents of a DictConfig as a tree structure using the Rich library.
+    """Render the composed config as a Rich tree, one branch per top-level field.
 
-    :param cfg: A DictConfig composed by Hydra.
-    :param print_order: Determines in what order config components are printed. Anything not listed
-        is printed after them.
-    :param resolve: Whether to resolve reference fields of DictConfig. Default is ``False``.
-    :param save_to_file: Whether to export config to the hydra output folder. Default is ``False``.
+    :param print_order: the fields rendered first; anything else follows in the order the config
+        holds it.
+    :param resolve: resolve the ``${...}`` interpolations before rendering them.
+    :param save_to_file: also write the tree to ``config_tree.log`` in the run directory.
     """
     style = "dim"
     tree = rich.tree.Tree("CONFIG", style=style, guide_style=style)
-
-    queue = []
-
-    # add fields from `print_order` to queue
-    for field in print_order:
-        queue.append(field) if field in cfg else log.warning(
-            f"Field '{field}' not found in config. Skipping '{field}' config printing..."
-        )
-
-    # add all the other fields to queue (not specified in `print_order`)
-    for field in cfg:
-        if field not in queue:
-            queue.append(field)
-
-    # generate config tree from queue
-    for field in queue:
+    for field in _ordered_fields(cfg, print_order):
         branch = tree.add(field, style=style, guide_style=style)
-
-        config_group = cfg[field]
-        if isinstance(config_group, DictConfig):
-            branch_content = OmegaConf.to_yaml(config_group, resolve=resolve)
-        else:
-            branch_content = str(config_group)
-
-        branch.add(rich.syntax.Syntax(branch_content, "yaml"))
-
-    # print config tree
+        branch.add(rich.syntax.Syntax(_as_yaml(cfg[field], resolve), "yaml"))
     rich.print(tree)
-
-    # save config tree to file
     if save_to_file:
         with open(Path(cfg.paths.output_dir, "config_tree.log"), "w") as file:
             rich.print(tree, file=file)
 
 
+def _prompt_for_tags() -> list[str]:
+    """Ask for the tags on the command line, splitting the answer on commas.
+
+    :raises ValueError: under a multirun, whose jobs would each stop at the prompt.
+    """
+    if "id" in HydraConfig().cfg.hydra.job:
+        raise ValueError("Specify tags before launching a multirun!")
+    log.warning("No tags provided in config. Prompting user to input tags...")
+    tags = Prompt.ask("Enter a list of comma separated tags", default="dev")
+    return [tag.strip() for tag in tags.split(",") if tag != ""]
+
+
 @rank_zero_only
 def enforce_tags(cfg: DictConfig, save_to_file: bool = False) -> None:
-    """Prompts user to input tags from command line if no tags are provided in config.
+    """Prompt for tags when the config carries none, and write them back into it.
 
-    :param cfg: A DictConfig composed by Hydra.
-    :param save_to_file: Whether to export tags to the hydra output folder. Default is ``False``.
+    :param save_to_file: also write the tags to ``tags.log`` in the run directory.
     """
     if not cfg.get("tags"):
-        if "id" in HydraConfig().cfg.hydra.job:
-            raise ValueError("Specify tags before launching a multirun!")
-
-        log.warning("No tags provided in config. Prompting user to input tags...")
-        tags = Prompt.ask("Enter a list of comma separated tags", default="dev")
-        tags = [t.strip() for t in tags.split(",") if t != ""]
-
         with open_dict(cfg):
-            cfg.tags = tags
-
+            cfg.tags = _prompt_for_tags()
         log.info(f"Tags: {cfg.tags}")
 
     if save_to_file:

@@ -1,4 +1,4 @@
-# Re-exports of the helpers src/train.py and src/eval.py import as a group.
+# The helpers of this package, gathered so the entry points import them as one group.
 from src.utils.instantiators import instantiate_callbacks, instantiate_loggers
 from src.utils.logging_utils import log_hyperparameters
 from src.utils.pylogger import RankedLogger

@@ -20,11 +20,11 @@ hydra:
 
 trainer:
   max_epochs: 1
-  accelerator: cpu # debuggers do not like gpus
-  devices: 1 # debuggers do not like multiprocessing
+  accelerator: cpu # a debugger cannot step through a GPU kernel
+  devices: 1 # one process, which is as far as a debugger follows
   detect_anomaly: true # raise on a NaN or an infinity in any tensor
 
 data:
-  num_workers: 0 # debuggers do not like multiprocessing
+  num_workers: 0 # load in the main process, for the same reason
   pin_memory: False
   n_folds: 1 # one split, so a debug run fits one model rather than the experiment's six
