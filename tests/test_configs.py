@@ -1,25 +1,14 @@
-"""Every config the repository ships must compose and build the objects it names.
-
-A broken config surfaces only when a run has already been queued, hours after the edit, so the
-whole grid is composed here instead: the two roots, the twelve experiments and the seven searches.
-The experiments build every algorithm config three times over, so those need no test of their own.
-"""
-
 from pathlib import Path
 
 import hydra
 import pytest
-from hydra import compose, initialize
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf, open_dict
+from omegaconf import DictConfig, OmegaConf
 
-from tests.conftest import ROOT
+from tests.conftest import MODELS, NCONSTITUENTS, ROOT, compose_root, point_into
 
-MODELS = ("deepsets", "mlp", "jetformer", "lorentznet")
-NCONSTITUENTS = (16, 50, 150)
-# What the catalogues under scripts/hls4ml name, and nothing else.
 EXPECTED_EXPERIMENTS = {f"{model}_{n}" for model in MODELS for n in NCONSTITUENTS}
-# LorentzNet is the symmetry-embedded class, trained baseline only, so it has no SCL space.
+# LorentzNet is trained in the baseline regime alone, so it has no SCL space.
 EXPECTED_SEARCHES = {
     f"{model}{variant}_optuna"
     for model in MODELS
@@ -29,7 +18,6 @@ EXPECTED_SEARCHES = {
 
 
 def _names(group: str) -> list[str]:
-    """The config names of one group, as the command line spells them."""
     return sorted(path.stem for path in (ROOT / "configs" / group).glob("*.yaml"))
 
 
@@ -38,31 +26,15 @@ SEARCHES = _names("hparams_search/hls4ml")
 
 
 def _composed(tmp_path: Path, *overrides: str) -> DictConfig:
-    """Compose ``train.yaml`` as the command line would, on the cheapest trainer.
-
-    The experiment configs select the GPU trainer and MLflow; both are overridden here so that the
-    composition can be checked on any machine, with *tmp_path* standing in for the run directory.
-    """
-    with initialize(version_base="1.3", config_path="../configs"):
-        cfg = compose(
-            config_name="train.yaml",
-            return_hydra_config=True,
-            overrides=[*overrides, "trainer=cpu", "logger=none"],
-        )
-    with open_dict(cfg):
-        cfg.paths.root_dir = str(ROOT)
-        cfg.paths.output_dir = str(tmp_path)
-        cfg.paths.log_dir = str(tmp_path)
-        cfg.paths.results_dir = str(tmp_path / "results")
-        cfg.hydra.runtime.output_dir = str(tmp_path)
-    HydraConfig().set_config(cfg)
-
+    # The experiments select the GPU trainer and MLflow; both are overridden so that the
+    # composition can be checked on any machine.
+    cfg = compose_root("train.yaml", *overrides, "trainer=cpu", "logger=none")
+    HydraConfig().set_config(point_into(cfg, tmp_path))
     return cfg
 
 
 @pytest.mark.parametrize("root", ["cfg_train", "cfg_eval"])
 def test_each_root_builds_its_data_algorithm_and_trainer(root: str, request) -> None:
-    """``train.yaml`` alone is what a debug run composes; ``eval.yaml`` adds the manifest path."""
     cfg = request.getfixturevalue(root)
     HydraConfig().set_config(cfg)
 
@@ -76,7 +48,6 @@ def test_each_root_builds_its_data_algorithm_and_trainer(root: str, request) -> 
 def test_every_experiment_config_builds_data_algorithm_and_trainer(
     experiment: str, tmp_path: Path
 ) -> None:
-    """What a training run does before it reaches the data, done without the data."""
     assert set(EXPERIMENTS) == EXPECTED_EXPERIMENTS
     cfg = _composed(tmp_path, f"experiment=hls4ml/{experiment}")
     model, nconstituents = experiment.rsplit("_", 1)
@@ -91,7 +62,6 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
 
 @pytest.mark.parametrize("search", SEARCHES)
 def test_every_search_config_offers_a_non_empty_space(search: str, tmp_path: Path) -> None:
-    """An empty space would let a sweep run its whole budget on one point."""
     assert set(SEARCHES) == EXPECTED_SEARCHES
     model = search.split("_")[0]
     cfg = _composed(tmp_path, f"experiment=hls4ml/{model}_16", f"hparams_search=hls4ml/{search}")
@@ -103,7 +73,6 @@ def test_every_search_config_offers_a_non_empty_space(search: str, tmp_path: Pat
 
 
 def test_the_study_name_follows_the_regime(tmp_path: Path) -> None:
-    """One study per regime, named from the config alone, so no driver has to pass it."""
     for method, scheme in (("augmentation", "none"), ("symm_loss", "so2")):
         cfg = _composed(
             tmp_path,

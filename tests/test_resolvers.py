@@ -1,5 +1,3 @@
-"""The custom ``${...}`` resolvers, which several configs cannot be composed without."""
-
 from omegaconf import OmegaConf
 
 from src.utils.omegaconf import register_resolvers, short_hash
@@ -8,7 +6,6 @@ RUN_DIR = "/logs/train/runs/2026-08-29_12-00-00"
 
 
 def test_the_resolvers_count_the_features_and_name_the_run() -> None:
-    """Every algorithm config sets nbr_feats this way, and an MLflow run is named this way."""
     # conftest registered them once already; a multirun calls this a second time too.
     register_resolvers()
     cfg = OmegaConf.create(
