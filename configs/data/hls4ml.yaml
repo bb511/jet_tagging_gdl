@@ -2,9 +2,6 @@
 # package of its own, so only the wrapper is configured here.
 _target_: src.data.hls4ml_datamodule.HLS4MLDataModule
 
-# A local directory of this name is read directly, which is how a mirror is checked before upload.
-repo_id: fastmachinelearning/hls4ml_lhc_jets_150p
-
 # The record ships executable code, so a run executes whatever is at this commit (null: the head).
 revision: fc7104f60a45d528ab597b220d5a7cd8e31cfff8
 
@@ -18,9 +15,12 @@ method: augmentation
 # boost of isotropic direction. Under symm_loss it names the group the SCL draws from.
 augmentation_scheme: none
 
-# Half-width of the uniform rapidity of the beam boost, JetCLR's shift range; the sample's jets sit
-# within |eta| <~ 1.65. The isotropic probe boost (lorentz_iso) shares it.
-lorentz_eta_max: 1.0
+# The knobs of make_transform, shared with the SCL and the invariance probe, whose configs
+# interpolate this node. lorentz_eta_max: half-width of the uniform rapidity of the beam boost,
+# JetCLR's shift range (the sample's jets sit within |eta| <~ 1.65); the isotropic probe boost
+# (lorentz_iso) shares it.
+transform_kwargs:
+  lorentz_eta_max: 1.0
 
 # Experiments use 16, 50 and 150; 150 is every constituent the record carries.
 nconstituents: 16
@@ -29,6 +29,9 @@ nconstituents: 16
 features: [px, py, pz, e]
 
 batch_size: 256
+# Loader processes, where the online transform runs; they persist across epochs so their copy of
+# the shuffler advances (fresh forks would replay the first permutation every epoch). 0 iterates
+# in the driver instead, 1.8x slower per epoch for DeepSets at N=16 under augmentation.
 num_workers: 4
 pin_memory: true
 

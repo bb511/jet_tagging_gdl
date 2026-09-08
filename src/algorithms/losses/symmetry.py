@@ -45,27 +45,18 @@ def build_symmetric_batch(
     group: str,
     feature_names: Sequence[str],
     norm_scales: dict[str, float] | None = None,
-    *,
-    lorentz_eta_max: float = 1.0,
-    so3_apply_filter: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor | None]:
+    **transform_kwargs: float,
+) -> torch.Tensor:
     """Draw one transformation per jet and return the transformed partner batch.
 
     :param x: batch of shape (jets, constituents, features), whose columns *feature_names* lists in
         order.
     :param norm_scales: per-column factors returning the stored values to GeV.
-    :param lorentz_eta_max: half-width of the uniform rapidity range of the boosts, along the beam
-        for ``lorentz``, in a random direction for ``lorentz_iso``.
-    :param so3_apply_filter: drop jets rotated outside detector acceptance; off by default, so
-        SO(3) is learned under the Haar measure.
-    :return: the pair ``(x_sym, keep_mask)``. Under filtered SO(3), ``x_sym`` holds fewer jets than
-        *x*, and ``keep_mask``, of the input batch length, selects the rows of any batch-aligned
-        tensor that survive; it is ``None`` whenever no jet is dropped.
+    :param transform_kwargs: the knobs of :func:`~src.data.components.augmentation.make_transform`,
+        ``lorentz_eta_max``.
+    :return: the transformed batch, of the shape and normalisation of *x*.
     """
-    transform = make_transform(
-        group, feature_names, norm_scales, lorentz_eta_max, so3_apply_filter
-    )
-    return transform(x)
+    return make_transform(group, feature_names, norm_scales, **transform_kwargs)(x)
 
 
 def symmetry_distance(
@@ -153,8 +144,7 @@ class SymmetryConsistencyLoss(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return ``(total_loss, symmetry_term)``.
 
-        *logits* and *logits_sym* must already describe the same jets: under filtered SO(3) the
-        caller subsets *logits* with the mask from :func:`build_symmetric_batch`.
+        *logits* and *logits_sym* describe the same jets in the same order.
         """
         sym = symmetry_distance(logits, logits_sym, self.metric, self.eps)
         return cls_loss + self.weight * sym, sym

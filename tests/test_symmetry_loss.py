@@ -14,20 +14,10 @@ from tests.conftest import FOUR_MOMENTUM, jets
 def test_the_partner_batch_keeps_the_constituent_grid() -> None:
     batch = jets(16)
     for group in ("so2", "so3", "lorentz", "lorentz_iso"):
-        partner, keep_mask = build_symmetric_batch(batch, group, FOUR_MOMENTUM)
+        partner = build_symmetric_batch(batch, group, FOUR_MOMENTUM)
 
         assert partner.shape == batch.shape
         assert partner.dtype == batch.dtype
-        # The SO(3) acceptance filter is opt-in, so by default no group drops a jet.
-        assert keep_mask is None
-
-
-def test_the_so3_mask_says_which_logits_the_partner_can_be_compared_with() -> None:
-    batch = jets(32)
-    filtered, keep_mask = build_symmetric_batch(batch, "so3", FOUR_MOMENTUM, so3_apply_filter=True)
-
-    assert keep_mask.shape == (32,)
-    assert filtered.shape[0] == int(keep_mask.sum())
 
 
 def test_the_distance_vanishes_when_the_logits_agree_and_enters_the_total_weighted() -> None:

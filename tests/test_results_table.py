@@ -190,14 +190,18 @@ def test_a_baseline_row_carries_no_comparison_of_its_own(tmp_path: Path) -> None
     assert row["delta_flip_significant_boot_005"] == "no"
 
 
-def test_the_regime_and_the_feature_list_name_the_table(tmp_path: Path) -> None:
+def test_the_regime_and_the_feature_list_or_the_subdir_name_the_table(tmp_path: Path) -> None:
     features = ["px", "py", "pz", "e"]
     baseline = _callback(tmp_path, augmentation_scheme="none", features=features)
     scl = _callback(tmp_path, method="symm_loss", augmentation_scheme="so3", features=features)
+    embedded = _callback(
+        tmp_path, augmentation_scheme="none", features=features, subdir="embedded"
+    )
 
     assert baseline.display_method == "baseline"
     assert baseline.output_path == tmp_path / "px_py_pz_e" / "results_table_baseline.csv"
     assert scl.output_path == tmp_path / "px_py_pz_e" / "results_table_symm_loss.csv"
+    assert embedded.output_path == tmp_path / "embedded" / "results_table_baseline.csv"
     # Nothing is created before a row is written, so a search leaves results/ untouched.
     assert not (tmp_path / "px_py_pz_e").exists()
 

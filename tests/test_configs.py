@@ -58,6 +58,7 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     assert module.hparams.name == model
     assert module.hparams.nconstituents == int(nconstituents)
     assert module.flops_total > 0
+    assert cfg.callbacks.results_table.subdir == ("embedded" if model == "lorentznet" else None)
 
 
 @pytest.mark.parametrize("search", SEARCHES)

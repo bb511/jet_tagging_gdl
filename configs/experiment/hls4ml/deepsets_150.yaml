@@ -17,6 +17,9 @@ data:
   nconstituents: 150
   batch_size: 2048
   n_folds: 5
+  # The online transform of a 2048 x 150 batch takes 16 single-threaded workers to keep up with
+  # the step (4 leave the GPU waiting 20 ms a batch); a job pinned with taskset needs as many CPUs.
+  num_workers: 16
 
 # From the earlier study's 32-constituent search: a starting point, not tuned at this count.
 algorithm:

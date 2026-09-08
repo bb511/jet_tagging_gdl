@@ -69,6 +69,33 @@ class _Predictions:
         return torch.cat(self.labels).numpy(), probs, probs.argmax(axis=1)
 
 
+def _scores(
+    predictions: _Predictions, split: str
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """The true classes, the probabilities and the predictions, None when nothing is plottable.
+
+    A pass that collected nothing, and one whose scores hold NaN because the run diverged, both
+    leave the figures undrawn rather than writing an empty or a blank one.
+    """
+    if not predictions.logits:
+        log.warning(f"No {split} predictions were collected, so those plots are skipped.")
+        return None
+    labels, probs, preds = predictions.as_arrays()
+    if np.isnan(probs).any():
+        log.warning(f"The {split} scores hold NaN, so the run diverged; plots skipped.")
+        return None
+    return labels, probs, preds
+
+
+def _log_artifacts(trainer: Trainer, paths: list[Path]) -> None:
+    """Copy the figures into the MLflow run, when one of the loggers is MLflow."""
+    for logger in trainer.loggers:
+        if not isinstance(logger, MLFlowLogger):
+            continue
+        for path in paths:
+            logger.experiment.log_artifact(logger.run_id, str(path), artifact_path="plots")
+
+
 class PlottingCallback(Callback):
     """Write the diagnostic plots of a run under ``<default_root_dir>/plots``.
 
@@ -138,7 +165,7 @@ class PlottingCallback(Callback):
             log.warning("No epoch metrics were collected, so no training curves are drawn.")
         else:
             path = curves.plot(self._history, self._save_dir(trainer))
-            self._log_artifacts(trainer, [path])
+            _log_artifacts(trainer, [path])
         self._draw_classification(trainer, self._val, "val")
 
     def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
@@ -167,29 +194,11 @@ class PlottingCallback(Callback):
         plots = Path(trainer.default_root_dir) / "plots"
         return plots if self.subdir is None else plots / self.subdir
 
-    @staticmethod
-    def _scores(
-        predictions: _Predictions, split: str
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-        """The true classes, the probabilities and the predictions, None when nothing is plottable.
-
-        A pass that collected nothing, and one whose scores hold NaN because the run diverged, both
-        leave the figures undrawn rather than writing an empty or a blank one.
-        """
-        if not predictions.logits:
-            log.warning(f"No {split} predictions were collected, so those plots are skipped.")
-            return None
-        labels, probs, preds = predictions.as_arrays()
-        if np.isnan(probs).any():
-            log.warning(f"The {split} scores hold NaN, so the run diverged; plots skipped.")
-            return None
-        return labels, probs, preds
-
     def _draw_classification(
         self, trainer: Trainer, predictions: _Predictions, split: str
     ) -> None:
         """Draw the ROC curves and the confusion matrix of one split, if it has scores."""
-        scores = self._scores(predictions, split)
+        scores = _scores(predictions, split)
         if scores is None:
             return
         labels, probs, preds = scores
@@ -198,13 +207,4 @@ class PlottingCallback(Callback):
             roc.plot(labels, probs, self.class_names, save_dir, split),
             confusion.plot(labels, preds, self.class_names, save_dir, split),
         ]
-        self._log_artifacts(trainer, paths)
-
-    @staticmethod
-    def _log_artifacts(trainer: Trainer, paths: list[Path]) -> None:
-        """Copy the figures into the MLflow run, when one of the loggers is MLflow."""
-        for logger in trainer.loggers:
-            if not isinstance(logger, MLFlowLogger):
-                continue
-            for path in paths:
-                logger.experiment.log_artifact(logger.run_id, str(path), artifact_path="plots")
+        _log_artifacts(trainer, paths)

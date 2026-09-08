@@ -12,7 +12,7 @@ method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 symm_loss_metric: l2
-lorentz_eta_max: ${data.lorentz_eta_max}
+transform_kwargs: ${data.transform_kwargs}
 
 embed_dim: 64
 num_heads: 2

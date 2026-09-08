@@ -7,6 +7,7 @@ from hydra import initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 
 from src.data import hls4ml_datamodule as datamodule_module
+from src.data.components.dataset import HLS4MLDataset
 from src.data.hls4ml_datamodule import HLS4MLDataModule, compose_record_config
 from tests.conftest import RECORD_COLUMNS, ROOT, labels
 
@@ -67,7 +68,6 @@ def record(monkeypatch, tmp_path: Path) -> FakeRecord:
 
 def _datamodule(**overrides) -> HLS4MLDataModule:
     defaults = {
-        "repo_id": "stand-in/record",
         "cache_dir": "/nowhere/hf",
         "nconstituents": NCONSTITUENTS,
         "batch_size": 8,
@@ -175,11 +175,7 @@ def test_the_folds_pool_the_two_splits_and_a_fold_is_selected_within_range(
     assert single.fold_idx == 0
 
 
-def test_the_record_is_told_the_cache_and_the_constituent_count(
-    record: FakeRecord, tmp_path: Path
-) -> None:
-    mirror = tmp_path / "mirror"
-    mirror.mkdir()
+def test_the_record_is_told_the_cache_and_the_constituent_count(record: FakeRecord) -> None:
     datamodule = _datamodule(nconstituents=150, cache_dir="/scratch/hf")
     datamodule._ensure_record()
 
@@ -188,8 +184,6 @@ def test_the_record_is_told_the_cache_and_the_constituent_count(
     assert datamodule.feature_names == RECORD_COLUMNS
     # Spelled 0: a Hydra override cannot carry None through as an int.
     assert "data.nconstituents=0" in _datamodule(nconstituents=0)._record_overrides("/root")
-    # A mirror is checked from disk before it is uploaded, so no hub call is made.
-    assert _datamodule(repo_id=str(mirror))._record_root() == str(mirror.resolve())
 
 
 def test_composing_the_record_leaves_the_running_hydra_alone(tmp_path: Path) -> None:
@@ -203,3 +197,17 @@ def test_composing_the_record_leaves_the_running_hydra_alone(tmp_path: Path) -> 
 
         assert composed.data.nconstituents == 150
         assert GlobalHydra.instance().hydra is outer
+
+
+def test_persistent_workers_reshuffle_every_epoch_and_cover_every_jet_once() -> None:
+    # A worker forked afresh each epoch would draw from the shuffler's untouched state and replay
+    # the first permutation; persistence lets its copy advance as the driver's own would.
+    x = torch.arange(40.0).view(40, 1, 1)
+    shuffler = torch.Generator().manual_seed(0)
+    dataset = HLS4MLDataset(x, labels(40), batch_size=10, shuffler=shuffler)
+    loader = _datamodule(num_workers=2)._make_dataloader(dataset)
+
+    epochs = [[int(batch_x[0, 0, 0]) for batch_x, _ in loader] for _ in range(3)]
+
+    assert len({tuple(epoch) for epoch in epochs}) == 3
+    assert sorted(int(v) for batch_x, _ in loader for v in batch_x[:, 0, 0]) == list(range(40))

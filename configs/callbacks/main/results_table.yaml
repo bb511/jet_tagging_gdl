@@ -9,5 +9,6 @@ model_name: ${algorithm.name}
 augmentation_scheme: ${data.augmentation_scheme}
 nconstituents: ${data.nconstituents}
 features: ${data.features}
+subdir: null # replaces the <features>/ directory; the embedded class sets embedded
 selected_metric_mode: scheme # scheme: judge the run on the group it was trained on | mean_all
 invariance_metric: wasserstein # the family filling the selected and per-group columns

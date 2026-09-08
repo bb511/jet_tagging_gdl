@@ -105,6 +105,10 @@ load_env() {
         . ./.env
         set +a
     fi
+    # The loader runs inside the driver and its CPU work is small, so torch's default of one
+    # thread per core would only make the drivers sharing a machine contend; .env or the caller
+    # may still choose the count.
+    export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 }
 
 # Without HF_HUB_CACHE the 3.1 GB record snapshot is downloaded again into the

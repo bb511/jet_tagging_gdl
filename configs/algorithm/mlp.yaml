@@ -12,7 +12,7 @@ method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 symm_loss_metric: l2
-lorentz_eta_max: ${data.lorentz_eta_max}
+transform_kwargs: ${data.transform_kwargs}
 
 # The flattened (N x F) input grows with N (64 columns at N=16, 600 at N=150); these widths do not.
 hidden_layers: [128, 64, 32]

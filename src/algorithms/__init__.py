@@ -71,7 +71,7 @@ class JetTaggingModule(LightningModule):
         group: str = "none",
         symm_loss_weight: float = 0.1,
         symm_loss_metric: str = "l2",
-        lorentz_eta_max: float = 1.0,
+        transform_kwargs: dict[str, float | bool] | None = None,
         optimizer: Callable | None = None,
         scheduler: dict | None = None,
         compile: bool = False,
@@ -83,8 +83,9 @@ class JetTaggingModule(LightningModule):
         :param group: symmetry group of the SCL, read only under ``method="symm_loss"``.
         :param symm_loss_metric: distance between the two logit sets; see
             :func:`~src.algorithms.losses.symmetry.symmetry_distance`.
-        :param lorentz_eta_max: half-width of the rapidity range of the SCL boosts, along the
-            beam under ``lorentz``, in a random direction under ``lorentz_iso``.
+        :param transform_kwargs: the knobs of
+            :func:`~src.data.components.augmentation.make_transform` the SCL draws its transforms
+            with, shared with the datamodule and the invariance probe.
         :param optimizer: Hydra ``_partial_`` optimiser, called with ``params``.
         :param scheduler: Lightning scheduler dict whose ``scheduler`` entry is a Hydra
             ``_partial_``; ``None`` trains at a fixed learning rate.
@@ -94,7 +95,8 @@ class JetTaggingModule(LightningModule):
         # Optimiser and scheduler partials out of hparams, so a checkpoint holds plain
         # containers and loads without add_safe_globals.
         self.save_hyperparameters(logger=False, ignore=["optimizer", "scheduler"])
-        self._validate(method, group)
+        _validate(method, group)
+        self.transform_kwargs = dict(transform_kwargs or {})
 
         self._optimizer = optimizer
         self._scheduler = scheduler
@@ -105,13 +107,6 @@ class JetTaggingModule(LightningModule):
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
         # Counted here, not in a callback, so hparams carry the FLOP count from the first hook.
         record_flops(self, nconstituents, nbr_feats)
-
-    @staticmethod
-    def _validate(method: str, group: str) -> None:
-        """Reject an unknown training method, and an SCL run whose group names no transform."""
-        if method not in SUPPORTED_METHODS:
-            raise ValueError(f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}.")
-        validate_symmetry_group(method, group)
 
     def _build_metrics(self, output_dim: int, method: str) -> None:
         """Register the metric objects; the SCL trackers exist only under ``symm_loss``."""
@@ -170,19 +165,10 @@ class JetTaggingModule(LightningModule):
         self, x: torch.Tensor, logits: torch.Tensor, cls_loss: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Add the SCL term, comparing the logits on *x* with those on a random T(x)."""
-        x_sym, keep_mask = self._partner_batch(x)
-        if keep_mask is not None and not bool(keep_mask.any()):
-            # The SO(3) filter, when it is on, rejected every jet: a mean over the empty batch
-            # would be NaN, so this batch contributes cross-entropy alone.
-            return cls_loss, cls_loss.new_zeros(())
+        return self.symm_loss(cls_loss, logits, self(self._partner_batch(x)))
 
-        # With the SO(3) filter on, jets rotated out of acceptance are dropped, so only the
-        # survivors' logits can be paired with the partner batch.
-        kept = logits if keep_mask is None else logits[keep_mask]
-        return self.symm_loss(cls_loss, kept, self(x_sym))
-
-    def _partner_batch(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """Draw one transformation per jet and return ``(T(x), keep_mask)``.
+    def _partner_batch(self, x: torch.Tensor) -> torch.Tensor:
+        """Draw one transformation per jet and return ``T(x)``.
 
         :raises RuntimeError: when :meth:`setup` has not named the columns of *x*.
         """
@@ -191,9 +177,8 @@ class JetTaggingModule(LightningModule):
                 "feature_names is unset, so the columns of x cannot be named. Run under "
                 "a trainer whose datamodule setup() has resolved the feature layout."
             )
-        eta_max = self.hparams.lorentz_eta_max
         return build_symmetric_batch(
-            x, self.hparams.group, self.feature_names, self.norm_scales, lorentz_eta_max=eta_max
+            x, self.hparams.group, self.feature_names, self.norm_scales, **self.transform_kwargs
         )
 
     def on_train_start(self) -> None:
@@ -317,6 +302,13 @@ class JetTaggingModule(LightningModule):
             kwargs["T_max"] = int(self.trainer.estimated_stepping_batches)
         scheduler_cfg["scheduler"] = scheduler_fn(optimizer=optimizer, **kwargs)
         return scheduler_cfg
+
+
+def _validate(method: str, group: str) -> None:
+    """Reject an unknown training method, and an SCL run whose group names no transform."""
+    if method not in SUPPORTED_METHODS:
+        raise ValueError(f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}.")
+    validate_symmetry_group(method, group)
 
 
 def _build_symm_loss(method: str, weight: float, metric: str) -> SymmetryConsistencyLoss | None:

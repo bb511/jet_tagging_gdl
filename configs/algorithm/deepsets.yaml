@@ -13,7 +13,7 @@ method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 symm_loss_metric: l2
-lorentz_eta_max: ${data.lorentz_eta_max}
+transform_kwargs: ${data.transform_kwargs}
 
 phi_layers: [64, 64, 32]
 rho_layers: [32, 32, 16]

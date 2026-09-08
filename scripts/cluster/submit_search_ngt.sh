@@ -37,12 +37,20 @@
 #   --seed <s>      sampler seed of worker 0; worker j gets s+j. Required: it is
 #                   the one setting the workers must not share
 #   --tag <t>       names the logs and the sweep directories (default: hostname)
+#   --cpus <list>   the CPU ids the workers share, as ids and a-b ranges separated
+#                   by commas or spaces: --cpus "$(cpus)" on a pod, where 'cpus'
+#                   is an alias of the interactive shell that this script cannot
+#                   see. A 'cpus' executable on PATH is the default; with neither,
+#                   the workers run unpinned
 #   --dry-run       print each worker's command, launch nothing
 #
 # Anything after the catalogue file is appended to every worker as an override.
 #
 # A process tree started under 'kubectl exec' dies with the exec session, so each
-# worker is launched with setsid nohup and outlives the disconnection.
+# worker is launched with setsid nohup and outlives the disconnection. Each is
+# pinned with taskset to its own contiguous share of the pod's CPUs: the pods'
+# cpusets are neither 0-based nor contiguous, so the ids are handed over
+# explicitly, where a naive 'taskset -c 0-2' dies with "failed to set affinity".
 set -eu
 
 # shellcheck source=scripts/cluster/lib.sh
@@ -57,6 +65,7 @@ workers=""
 trials=""
 seed=""
 tag=""
+cpus=""
 dry=0
 
 while [ $# -gt 0 ]; do
@@ -67,6 +76,7 @@ while [ $# -gt 0 ]; do
         --trials) trials="${2:?--trials needs a number}"; shift 2 ;;
         --seed) seed="${2:?--seed needs a number}"; shift 2 ;;
         --tag) tag="${2:?--tag needs a value}"; shift 2 ;;
+        --cpus) cpus="${2:?--cpus needs a list}"; shift 2 ;;
         --dry-run) dry=1; shift ;;
         --) shift; break ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -75,7 +85,7 @@ while [ $# -gt 0 ]; do
 done
 
 usage="usage: submit_search_ngt.sh --only <sel> --trials <T> --seed <s> [--gpus i,j]"
-usage="$usage [--workers k] [--tag t] [--dry-run] <run*_search.sh> [overrides...]"
+usage="$usage [--workers k] [--tag t] [--cpus list] [--dry-run] <run*_search.sh> [overrides...]"
 file=${1:?$usage}
 shift || true
 
@@ -120,6 +130,32 @@ fi
 
 n_devices=${#chosen[@]}
 [ -n "$workers" ] || workers=$n_devices
+
+# One id per line from a list of ids and a-b ranges, refusing anything else, so
+# a 'cpus' that prints something unexpected stops the launch rather than pinning
+# every worker to CPU 0.
+cpu_ids() {
+    local item start end c
+    for item in $(printf '%s' "$1" | tr ',' ' '); do
+        case "$item" in
+            *-*-* | -* | *- | *[!0-9-]*) echo "bad CPU id '$item' in: $1" >&2; return 1 ;;
+            *-*) start=${item%%-*}; end=${item##*-}
+                 for ((c = start; c <= end; c++)); do echo "$c"; done ;;
+            *) echo "$item" ;;
+        esac
+    done
+}
+
+if [ -z "$cpus" ] && command -v cpus >/dev/null 2>&1; then cpus=$(cpus); fi
+declare -a ids=()
+if [ -n "$cpus" ]; then
+    # Through a substitution rather than straight into mapfile, whose status ignores the producer's.
+    id_lines=$(cpu_ids "$cpus") || exit 2
+    mapfile -t ids <<< "$id_lines"
+    [ "${#ids[@]}" -gt 0 ] || exit 2
+else
+    echo "note: no --cpus and no 'cpus' command, so the workers are not pinned" >&2
+fi
 if [ "$workers" -lt 1 ]; then echo "--workers must be at least 1" >&2; exit 2; fi
 if [ "$workers" -gt "$trials" ]; then
     echo "--workers $workers exceeds --trials $trials: a worker without a trial exits at once" >&2
@@ -136,6 +172,25 @@ trials_of() {
 split=""
 for j in $(seq 0 $((workers - 1))); do split="${split:+$split/}$(trials_of "$j")"; done
 
+# Worker j's contiguous share of the CPU ids, shared out like the trials; empty
+# when nothing is pinned.
+n_ids=${#ids[@]}
+if [ "$n_ids" -gt 0 ] && [ "$n_ids" -lt "$workers" ]; then
+    echo "--workers $workers exceeds the $n_ids CPU id(s) given, one per worker at least" >&2
+    exit 2
+fi
+pin_of() {
+    [ "$n_ids" -gt 0 ] || return 0
+    local per=$((n_ids / workers)) rem=$((n_ids % workers)) first count
+    if [ "$1" -lt "$rem" ]; then
+        first=$(($1 * (per + 1))); count=$((per + 1))
+    else
+        first=$((rem * (per + 1) + ($1 - rem) * per)); count=$per
+    fi
+    local IFS=','
+    printf 'taskset -c %s ' "${ids[*]:$first:$count}"
+}
+
 logdir="logs/searches/ngt"
 [ "$dry" -eq 1 ] || mkdir -p "$logdir"
 
@@ -150,13 +205,15 @@ for j in $(seq 0 $((workers - 1))); do
     worker=(scripts/cluster/submit_search.sh --only "$only" --tag "$worker_tag" "$file" "$@"
         "hydra.sweeper.n_trials=$(trials_of "$j")" "hydra.sweeper.sampler.seed=$((seed + j))")
 
-    printf 'CUDA_VISIBLE_DEVICES=%s setsid nohup bash %s > %s 2>&1 &\n' \
-        "$device" "${worker[*]}" "$log"
+    pin=$(pin_of "$j")
+    printf 'CUDA_VISIBLE_DEVICES=%s %ssetsid nohup bash %s > %s 2>&1 &\n' \
+        "$device" "$pin" "${worker[*]}" "$log"
     if [ "$dry" -eq 1 ]; then
         CUDA_VISIBLE_DEVICES="$device" bash "${worker[0]}" --dry-run "${worker[@]:1}"
         continue
     fi
-    CUDA_VISIBLE_DEVICES="$device" setsid nohup bash "${worker[@]}" > "$log" 2>&1 &
+    # shellcheck disable=SC2086  # $pin is 'taskset -c <ids>' or nothing, split on purpose
+    CUDA_VISIBLE_DEVICES="$device" $pin setsid nohup bash "${worker[@]}" > "$log" 2>&1 &
     sleep "$STAGGER_SECONDS"
 done
 

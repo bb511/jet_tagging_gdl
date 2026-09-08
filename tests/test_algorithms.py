@@ -37,7 +37,7 @@ def _algorithm(
                 "nconstituents": nconstituents,
                 "method": method,
                 "augmentation_scheme": group,
-                "lorentz_eta_max": 2.0,
+                "transform_kwargs": {"lorentz_eta_max": 2.0},
                 "features": FOUR_MOMENTUM,
             }
         }

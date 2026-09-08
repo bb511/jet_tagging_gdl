@@ -19,19 +19,6 @@ from src.data.components.augmentation import (
 from tests.conftest import FOUR_MOMENTUM, RECORD_COLUMNS, jets
 
 
-def _collimated_jets(n_jets: int = 64, seed: int = 0) -> torch.Tensor:
-    # Narrow jets of about 200 GeV at the record's full width. The SO(3) acceptance cuts are on
-    # the spread about the jet axis, so an isotropic spray says nothing about the filter.
-    generator = torch.Generator().manual_seed(seed)
-    axis = torch.randn(n_jets, 1, 3, generator=generator)
-    axis = axis / axis.norm(dim=-1, keepdim=True) * 200.0
-    momenta = axis / 5.0 + torch.randn(n_jets, 5, 3, generator=generator) * 2.0
-    batch = torch.zeros(n_jets, 8, len(RECORD_COLUMNS))
-    batch[:, :5, :3] = momenta
-    batch[:, :5, 3] = momenta.norm(dim=-1)
-    return batch
-
-
 def _mass_squared(batch: torch.Tensor) -> torch.Tensor:
     return batch[..., 3] ** 2 - (batch[..., :3] ** 2).sum(-1)
 
@@ -53,28 +40,14 @@ def test_an_so2_rotation_turns_the_jet_about_the_beam() -> None:
 
 def test_an_so3_rotation_leaves_the_momentum_magnitude_alone() -> None:
     batch = jets()
-    rotated, _, keep_mask = apply_random_so3(batch, FOUR_MOMENTUM, apply_filter=False)
+    rotated, _ = apply_random_so3(batch, FOUR_MOMENTUM)
     matrices = sample_haar_so3_rot_matrices(64)
 
-    before = batch[..., :3].norm(dim=-1)[keep_mask]
+    before = batch[..., :3].norm(dim=-1)
 
     assert torch.allclose(before, rotated[..., :3].norm(dim=-1), atol=1e-3)
     assert torch.allclose(torch.linalg.det(matrices), torch.ones(64), atol=1e-5)
     assert torch.allclose(matrices @ matrices.transpose(1, 2), torch.eye(3), atol=1e-5)
-
-
-def test_the_so3_filter_drops_the_rejected_jets_rather_than_reverting_them() -> None:
-    batch = _collimated_jets(64)
-    torch.manual_seed(0)
-    rotated, _, keep_mask = apply_random_so3(batch, RECORD_COLUMNS, apply_filter=True)
-    rejected = int((~keep_mask).sum())
-
-    # The labels are subset with the mask, so it is indexed by the jets going in.
-    assert keep_mask.shape == (64,) and keep_mask.dtype == torch.bool
-    assert 0 < rejected < 64, "the acceptance cuts left nothing to check"
-    assert rotated.shape[0] == 64 - rejected
-    # Reverting a rejected jet would make T(x) == x and deflate every metric.
-    assert not torch.allclose(batch[keep_mask][..., :3], rotated[..., :3])
 
 
 def test_a_beam_boost_shifts_eta_rigidly_and_leaves_pt_and_phi_alone() -> None:
@@ -125,18 +98,7 @@ def test_a_column_is_found_by_either_name_and_scaled_by_its_own_factor() -> None
 def test_the_factory_builds_one_transform_per_group_and_refuses_none() -> None:
     batch = jets()
     for scheme in ("so2", "so3", "lorentz", "lorentz_iso"):
-        transformed, keep_mask = make_transform(scheme, FOUR_MOMENTUM)(batch)
-
-        assert transformed.shape == batch.shape
-        # The SO(3) acceptance filter is opt-in, so by default no scheme drops a jet.
-        assert keep_mask is None
-
-    torch.manual_seed(0)
-    filtered, keep_mask = make_transform("so3", RECORD_COLUMNS, so3_apply_filter=True)(
-        _collimated_jets(64)
-    )
-
-    assert keep_mask is not None and filtered.shape[0] == int(keep_mask.sum())
+        assert make_transform(scheme, FOUR_MOMENTUM)(batch).shape == batch.shape
 
     # 'none' is a legitimate value of data.augmentation_scheme, but not a transform.
     with pytest.raises(ValueError, match="lorentz_iso"):

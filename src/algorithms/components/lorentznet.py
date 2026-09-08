@@ -61,6 +61,17 @@ def unsorted_segment_mean(
     return result / count.clamp(min=1)
 
 
+def _build_phi_x(n_hidden: int) -> nn.Sequential:
+    """Return the network weighting each coordinate step, initialised near zero.
+
+    The last-layer gain of 0.001 is the reference implementation's: the coordinate update feeds
+    the next block's invariants, and full-gain initial steps stall training.
+    """
+    last = nn.Linear(n_hidden, 1, bias=False)
+    nn.init.xavier_uniform_(last.weight, gain=0.001)
+    return nn.Sequential(nn.Linear(n_hidden, n_hidden), nn.ReLU(), last)
+
+
 class LGEB(nn.Module):
     """Lorentz Group Equivariant Block: one round of message passing.
 
@@ -95,18 +106,7 @@ class LGEB(nn.Module):
             nn.ReLU(),
             nn.Linear(n_hidden, n_output),
         )
-        self.phi_x = None if last_layer else self._build_phi_x(n_hidden)
-
-    @staticmethod
-    def _build_phi_x(n_hidden: int) -> nn.Sequential:
-        """Return the network weighting each coordinate step, initialised near zero.
-
-        The last-layer gain of 0.001 is the reference implementation's: the coordinate update feeds
-        the next block's invariants, and full-gain initial steps stall training.
-        """
-        last = nn.Linear(n_hidden, 1, bias=False)
-        nn.init.xavier_uniform_(last.weight, gain=0.001)
-        return nn.Sequential(nn.Linear(n_hidden, n_hidden), nn.ReLU(), last)
+        self.phi_x = None if last_layer else _build_phi_x(n_hidden)
 
     def forward(
         self,

@@ -33,3 +33,8 @@ trainer:
 # lose mantissa. Set per experiment so searches, trainings and evaluations agree; a no-op on a V100.
 extras:
   matmul_precision: high
+
+# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
+callbacks:
+  results_table:
+    subdir: embedded

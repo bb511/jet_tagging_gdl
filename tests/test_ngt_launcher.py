@@ -68,6 +68,22 @@ def test_the_pool_shares_out_the_devices_the_budget_and_the_seeds() -> None:
     ]
     assert all("trainer.max_epochs=3" in line for line in lines)
     assert all(_value(line, "--only") == "nconst150" for line in lines)
+    # Off the pod there is no cpus command, so nothing is pinned.
+    assert not any("taskset" in line for line in lines)
+
+
+def test_the_workers_are_pinned_to_contiguous_shares_of_the_given_cpus() -> None:
+    # Five ids, given as the pods print them, over four workers: the first worker takes the odd one.
+    result = _launch("--dry-run", *POOL, "--cpus", "64-66, 96,97", CATALOGUE, devices=SLICES)
+    assert result.returncode == 0, result.stderr
+    lines = _worker_lines(result.stdout)
+
+    assert [line.split()[1:4] for line in lines] == [
+        ["taskset", "-c", "64,65"],
+        ["taskset", "-c", "66"],
+        ["taskset", "-c", "96"],
+        ["taskset", "-c", "97"],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -87,6 +103,14 @@ def test_the_pool_shares_out_the_devices_the_budget_and_the_seeds() -> None:
         pytest.param(
             ("--only", "nconst150", "--trials", "10", "--seed", "7", "--gpus", "0,3"),
             id="device past the list",
+        ),
+        pytest.param(
+            ("--only", "nconst150", "--trials", "10", "--seed", "7", "--cpus", "64-66,all"),
+            id="cpu list that is not ids",
+        ),
+        pytest.param(
+            ("--only", "nconst150", "--trials", "10", "--seed", "7", "--cpus", "64,65"),
+            id="fewer cpus than workers",
         ),
     ],
 )

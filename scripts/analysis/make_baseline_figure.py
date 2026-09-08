@@ -15,11 +15,9 @@ SO(2), SO(3) and Lorentz bars, and measures the model against its own clean pred
 Lower is better in the last two rows, unlike the delta figures where positive is always better.
 
 Reads results_table_*.csv files, keeps the augmentation_scheme=none rows and writes
-<out-dir>/<name>.svg::
+<out-dir>/<name>.svg, by default fig_baseline.svg beside the first table::
 
-    python3 scripts/analysis/make_baseline_figure.py \
-        results/lorentz_net_clamp/nconst*/final_5fold/results_table_baseline.csv \
-        --out-dir results/lorentz_net_clamp --name fig_lorentznet_5fold
+    python3 scripts/analysis/make_baseline_figure.py results/embedded/results_table_baseline.csv
 """
 
 from __future__ import annotations

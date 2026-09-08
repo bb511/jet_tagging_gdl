@@ -1,12 +1,13 @@
 """Append the summary row of a run to the results table of its regime.
 
 One row per run rather than per fold: the callback stays attached across the k folds and writes the
-row once the last fold has been tested. Tables are split by the input feature list and by the
-regime, so ``results/px_py_pz_e/results_table_symm_loss.csv`` holds every symmetry-consistency run
-on the four-momentum features, whatever the architecture or the constituent count. Most quantities
-occupy four columns (the mean over the folds, its standard deviation, the two joined as ``mean +/-
-std``, and the fold values joined by ';'), in the column order the tables already on disk carry, so
-a new row can be appended to them.
+row once the last fold has been tested. Tables are split by the regime and by the input feature
+list, so ``results/px_py_pz_e/results_table_symm_loss.csv`` holds every symmetry-consistency run on
+the four-momentum features, whatever the architecture or the constituent count. The embedded class
+sets ``subdir`` to ``embedded`` instead: its inputs are fixed by the architecture, so a feature
+directory would separate nothing. Most quantities occupy four columns (the mean over the folds, its
+standard deviation, the two joined as ``mean +/- std``, and the fold values joined by ';'), in the
+column order the tables already on disk carry, so a new row can be appended to them.
 
 A run evaluated against a baseline (``eval.baseline_checkpoint_manifest_path``) carries the
 baseline's own accuracy as well, and one eight-column family per delta the invariance probe logged:
@@ -58,12 +59,12 @@ def _display_regime(method: str, augmentation_scheme: str) -> str:
     return method
 
 
-def _table_path(base: Path, features_label: str | None, display_method: str) -> Path:
-    """Weave the feature list and the regime into the table name.
+def _table_path(base: Path, subdir: str | None, display_method: str) -> Path:
+    """Weave the subdirectory and the regime into the table name.
 
     ``results/results_table.csv`` becomes ``results/px_py_pz_e/results_table_baseline.csv``.
     """
-    directory = base.parent / features_label if features_label else base.parent
+    directory = base.parent / subdir if subdir else base.parent
     return directory / f"{base.stem}_{display_method}{base.suffix}"
 
 
@@ -84,14 +85,53 @@ def _check_header(path: Path, fieldnames: list[str]) -> None:
     )
 
 
+def _to_float(value) -> float:
+    """Read a metric out of Lightning's dicts, whether it is a tensor or a number."""
+    if value is None:
+        return float("nan")
+    if hasattr(value, "item"):
+        return float(value.item())
+    return float(value)
+
+
+def _safe_mean(values: Sequence[float]) -> float:
+    """Mean over the folds that reported the metric; NaN when none did."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[~np.isnan(finite)]
+    return float(finite.mean()) if finite.size else float("nan")
+
+
+def _safe_std(values: Sequence[float]) -> float:
+    """Sample standard deviation over the folds; zero for a single fold, NaN for none."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[~np.isnan(finite)]
+    if finite.size == 0:
+        return float("nan")
+    return float(finite.std(ddof=1)) if finite.size > 1 else 0.0
+
+
+def _format_pm(mean_val: float, std_val: float) -> str:
+    """Render a mean and its spread as one cell for a paper table."""
+    if math.isnan(mean_val):
+        return "nan"
+    return f"{mean_val:.4f} +/- {std_val:.4f}"
+
+
+def _flops(pl_module: LightningModule) -> float:
+    """The forward FLOP count ``record_flops`` left on the algorithm."""
+    return _to_float(getattr(pl_module, "flops_total", float("nan")))
+
+
 class ResultsTableCallback(Callback):
     """Aggregate the folds of one run into a single row of the results table.
 
     :param output_path: base name of the table; :func:`_table_path` weaves the regime and the
-        feature list into it.
+        subdirectory into it.
     :param n_folds: folds to wait for before the row is written.
     :param model_name: short architecture label, ``algorithm.name``.
-    :param features: the input feature list, which names the subdirectory.
+    :param features: the input feature list, which names the subdirectory unless ``subdir`` does.
+    :param subdir: directory under the table's parent in place of the feature list; the embedded
+        class passes ``embedded``.
     :param selected_metric_mode: with ``scheme`` the run is judged on the group it was trained on,
         and on the mean over the three groups when it was trained on none; ``mean_all`` always
         reports that mean.
@@ -112,6 +152,7 @@ class ResultsTableCallback(Callback):
         augmentation_scheme: str = "none",
         nconstituents: int = 0,
         features: Sequence[str] | None = None,
+        subdir: str | None = None,
         selected_metric_mode: str = "scheme",
         invariance_metric: str = "wasserstein",
     ) -> None:
@@ -122,15 +163,17 @@ class ResultsTableCallback(Callback):
         self.augmentation_scheme = str(augmentation_scheme).lower()
         self.nconstituents = int(nconstituents)
         self.selected_metric_mode = selected_metric_mode
-        self._resolve_output(output_path, features)
+        self._resolve_output(output_path, features, subdir)
         self._resolve_keys(invariance_metric)
         self._reset_folds()
 
-    def _resolve_output(self, output_path: str, features: Sequence[str] | None) -> None:
-        """Name the table this run appends to, from its regime and its feature list."""
+    def _resolve_output(
+        self, output_path: str, features: Sequence[str] | None, subdir: str | None
+    ) -> None:
+        """Name the table this run appends to, from its regime and its subdirectory."""
         self.display_method = _display_regime(self.run_method_raw, self.augmentation_scheme)
-        self.features_label = "_".join(str(f) for f in features) if features else None
-        self.output_path = _table_path(Path(output_path), self.features_label, self.display_method)
+        label = subdir or ("_".join(str(f) for f in features) if features else None)
+        self.output_path = _table_path(Path(output_path), label, self.display_method)
 
     def _resolve_keys(self, invariance_metric: str) -> None:
         """The ``trainer.callback_metrics`` keys the columns of a fold are read from."""
@@ -149,45 +192,13 @@ class ResultsTableCallback(Callback):
         self._fold_delta_test_acc: list[float] = []
         self._summary_written = False
 
-    @staticmethod
-    def _to_float(value) -> float:
-        """Read a metric out of Lightning's dicts, whether it is a tensor or a number."""
-        if value is None:
-            return float("nan")
-        if hasattr(value, "item"):
-            return float(value.item())
-        return float(value)
-
-    @staticmethod
-    def _safe_mean(values: Sequence[float]) -> float:
-        """Mean over the folds that reported the metric; NaN when none did."""
-        finite = np.asarray(values, dtype=float)
-        finite = finite[~np.isnan(finite)]
-        return float(finite.mean()) if finite.size else float("nan")
-
-    @staticmethod
-    def _safe_std(values: Sequence[float]) -> float:
-        """Sample standard deviation over the folds; zero for a single fold, NaN for none."""
-        finite = np.asarray(values, dtype=float)
-        finite = finite[~np.isnan(finite)]
-        if finite.size == 0:
-            return float("nan")
-        return float(finite.std(ddof=1)) if finite.size > 1 else 0.0
-
-    @staticmethod
-    def _format_pm(mean_val: float, std_val: float) -> str:
-        """Render a mean and its spread as one cell for a paper table."""
-        if math.isnan(mean_val):
-            return "nan"
-        return f"{mean_val:.4f} +/- {std_val:.4f}"
-
     def _summary(self, prefix: str, values: Sequence[float]) -> dict[str, object]:
         """The three summary columns of one series: mean, standard deviation, both."""
-        mean, std = self._safe_mean(values), self._safe_std(values)
+        mean, std = _safe_mean(values), _safe_std(values)
         return {
             f"{prefix}_mean": round(mean, 6),
             f"{prefix}_std": round(std, 6),
-            f"{prefix}_pm": self._format_pm(mean, std),
+            f"{prefix}_pm": _format_pm(mean, std),
         }
 
     def _ci_columns(self, prefix: str, values: Sequence[float]) -> dict[str, object]:
@@ -215,7 +226,7 @@ class ResultsTableCallback(Callback):
     def _extract_invariance(self, metrics: dict[str, object]) -> dict[str, float]:
         """Pull this fold's invariance metrics out of ``trainer.callback_metrics``."""
         keys = self.INVARIANCE_KEYS + self._FLIP_BREAKDOWN_KEYS + self._DELTA_KEYS
-        return {key: self._to_float(metrics.get(key)) for key in keys}
+        return {key: _to_float(metrics.get(key)) for key in keys}
 
     def _group_series(
         self, inv_folds: list[dict[str, float]], suffix: str
@@ -238,14 +249,14 @@ class ResultsTableCallback(Callback):
             key = f"invariance/{self.augmentation_scheme}_{metric}"
             return key, inv.get(key, float("nan"))
         values = [inv.get(key, float("nan")) for key in self.INVARIANCE_KEYS]
-        return f"invariance/mean_{metric}", self._safe_mean(values)
+        return f"invariance/mean_{metric}", _safe_mean(values)
 
     def _selected_group_value(self, inv: dict[str, float], suffix: str) -> float:
         """As :meth:`_selected_metric_for_fold`, for a fixed suffix such as ``flip_recover``."""
         if self.selected_metric_mode == "scheme" and self.augmentation_scheme in GROUPS:
             return inv.get(f"invariance/{self.augmentation_scheme}_{suffix}", float("nan"))
         keys = [f"invariance/{group}_{suffix}" for group in GROUPS]
-        return self._safe_mean([inv.get(key, float("nan")) for key in keys])
+        return _safe_mean([inv.get(key, float("nan")) for key in keys])
 
     def _flip_columns(self, inv_folds: list[dict[str, float]]) -> dict[str, object]:
         """The flip breakdown of the group the run is judged on."""
@@ -311,7 +322,7 @@ class ResultsTableCallback(Callback):
         self, test_folds: list[float], selected: list[float], flops_folds: list[float]
     ) -> dict[str, object]:
         """The FLOP count and the per-fold values the tables carry last."""
-        flops = self._safe_mean(flops_folds)
+        flops = _safe_mean(flops_folds)
         return {
             "flops_mean": round(flops, 3) if not math.isnan(flops) else float("nan"),
             "test_acc_folds": _join(test_folds),
@@ -409,16 +420,11 @@ class ResultsTableCallback(Callback):
         self._summary_written = True
         self._log_row(row)
 
-    @staticmethod
-    def _flops(pl_module: LightningModule) -> float:
-        """The forward FLOP count ``record_flops`` left on the algorithm."""
-        return ResultsTableCallback._to_float(getattr(pl_module, "flops_total", float("nan")))
-
     def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Close one fold's training: the invariance metrics and the FLOPs are in."""
         inv = self._extract_invariance(trainer.callback_metrics)
         self._fold_invariance.append(inv)
-        self._fold_flops.append(self._flops(pl_module))
+        self._fold_flops.append(_flops(pl_module))
         key, value = self._selected_metric_for_fold(inv)
         log.info(
             f"Fold {len(self._fold_invariance)}/{self.n_folds} | {key}={value:.4f} | "
@@ -440,13 +446,13 @@ class ResultsTableCallback(Callback):
 
         :return: the number of folds recorded so far, this one included.
         """
-        self._fold_test_acc.append(self._to_float(metrics.get("test/acc")))
-        self._fold_baseline_test_acc.append(self._to_float(metrics.get("baseline/test_acc")))
-        self._fold_delta_test_acc.append(self._to_float(metrics.get("delta_test_acc")))
+        self._fold_test_acc.append(_to_float(metrics.get("test/acc")))
+        self._fold_baseline_test_acc.append(_to_float(metrics.get("baseline/test_acc")))
+        self._fold_delta_test_acc.append(_to_float(metrics.get("delta_test_acc")))
         fold = len(self._fold_test_acc)
         self._record_test_fold(metrics, fold)
         if len(self._fold_flops) < fold:
-            self._fold_flops.append(self._flops(pl_module))
+            self._fold_flops.append(_flops(pl_module))
         return fold
 
     def on_test_end(self, trainer: Trainer, pl_module: LightningModule) -> None:

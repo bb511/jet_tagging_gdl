@@ -65,8 +65,8 @@ def _flip_rates(counts: dict[str, int]) -> dict[str, float]:
 def _accuracy_transformed(counts: dict[str, int]) -> float:
     """Fraction of the transformed jets a model gets right, from its own transition counts.
 
-    Counted over the jets that survived the SO(3) filter, the same subset the transitions
-    themselves are counted on, so two models compared through it are compared on one population.
+    Both models see the same transformed batches, so two of them compared through it are compared
+    on one population.
     """
     survivors = counts["correct_before"] + counts["wrong_before"]
     correct_after = counts["stable"] + counts["recovered"]
@@ -147,28 +147,27 @@ class _Accumulator:
 class InvarianceMetricCallback(Callback):
     """Log ``invariance/*`` metrics for every symmetry group at the end of the test pass.
 
-    The metrics are the flip rate and its label-aware breakdown, the fraction of jets the SO(3)
-    acceptance filter rejects when that filter is switched on, and the Wasserstein-1 distance
+    The metrics are the flip rate and its label-aware breakdown, and the Wasserstein-1 distance
     between the original and transformed logit distributions, per class and averaged over classes.
     With a baseline attached the same metrics are reported for it under ``baseline/``, together
     with the ``delta_*`` differences.
 
-    :param lorentz_eta_max: half-width of the rapidity range the boosts are drawn from, along the
-        beam for ``lorentz`` and in a random direction for ``lorentz_iso``; it defines the probe,
-        so it is never tuned.
+    :param transform_kwargs: the knobs of :func:`~src.data.components.augmentation.make_transform`
+        the data pipeline used, so the probe measures the trained regime; they define the probe
+        and are never tuned.
     :param compute_wasserstein: keeps every test logit in host memory until the end of the pass.
     :param class_names: display names of the output classes, in column order.
     """
 
     def __init__(
         self,
-        lorentz_eta_max: float = 1.0,
+        transform_kwargs: dict[str, float | bool] | None = None,
         compute_wasserstein: bool = True,
         compute_flip_breakdown: bool = True,
         class_names: Sequence[str] = ("g", "q", "W", "Z", "t"),
     ) -> None:
         super().__init__()
-        self.lorentz_eta_max = lorentz_eta_max
+        self.transform_kwargs = dict(transform_kwargs or {})
         self.compute_wasserstein = compute_wasserstein
         self.compute_flip_breakdown = compute_flip_breakdown
         self.class_names = list(class_names)
@@ -289,24 +288,9 @@ class InvarianceMetricCallback(Callback):
     ) -> None:
         """Compare every model's logits on a batch with its logits on the batch's transform."""
         names = self._names_for(x.shape[-1])
-        x_sym, keep_mask = make_transform(group, names, self._norm_scales, self.lorentz_eta_max)(x)
-        if keep_mask is not None and not self._record_rejection(group, keep_mask):
-            return
-        # With the SO(3) filter on, the jets rotated out of acceptance are dropped, so only the
-        # survivors' logits can be paired with the transformed batch.
-        kept_targets = targets if keep_mask is None else targets[keep_mask]
+        x_sym = make_transform(group, names, self._norm_scales, **self.transform_kwargs)(x)
         for accumulator, module, clean in probes:
-            kept = clean if keep_mask is None else clean[keep_mask]
-            self._compare(accumulator, group, kept, module(x_sym), kept_targets)
-
-    def _record_rejection(self, group: str, keep_mask: torch.Tensor) -> bool:
-        """Record the SO(3) filter's rejection fraction, and say whether anything survived.
-
-        Nothing left means nothing to pair, and a mean over the empty tensor would enter the epoch
-        average as NaN.
-        """
-        self._record(f"{group}_reject_frac", 1.0 - keep_mask.float().mean().item())
-        return bool(keep_mask.any())
+            self._compare(accumulator, group, clean, module(x_sym), targets)
 
     def _compare(
         self,
