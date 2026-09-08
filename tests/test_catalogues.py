@@ -138,6 +138,9 @@ def test_folds_fan_a_block_out_into_a_main_run_and_one_process_per_fold() -> Non
     # The device counter runs on across blocks, so two blocks over two devices load them evenly.
     assert [_override(line, "trainer.devices") for line in lines] == ["[2]", "[3]"] * 3
     assert not any(_has_override(line, "CUDA_VISIBLE_DEVICES") for line in lines)
+    # The block's runner expands $parent off the main run's manifest, so the folds nest under it.
+    assert not any(_has_override(line, "parent_run_id") for line in lines[::3])
+    assert [_override(line, "parent_run_id") for line in lines[1:3]] == ["$parent"] * 2
 
 
 def test_a_uuid_device_is_pinned_through_the_environment() -> None:

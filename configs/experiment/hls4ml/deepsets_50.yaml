@@ -11,7 +11,6 @@ seed: 12345
 tags: ["hls4ml", "deepsets", "nconst-50"]
 
 experiment_name: hls4ml_deepsets_nconst50
-run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
   nconstituents: 50

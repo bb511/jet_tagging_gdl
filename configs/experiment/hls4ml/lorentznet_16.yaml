@@ -13,7 +13,6 @@ seed: 12345
 tags: ["hls4ml", "lorentznet", "nconst-16"]
 
 experiment_name: hls4ml_lorentznet_nconst16
-run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
   nconstituents: 16

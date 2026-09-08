@@ -109,6 +109,22 @@ def test_each_schedule_is_handed_what_lightning_cannot_infer() -> None:
     assert plateau["monitor"] == "val/acc"
 
 
+def test_deepsets_mean_pools_over_the_jets_own_constituents() -> None:
+    # The mean divides by the multiplicity, so a ninth all-zero slot changes nothing; a slot-count
+    # mean, as the reference implementation pooled, would scale every pooled vector by 8/9.
+    narrow = _algorithm("deepsets", nconstituents=8).eval()
+    wide = _algorithm("deepsets", nconstituents=9).eval()
+    wide.load_state_dict(narrow.state_dict(), strict=True)
+    assert narrow.net.aggregation == "mean"
+    batch = jets(4, 8, 6)
+
+    with torch.no_grad():
+        physical = narrow(batch)
+        padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
+
+    assert torch.allclose(physical, padded, atol=1e-6)
+
+
 def test_lorentznet_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:
     narrow = _algorithm("lorentznet", nconstituents=8).eval()
     wide = _algorithm("lorentznet", nconstituents=9).eval()

@@ -113,6 +113,9 @@ class _Accumulator:
     """
 
     prefix: str
+    n_jets: int = 0
+    # Per group, how many jets changed their predicted class under the transform.
+    flips: dict[str, int] = field(default_factory=dict)
     clean_logits: list[torch.Tensor] = field(default_factory=list)
     transformed_logits: dict[str, list[torch.Tensor]] = field(default_factory=dict)
     flip_counts: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -130,6 +133,11 @@ class _Accumulator:
             self.clean_correct = torch.zeros_like(total)
         self.clean_total += total
         self.clean_correct += correct
+        self.n_jets += targets.numel()
+
+    def flip_rates(self) -> dict[str, float]:
+        """The fraction of the jets whose predicted class each group's transform changed."""
+        return {f"{self.prefix}/{group}_flip": n / self.n_jets for group, n in self.flips.items()}
 
     def clean_accuracy(self) -> float:
         """Accuracy on the untransformed test set, NaN before any batch has been seen.
@@ -180,7 +188,6 @@ class InvarianceMetricCallback(Callback):
         self._model_feature_names: list[str] | None = None
         self._full_feature_names: list[str] | None = None
         self._norm_scales: dict[str, float] | None = None
-        self._batch_metrics: dict[str, list[float]] = {}
         self._own = _Accumulator("invariance")
         self._baseline = _Accumulator("baseline")
 
@@ -249,24 +256,22 @@ class InvarianceMetricCallback(Callback):
             return
         x, y = batch  # x: (jets, constituents, features), normalised, on the module's device
         targets = y.argmax(dim=1) if y.ndim > 1 and y.shape[1] > 1 else y
-        probes = self._probes_for_batch(pl_module, outputs, x)
+        probes = self._probes_for_batch(pl_module, x)
         for accumulator, _, clean in probes:
             self._record_clean(accumulator, clean, targets)
         for group in GROUPS:
             self._probe_group(group, x, targets, probes)
 
     def _probes_for_batch(
-        self, pl_module: LightningModule, outputs: Any, x: torch.Tensor
+        self, pl_module: LightningModule, x: torch.Tensor
     ) -> list[tuple[_Accumulator, LightningModule, torch.Tensor]]:
         """Pair every probed model with its accumulator and its logits on the plain batch.
 
-        JetTaggingModule.test_step hands its model_step dict over, so the tested module's own
-        logits come free; a module whose step returns nothing pays one forward pass here.
+        The clean logits are recomputed here rather than taken from the test step: the step runs
+        under the trainer's precision context and this hook does not, so under 16-mixed the step's
+        fp16 logits would be compared with the fp32 logits of the transformed batch.
         """
-        logits = outputs.get("logits") if isinstance(outputs, dict) else None
-        if logits is None:
-            logits = pl_module(x)
-        probes = [(self._own, pl_module, logits)]
+        probes = [(self._own, pl_module, pl_module(x))]
         if self.baseline_module is not None:
             probes.append((self._baseline, self.baseline_module, self.baseline_module(x)))
         return probes
@@ -302,15 +307,11 @@ class InvarianceMetricCallback(Callback):
     ) -> None:
         """Record one model's flip rate, transition counts and transformed logits for one group."""
         flipped = logits.argmax(dim=1) != logits_sym.argmax(dim=1)
-        self._record(f"{group}_flip", flipped.float().mean().item(), accumulator.prefix)
+        accumulator.flips[group] = accumulator.flips.get(group, 0) + int(flipped.sum().item())
         if self.compute_flip_breakdown:
             self._count_flips(accumulator, group, logits, logits_sym, targets)
         if self.compute_wasserstein:
             accumulator.transformed_logits.setdefault(group, []).append(logits_sym.detach().cpu())
-
-    def _record(self, name: str, value: float, prefix: str = "invariance") -> None:
-        """Add one batch's value to the series that is averaged at the end of the epoch."""
-        self._batch_metrics.setdefault(f"{prefix}/{name}", []).append(value)
 
     def _count_flips(
         self,
@@ -372,6 +373,7 @@ class InvarianceMetricCallback(Callback):
         """Everything each probed model reports once the whole test set has gone through."""
         results: dict[str, float] = {}
         for accumulator in self._accumulators():
+            results |= accumulator.flip_rates()
             if self.compute_wasserstein:
                 results |= self._wasserstein_metrics(accumulator)
             if self.compute_flip_breakdown:
@@ -406,11 +408,10 @@ class InvarianceMetricCallback(Callback):
         return deltas
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Average the per-batch series, add the pass-level metrics, and log them all."""
-        if not self._batch_metrics:
+        """Reduce the counts and the kept logits over the whole test set, and log them all."""
+        if self._own.n_jets == 0:
             return
-        results = {name: float(np.mean(values)) for name, values in self._batch_metrics.items()}
-        results |= self._pass_metrics()
+        results = self._pass_metrics()
         if self.baseline_module is not None:
             results |= self._delta_metrics(results)
         for name, value in results.items():

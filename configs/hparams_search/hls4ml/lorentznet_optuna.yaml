@@ -3,6 +3,7 @@
 defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: tpe
+  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
 
 # One TPE study per nconstituents for LorentzNet, three in all, on the main run's val/acc_best.
 # LorentzNet embeds the symmetry rather than acquiring it, so it is only ever trained in the

@@ -1,4 +1,5 @@
-# Training curves, ROC curves and confusion matrices, written under the run directory.
+# ROC curves and confusion matrices, written under the run directory. No training curves: the
+# per-epoch metrics are in MLflow.
 
 _target_: src.callbacks.plotting.PlottingCallback
 class_names: ["g", "q", "W", "Z", "t"]

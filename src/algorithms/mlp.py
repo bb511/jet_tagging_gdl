@@ -1,9 +1,4 @@
-"""Flattened-input MLP jet tagger.
-
-The constituents are read as one long vector, so the model is not even invariant under their
-permutation. It is the floor against which the set-based and attention-based architectures, and the
-two ways of teaching them a symmetry, are read.
-"""
+"""Flattened-input MLP jet tagger."""
 
 from torch import nn
 
@@ -20,11 +15,7 @@ class MLPClassifier(JetTaggingModule):
         activation: str = "relu",
         batchnorm: bool = False,
     ) -> nn.Module:
-        """Build the network; the arguments are documented on :class:`MLP`.
-
-        The input width is the flattened grid, ``nconstituents * nbr_feats``, so the first layer
-        grows with the constituent count while the widths below do not.
-        """
+        """Build the network; the arguments are documented in components/mlp.py."""
         return nn.Sequential(
             nn.Flatten(1),
             MLP(

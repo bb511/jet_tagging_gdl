@@ -1,20 +1,14 @@
 import pytest
 import torch
 
-from src.algorithms.losses.symmetry import (
-    SUPPORTED_METRICS,
-    SymmetryConsistencyLoss,
-    build_symmetric_batch,
-    symmetry_distance,
-    validate_symmetry_group,
-)
+from src.algorithms.losses.symmetry import SUPPORTED_METRICS, SymmetryConsistencyLoss
 from tests.conftest import FOUR_MOMENTUM, jets
 
 
 def test_the_partner_batch_keeps_the_constituent_grid() -> None:
     batch = jets(16)
-    for group in ("so2", "so3", "lorentz", "lorentz_iso"):
-        partner = build_symmetric_batch(batch, group, FOUR_MOMENTUM)
+    for group in SymmetryConsistencyLoss.GROUPS:
+        partner = SymmetryConsistencyLoss(group).transform(batch, FOUR_MOMENTUM)
 
         assert partner.shape == batch.shape
         assert partner.dtype == batch.dtype
@@ -24,29 +18,24 @@ def test_the_distance_vanishes_when_the_logits_agree_and_enters_the_total_weight
     torch.manual_seed(0)
     logits, other = torch.randn(32, 5), torch.randn(32, 5)
     for metric in SUPPORTED_METRICS:
-        total, sym = SymmetryConsistencyLoss(weight=0.25, metric=metric)(
-            torch.tensor(1.5), logits, other
-        )
+        loss = SymmetryConsistencyLoss("so2", weight=0.25, metric=metric)
+        total, sym = loss(torch.tensor(1.5), logits, other)
 
-        assert symmetry_distance(logits, logits.clone(), metric) == pytest.approx(0.0, abs=1e-6)
-        assert symmetry_distance(logits, other, metric) > 0.0
-        assert sym == pytest.approx(symmetry_distance(logits, other, metric).item())
+        assert loss.distance(logits, logits.clone()) == pytest.approx(0.0, abs=1e-6)
+        assert sym > 0.0
+        assert sym == pytest.approx(loss.distance(logits, other).item())
         assert total.item() == pytest.approx(1.5 + 0.25 * sym.item())
 
 
 def test_a_mismatched_shape_or_an_unknown_metric_is_refused() -> None:
     with pytest.raises(ValueError, match="identical shape"):
-        symmetry_distance(torch.randn(8, 5), torch.randn(6, 5))
+        SymmetryConsistencyLoss("so2")(torch.tensor(0.0), torch.randn(8, 5), torch.randn(6, 5))
     with pytest.raises(ValueError, match="metric must be one of"):
-        symmetry_distance(torch.randn(8, 5), torch.randn(8, 5), "euclidean")
-    with pytest.raises(ValueError, match="metric must be one of"):
-        SymmetryConsistencyLoss(metric="euclidean")
+        SymmetryConsistencyLoss("so2", metric="euclidean")
 
 
 def test_an_scl_run_without_a_symmetry_group_is_refused() -> None:
     # algorithm.group follows data.augmentation_scheme, whose domain includes 'none'.
     for group in ("none", None):
         with pytest.raises(ValueError, match="symm_loss"):
-            validate_symmetry_group("symm_loss", group)
-    for group in ("so2", "so3", "lorentz", "lorentz_iso", "none", None):
-        validate_symmetry_group("augmentation", group)
+            SymmetryConsistencyLoss(group)

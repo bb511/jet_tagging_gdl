@@ -11,7 +11,6 @@ seed: 12345
 tags: ["hls4ml", "mlp", "nconst-150"]
 
 experiment_name: hls4ml_mlp_nconst150
-run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
   nconstituents: 150

@@ -21,12 +21,17 @@ MANIFEST_FILENAME = "checkpoint_manifest.json"
 
 @dataclass
 class ManifestRun:
-    """One fitted model: the main run, or one cross-validation fold."""
+    """One fitted model: the main run, or one cross-validation fold.
+
+    ``mlflow_run_id`` is the MLflow run it logged into, ``None`` under ``logger=none``; the folds
+    of a training nest under the main run's.
+    """
 
     fold_label: str
     fold_idx: int | None
     checkpoint_path: str
     val_acc_best: float | None = None
+    mlflow_run_id: str | None = None
 
 
 @dataclass

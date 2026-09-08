@@ -4,140 +4,73 @@ The training objective is
 
 .. math:: L = L_\\mathrm{cls} + w \\, d\\bigl(f(x), f(T x)\\bigr),
 
-with :math:`T` drawn independently per jet from one of SO(2), SO(3), the boosts along the beam
-(``lorentz``) or the boosts of isotropic direction (``lorentz_iso``), and :math:`d` one of the
-distances in :func:`symmetry_distance`. Only the beam boost is a symmetry of a pp collision. The
-transforms themselves come from :mod:`src.data.components.augmentation`, which is the single
-source of truth shared with the online augmentation and the invariance probe.
+with `T` drawn independently per jet from one of SO(2), SO(3), the boosts along the beam
+(``lorentz``) or the boosts of isotropic direction (``lorentz_iso``), and `d` a distance
+between the logits (``components/distance.py``) or a divergence between the class
+distributions (``components/divergence.py``).
+The transforms come from `src.data.components.augmentation`.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
+from src.algorithms.losses.components.distance import LogitDistance
+from src.algorithms.losses.components.divergence import SoftmaxDivergence
 from src.data.components.augmentation import make_transform
 
-SUPPORTED_GROUPS = ("so2", "so3", "lorentz", "lorentz_iso")
-
-
-def validate_symmetry_group(method: str, group: str | None) -> None:
-    """Reject an SCL run whose symmetry group names no transform.
-
-    ``algorithm.group`` is interpolated from ``data.augmentation_scheme``, whose domain also holds
-    ``none``; that value is legitimate for an augmentation run, where the group is never read, so
-    it is rejected only under ``method="symm_loss"``, and at construction rather than at the first
-    training step.
-    """
-    if method != "symm_loss":
-        return
-    if group is None or str(group).lower() not in SUPPORTED_GROUPS:
-        raise ValueError(
-            f"method='symm_loss' requires a group in {list(SUPPORTED_GROUPS)}, got "
-            f"{group!r}. The group follows data.augmentation_scheme, so set that "
-            "(e.g. data.augmentation_scheme=so3) or override algorithm.group."
-        )
-
-
-def build_symmetric_batch(
-    x: torch.Tensor,
-    group: str,
-    feature_names: Sequence[str],
-    norm_scales: dict[str, float] | None = None,
-    **transform_kwargs: float,
-) -> torch.Tensor:
-    """Draw one transformation per jet and return the transformed partner batch.
-
-    :param x: batch of shape (jets, constituents, features), whose columns *feature_names* lists in
-        order.
-    :param norm_scales: per-column factors returning the stored values to GeV.
-    :param transform_kwargs: the knobs of :func:`~src.data.components.augmentation.make_transform`,
-        ``lorentz_eta_max``.
-    :return: the transformed batch, of the shape and normalisation of *x*.
-    """
-    return make_transform(group, feature_names, norm_scales, **transform_kwargs)(x)
-
-
-def symmetry_distance(
-    logits: torch.Tensor,
-    logits_sym: torch.Tensor,
-    metric: str = "l2",
-    eps: float = 1e-8,
-) -> torch.Tensor:
-    """Mean per-jet discrepancy between the outputs on ``x`` and on ``T(x)``.
-
-    ``l1``, ``l2`` and ``mse`` act on the logits directly, ``cosine`` on their direction, and
-    ``js`` and ``kl`` on the softmax probabilities, symmetrised, with *eps* keeping the logarithms
-    finite where a probability underflows.
-    """
-    if logits.shape != logits_sym.shape:
-        raise ValueError(
-            "logits and logits_sym must have identical shape, got "
-            f"{tuple(logits.shape)} vs {tuple(logits_sym.shape)}."
-        )
-
-    distance = _METRICS.get(metric.lower())
-    if distance is None:
-        raise ValueError(f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}.")
-    return distance(logits, logits_sym, eps)
-
-
-def _relative_entropy(p: torch.Tensor, q: torch.Tensor, eps: float) -> torch.Tensor:
-    """Per-jet :math:`\\sum_c p_c \\log(p_c / q_c)`, with *eps* keeping both logarithms finite."""
-    return (p * (p.add(eps).log() - q.add(eps).log())).sum(dim=1)
-
-
-def _jensen_shannon(logits: torch.Tensor, logits_sym: torch.Tensor, eps: float) -> torch.Tensor:
-    """Jensen-Shannon divergence between the two softmaxes.
-
-    Clamped at zero, which the sum of two relative entropies can undercut by a rounding once *eps*
-    has shifted the probabilities.
-    """
-    p = F.softmax(logits, dim=-1)
-    q = F.softmax(logits_sym, dim=-1)
-    mix = 0.5 * (p + q)
-    js = 0.5 * (_relative_entropy(p, mix, eps) + _relative_entropy(q, mix, eps))
-    return js.clamp_min(0.0).mean()
-
-
-def _symmetrised_kl(logits: torch.Tensor, logits_sym: torch.Tensor, eps: float) -> torch.Tensor:
-    """Mean of the two Kullback-Leibler divergences between the two softmaxes."""
-    p = F.softmax(logits, dim=-1)
-    q = F.softmax(logits_sym, dim=-1)
-    kl_pq = F.kl_div(p.add(eps).log(), q, reduction="none").sum(dim=1)
-    kl_qp = F.kl_div(q.add(eps).log(), p, reduction="none").sum(dim=1)
-    return 0.5 * (kl_pq + kl_qp).mean()
-
-
-# Every distance takes (logits, logits_sym, eps) and returns a scalar, whether or not it has a
-# logarithm to keep finite, so that symmetry_distance can dispatch on the name alone.
-_METRICS: dict[str, Callable[[torch.Tensor, torch.Tensor, float], torch.Tensor]] = {
-    "l1": lambda a, b, eps: (a - b).abs().sum(dim=1).mean(),
-    "l2": lambda a, b, eps: (a - b).norm(dim=1).mean(),
-    "mse": lambda a, b, eps: F.mse_loss(a, b),
-    "cosine": lambda a, b, eps: (1.0 - F.cosine_similarity(a, b, dim=1)).mean(),
-    "js": _jensen_shannon,
-    "kl": _symmetrised_kl,
-}
-SUPPORTED_METRICS = tuple(_METRICS)
+SUPPORTED_METRICS = LogitDistance.METRICS + SoftmaxDivergence.METRICS
 
 
 class SymmetryConsistencyLoss(nn.Module):
-    """Add a weighted symmetry penalty to a classification loss."""
+    """Add a weighted symmetry penalty to a classification loss.
 
-    def __init__(self, weight: float = 0.1, metric: str = "l2", eps: float = 1e-8) -> None:
-        """
-        :param weight: the coefficient :math:`w` multiplying the symmetry term.
-        :param metric: one of :data:`SUPPORTED_METRICS`.
-        :param eps: floor on the probabilities of the divergence metrics.
-        """
+    :param group: the group `T` is drawn from, one of available symmetry groups.
+        It follows ``data.augmentation_scheme``.
+    :param weight: the coefficient `w` multiplying the symmetry term.
+    :param metric: one of `SUPPORTED_METRICS`.
+    :param eps: floor on the probabilities of the divergence metrics.
+    """
+
+    GROUPS = ("so2", "so3", "lorentz", "lorentz_iso")
+
+    def __init__(
+        self, group: str | None, weight: float = 0.1, metric: str = "l2", eps: float = 1e-8
+    ) -> None:
         super().__init__()
-        if metric.lower() not in SUPPORTED_METRICS:
-            raise ValueError(f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}.")
+        if group is None or str(group).lower() not in self.GROUPS:
+            raise ValueError(
+                f"method=symm_loss needs a group in {list(self.GROUPS)}, got {group!r}. The group "
+                "follows data.augmentation_scheme, so set that (e.g. data.augmentation_scheme=so3) "
+                "or override algorithm.group."
+            )
+        self.group = str(group).lower()
         self.weight = float(weight)
-        self.metric = metric.lower()
-        self.eps = eps
+        metric = metric.lower()
+        if metric in SoftmaxDivergence.METRICS:
+            self.distance = SoftmaxDivergence(metric, eps)
+        elif metric in LogitDistance.METRICS:
+            self.distance = LogitDistance(metric)
+        else:
+            raise ValueError(f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}.")
+
+    def transform(
+        self,
+        x: torch.Tensor,
+        feature_names: Sequence[str],
+        norm_scales: dict[str, float] | None = None,
+        **transform_kwargs: float,
+    ) -> torch.Tensor:
+        """Draw one transformation of the group per jet and return ``T(x)``.
+
+        :param x: batch of shape (jets, constituents, features), whose columns
+            *feature_names* lists in order.
+        :param norm_scales: per-column factors returning the stored values to GeV.
+        :param transform_kwargs: additional args for ``make_transform``.
+        :return: the transformed batch, of the shape and normalisation of *x*.
+        """
+        return make_transform(self.group, feature_names, norm_scales, **transform_kwargs)(x)
 
     def forward(
         self, cls_loss: torch.Tensor, logits: torch.Tensor, logits_sym: torch.Tensor
@@ -146,5 +79,10 @@ class SymmetryConsistencyLoss(nn.Module):
 
         *logits* and *logits_sym* describe the same jets in the same order.
         """
-        sym = symmetry_distance(logits, logits_sym, self.metric, self.eps)
+        if logits.shape != logits_sym.shape:
+            raise ValueError(
+                "logits and logits_sym must have identical shape, got "
+                f"{tuple(logits.shape)} vs {tuple(logits_sym.shape)}."
+            )
+        sym = self.distance(logits, logits_sym)
         return cls_loss + self.weight * sym, sym

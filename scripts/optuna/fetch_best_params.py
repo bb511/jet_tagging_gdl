@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Report the best trial of an Optuna study, ready to paste into a config.
-
-A study is one (architecture, constituent count, regime) cell of the grid, named
-``<model>_nconst<N>_<method>_<scheme>``, and its objective is the main run's clean
-``val/acc_best``. Each is printed as the best value, hydra override tokens for a one-off rerun,
-and a YAML block for making the values ``configs/experiment/hls4ml/<model>_<N>.yaml``'s own.
-
-    python3 scripts/optuna/fetch_best_params.py --db logs/optuna/hls4ml/mlp.db \\
-        --study mlp_nconst16_augmentation_none
-    python3 scripts/optuna/fetch_best_params.py --db logs/optuna/hls4ml/mlp.db --all
-    python3 scripts/optuna/fetch_best_params.py --db logs/optuna/hls4ml/mlp.db --all --csv
-"""
+# Report the best trial of an Optuna study, ready to paste into a config.
 
 from __future__ import annotations
 

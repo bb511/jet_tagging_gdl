@@ -1,10 +1,4 @@
-"""JetFormer jet tagger, a replica of the reference architecture (arXiv:2601.17215).
-
-The blocks are built from scratch rather than from :class:`torch.nn.TransformerEncoderLayer` so
-that the parameter count and the computation graph match the reference, down to its missing padding
-mask; :mod:`src.algorithms.components.jetformer` lists the deviations from a standard encoder
-layer.
-"""
+"""JetFormer jet tagger, a replica of the reference architecture (arXiv:2601.17215)."""
 
 from torch import nn
 
@@ -27,7 +21,6 @@ class JetFormer(JetTaggingModule):
         """Build the network; the arguments are documented on :class:`JetFormerNet`."""
         return JetFormerNet(
             in_dim=self.hparams.nbr_feats,
-            nconstituents=self.hparams.nconstituents,
             embed_dim=embed_dim,
             num_heads=num_heads,
             num_transformers=num_transformers,

@@ -220,7 +220,9 @@ class ResultsTableCallback(Callback):
         columns[f"{prefix}_folds"] = _join(values)
         columns.update(self._ci_columns(prefix, values))
         columns[f"{prefix}_bootstrap_pvalue"] = round(pvalue, 6)
-        columns[f"{prefix}_significant_boot_005"] = "yes" if pvalue < 0.05 else "no"
+        # Nothing reported is not no difference.
+        significant = "nan" if math.isnan(pvalue) else ("yes" if pvalue < 0.05 else "no")
+        columns[f"{prefix}_significant_boot_005"] = significant
         return columns
 
     def _extract_invariance(self, metrics: dict[str, object]) -> dict[str, float]:
@@ -365,18 +367,6 @@ class ResultsTableCallback(Callback):
         row.update(self._tail_columns(test_folds, selected, flops_folds))
         return row
 
-    def _folds_ready(self) -> int:
-        """How many folds are complete, and so how many the row would average over.
-
-        An eval-only pass never fires ``on_fit_end``, so the invariance metrics and the FLOP count
-        come from ``on_test_end`` instead and may lag the accuracy by a fold; the row is still
-        written when only the accuracy is in.
-        """
-        n_test = len(self._fold_test_acc)
-        if self._fold_invariance and self._fold_flops:
-            return min(n_test, len(self._fold_invariance), len(self._fold_flops))
-        return n_test
-
     def _write_row(self, row: dict[str, object]) -> None:
         """Append the row to the table, writing the header if the table is new."""
         fieldnames = list(row)
@@ -390,16 +380,6 @@ class ResultsTableCallback(Callback):
                 writer.writeheader()
             writer.writerow(row)
 
-    def _first_folds(self, n_ready: int) -> tuple[list, list, list, list, list]:
-        """The first *n_ready* entries of every accumulator, in the order _build_row reads them."""
-        return (
-            self._fold_invariance[:n_ready],
-            self._fold_test_acc[:n_ready],
-            self._fold_flops[:n_ready],
-            self._fold_baseline_test_acc[:n_ready],
-            self._fold_delta_test_acc[:n_ready],
-        )
-
     def _log_row(self, row: dict[str, object]) -> None:
         """Announce the appended row, so a queue's log says what landed in which table."""
         log.info(
@@ -412,53 +392,33 @@ class ResultsTableCallback(Callback):
 
     def _maybe_write_summary(self) -> None:
         """Write the row once every fold has been tested; a no-op before then."""
-        n_ready = self._folds_ready()
-        if self._summary_written or n_ready < max(self.n_folds, 1):
+        if self._summary_written or len(self._fold_test_acc) < max(self.n_folds, 1):
             return
-        row = self._build_row(*self._first_folds(n_ready))
+        row = self._build_row(
+            self._fold_invariance,
+            self._fold_test_acc,
+            self._fold_flops,
+            self._fold_baseline_test_acc,
+            self._fold_delta_test_acc,
+        )
         self._write_row(row)
         self._summary_written = True
         self._log_row(row)
 
-    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Close one fold's training: the invariance metrics and the FLOPs are in."""
-        inv = self._extract_invariance(trainer.callback_metrics)
-        self._fold_invariance.append(inv)
-        self._fold_flops.append(_flops(pl_module))
-        key, value = self._selected_metric_for_fold(inv)
-        log.info(
-            f"Fold {len(self._fold_invariance)}/{self.n_folds} | {key}={value:.4f} | "
-            f"FLOPs={self._fold_flops[-1]:.0f}"
-        )
-
-    def _record_test_fold(self, metrics: dict[str, object], fold: int) -> None:
-        """Take this fold's invariance metrics, whether or not a fit already recorded them."""
-        inv = self._extract_invariance(metrics)
-        if len(self._fold_invariance) < fold:
-            self._fold_invariance.append(inv)
-        elif any(not math.isnan(value) for value in inv.values()):
-            # A fit in this same process recorded the fold before the probe had run, since
-            # the probe runs on the test set alone. Its values are the ones that count.
-            self._fold_invariance[fold - 1] = inv
-
     def _record_fold(self, metrics: dict[str, object], pl_module: LightningModule) -> int:
-        """Take one fold's accuracies, and whatever a fit in this process did not already record.
+        """Take one fold's metrics off ``trainer.callback_metrics`` once its test pass has run.
 
         :return: the number of folds recorded so far, this one included.
         """
         self._fold_test_acc.append(_to_float(metrics.get("test/acc")))
         self._fold_baseline_test_acc.append(_to_float(metrics.get("baseline/test_acc")))
         self._fold_delta_test_acc.append(_to_float(metrics.get("delta_test_acc")))
-        fold = len(self._fold_test_acc)
-        self._record_test_fold(metrics, fold)
-        if len(self._fold_flops) < fold:
-            self._fold_flops.append(_flops(pl_module))
-        return fold
+        self._fold_invariance.append(self._extract_invariance(metrics))
+        self._fold_flops.append(_flops(pl_module))
+        return len(self._fold_test_acc)
 
     def on_test_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Close one fold's test pass, and write the row when it was the last fold."""
-        # An eval-only pass has no fit behind it, so this is where the invariance metrics
-        # (logged by InvarianceMetricCallback) and the FLOP count are collected.
         fold = self._record_fold(trainer.callback_metrics, pl_module)
         log.info(f"Fold {fold}/{self.n_folds} | test/acc={self._fold_test_acc[-1]:.4f}")
         self._maybe_write_summary()

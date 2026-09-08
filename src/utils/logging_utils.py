@@ -3,6 +3,7 @@
 from typing import Any
 
 from lightning import LightningModule
+from lightning.pytorch.loggers import Logger, MLFlowLogger
 from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf
 
@@ -11,12 +12,24 @@ from src.utils import pylogger
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
+def nest_under(loggers: list[Logger], parent_run_id: str | None) -> None:
+    """Make the MLflow run of *loggers* a child of *parent_run_id*; ``None`` leaves it where it is.
+
+    A fold's training nests under the main run's, and a checkpoint's evaluation under the training
+    run that wrote it. The tag has to be in place before the run is created, which the logger does
+    on its first use.
+    """
+    for logger in loggers:
+        if parent_run_id and isinstance(logger, MLFlowLogger):
+            logger.tags = {**(logger.tags or {}), "mlflow.parentRunId": parent_run_id}
+
+
 @rank_zero_only
 def log_hyperparameters(object_dict: dict[str, Any]) -> None:
     """Send the config, the parameter counts and the FLOP count to every attached logger.
 
-    :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``, plus the runtime-only
-        ``fold_idx`` and ``run_stage``.
+    :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``; an evaluation adds the
+        runtime-only ``fold_idx`` and ``run_stage``, which a training reads off the config.
     """
     if not object_dict["trainer"].logger:
         log.warning("Logger not found! Skipping hyperparameter logging...")
@@ -44,7 +57,7 @@ def _config_hparams(cfg: dict[str, Any], object_dict: dict[str, Any]) -> dict[st
         "seed": cfg.get("seed"),
         "experiment_name": cfg.get("experiment_name"),
         "run_name": cfg.get("run_name"),
-        "fold_idx": object_dict.get("fold_idx"),
+        "fold_idx": object_dict.get("fold_idx", cfg.get("run_label")),
         "run_stage": object_dict.get("run_stage", cfg.get("run_stage")),
     }
 

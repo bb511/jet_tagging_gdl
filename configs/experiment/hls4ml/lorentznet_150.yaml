@@ -13,7 +13,6 @@ seed: 12345
 tags: ["hls4ml", "lorentznet", "nconst-150"]
 
 experiment_name: hls4ml_lorentznet_nconst150
-run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 # A quarter of the usual batch: memory follows the squared multiplicity (mean 2 800 at 150 slots),
 # 17 GiB of a 32 GB V100 at 512 jets. Raise it only on a larger card.

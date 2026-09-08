@@ -1,10 +1,4 @@
-"""LorentzNet, wired into the shared training loop.
-
-The network reads four-momenta in GeV, not the normalised columns the datamodule stores, and in the
-order [E, px, py, pz]; ``_prepare_inputs`` makes both changes, so the rest of the pipeline handles
-this algorithm like any other. Its logits are Lorentz invariant by construction, which makes it the
-reference against which the augmented and SCL-trained networks are read.
-"""
+"""LorentzNet, wired into the shared training loop."""
 
 import torch
 from torch import nn
@@ -17,7 +11,7 @@ from src.data.components.augmentation import get_norm_scale
 class LorentzNet(JetTaggingModule):
     """Jet tagger built on Lorentz Group Equivariant Blocks (arXiv:2201.08187)."""
 
-    # The network needs the full four-momentum, and reads no other column.
+    # The network needs only the full four-momentum.
     required_features = ["px", "py", "pz", "e"]
 
     def build_net(
@@ -27,10 +21,7 @@ class LorentzNet(JetTaggingModule):
         c_weight: float = 1e-3,
         dropout: float = 0.0,
     ) -> nn.Module:
-        """Build the graph network; the arguments are documented on :class:`LorentzNetGraph`."""
-        # Registered here rather than in an __init__ the subclass must not have, since the base
-        # class collects these arguments by walking the frame of save_hyperparameters. Persistent,
-        # so a checkpoint carries the scales its weights were trained with; ones until setup().
+        """Build the graph network; the arguments are in components/lorentznet.py."""
         self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
         return LorentzNetGraph(
             n_hidden=n_hidden,
@@ -50,8 +41,6 @@ class LorentzNet(JetTaggingModule):
         """Undo the normalisation of a batch and hand it over as four-momenta.
 
         :param x: (jets, constituents, 4), the columns [px, py, pz, e] as stored.
-        :return: (jets, constituents, 4), the columns [E, px, py, pz] in GeV. The network's
-            Minkowski invariants are dimensionful, so a normalised batch would sit at the wrong
-            scale rather than merely be rescaled.
+        :return: (jets, constituents, 4), the columns [E, px, py, pz] in GeV.
         """
         return (x * self.denorm_scales)[..., [3, 0, 1, 2]]

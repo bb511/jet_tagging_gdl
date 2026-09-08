@@ -1,4 +1,5 @@
-# JetFormer, the attention tagger: a replica of arXiv:2601.17215 down to its missing padding mask.
+# JetFormer, the attention tagger: a replica of arXiv:2601.17215 down to its missing padding mask,
+# minus the score-norm layer the reference defines but never applies.
 _target_: src.algorithms.jetformer.JetFormer
 _convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
 name: jetformer

@@ -54,8 +54,10 @@ class HLS4MLDataModule(LightningDataModule):
     :param nconstituents: how many constituents to keep by leading pT for each jet.
     :param features: the data features that the model consumes, ordered.
     :param n_folds: setting this to 1 uses the record's own train and validation splits;
-        k >= 2 pools them and splits them again, with `set_fold` choosing which fold is served.
+        k >= 2 pools them and splits them again, with `fold_idx` choosing which fold is served.
     :param kfold_seed: fixes the kfold splitting so its reproducible.
+    :param fold_idx: the fold served, counted from zero, which `set_fold` moves and train.py
+        derives from its `fold` knob; ignored at n_folds 1.
     :param keep_full_features_at_test: keep all the data features in the test batches,
         in case they are required at test time to compute quantities of interest.
     """
@@ -74,6 +76,7 @@ class HLS4MLDataModule(LightningDataModule):
         pin_memory: bool = True,
         n_folds: int = 1,
         kfold_seed: int = 42,
+        fold_idx: int = 0,
         keep_full_features_at_test: bool = True,
     ) -> None:
         super().__init__()
@@ -98,7 +101,7 @@ class HLS4MLDataModule(LightningDataModule):
         # folding
         self.n_folds = n_folds
         self.kfold_seed = kfold_seed
-        self.fold_idx = 0
+        self.fold_idx = fold_idx if n_folds >= 2 else 0
         self.keep_full_features_at_test = keep_full_features_at_test
 
         # Filled at instantiation.

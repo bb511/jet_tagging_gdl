@@ -9,7 +9,7 @@ defaults:
   - paths: default
   - extras: default
   - hydra: default
-  - logger: none
+  - logger: mlflow
   - experiment: null
   - optional local: default
   - debug: null
@@ -39,5 +39,5 @@ baseline_checkpoint_manifest_path: null
 
 seed: 12345
 
-# Logged so a train run and its later evaluation are distinguishable in MLflow.
+# Logged so a training and its later evaluation are distinguishable in MLflow.
 run_stage: "eval"

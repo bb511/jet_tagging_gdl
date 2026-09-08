@@ -1,10 +1,19 @@
-"""Custom transformer block matching the reference JetFormer architecture (arXiv:2601.17215).
+"""Custom transformer matching the reference JetFormer (arXiv:2601.17215).
 
-Differs from a standard nn.TransformerEncoderLayer in three ways: bias-free Q/K/V projections, a
-pre-activation FFN (norm -> activation -> linear, not the usual linear -> activation), and a
-learnable normalization layer over the full (num_tokens x num_tokens) attention-score matrix that
-is registered, so it counts in the parameter total, but never applied in forward, as in the
-reference, where it is defined but commented out.
+Unlike a standard Transformer, this has bias-free Q/K/V projs, a pre-activation FFN
+(norm -> activation -> linear, not linear -> activation) with bias-free linears and a
+x2 expansion, dropout on the residual stream after each block rather than on the branch,
+no padding mask, no norm after the embedding, and a learned CLS token read out through
+one norm and one linear layer.
+
+Divergences from the reference:
+
+* The reference registers a BatchNorm1d or LayerNorm over the flattened (N + 1)^2
+  attention-score matrix that is never actually used. We leave it out.
+* The network returns logits, where the reference returns log-probabilities; the
+  cross-entropy loss applies the same log-softmax, so the objective is the same.
+* The config picks layer norm where the reference's search fixed batch norm, and the
+  search space differs.
 """
 
 import torch
@@ -12,7 +21,7 @@ from torch import nn
 
 
 class SeqNorm(nn.Module):
-    """BatchNorm1d or LayerNorm over the channel axis of a (jets, tokens, channels) batch."""
+    """BatchNorm1d or LayerNorm over the channel axis of a (jets, tokens, channels)."""
 
     def __init__(self, dim: int, normalization: str = "batch") -> None:
         super().__init__()
@@ -20,17 +29,16 @@ class SeqNorm(nn.Module):
         self.norm = nn.BatchNorm1d(dim) if normalization == "batch" else nn.LayerNorm(dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalise over the channel axis, transposing for BatchNorm1d."""
         if self.normalization == "batch":
             return self.norm(x.transpose(1, 2)).transpose(1, 2)
         return self.norm(x)
 
 
 class JetFormerAttention(nn.Module):
-    """Pre-norm multi-head self-attention, no padding mask, with a dead score-norm layer."""
+    """Pre-norm multi-head self-attention, no padding mask."""
 
-    def __init__(
-        self, dim: int, num_heads: int, num_tokens: int, normalization: str = "batch"
-    ) -> None:
+    def __init__(self, dim: int, num_heads: int, normalization: str = "batch") -> None:
         super().__init__()
         if dim % num_heads != 0:
             raise ValueError(f"dim ({dim}) must be divisible by num_heads ({num_heads})")
@@ -43,13 +51,8 @@ class JetFormerAttention(nn.Module):
         self.v = nn.Linear(dim, dim, bias=False)
         self.out = nn.Linear(dim, dim, bias=True)
 
-        # Unused in forward, kept so the parameter count matches the reference's own dead layer.
-        score_dim = num_tokens * num_tokens
-        self.pre_exp_norm = (
-            nn.BatchNorm1d(score_dim) if normalization == "batch" else nn.LayerNorm(score_dim)
-        )
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Attend over the tokens of a (jets, tokens, channels) batch and add result."""
         B, N, _ = x.shape
         h = self.norm(x)
 
@@ -64,19 +67,18 @@ class JetFormerAttention(nn.Module):
 
 
 class JetFormerBlock(nn.Module):
-    """Self-attention sub-layer followed by a x2-expansion pre-activation FFN, both residual."""
+    """Self-attention sub-layer followed by a x2-expansion pre-activation FFN."""
 
     def __init__(
         self,
         dim: int,
         num_heads: int,
-        num_tokens: int,
         dropout: float = 0.0,
         activation: str = "relu",
         normalization: str = "batch",
     ) -> None:
         super().__init__()
-        self.attn = JetFormerAttention(dim, num_heads, num_tokens, normalization)
+        self.attn = JetFormerAttention(dim, num_heads, normalization)
 
         act_cls = nn.ReLU if activation == "relu" else nn.SiLU
         self.norm_0 = SeqNorm(dim, normalization)
@@ -88,26 +90,24 @@ class JetFormerBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Attention, then the feed-forward sub-layer, each residual; dropout on the sum."""
         x = self.attn(x)
         h = self.linear_0(self.activ_0(self.norm_0(x)))
         h = self.linear_1(self.activ_1(self.norm_1(h)))
-        return x + self.dropout(h)
+        return self.dropout(x + h)
 
 
 class JetFormerNet(nn.Module):
     """Embed the constituents, prepend a CLS token, run the blocks, read token 0.
 
-    :param nconstituents: constituents per jet; with the CLS token this fixes the sequence length
-        that the dead score-norm layer of each block is sized for.
     :param num_heads: attention heads per block, which must divide ``embed_dim``.
-    :param normalization: either ``batch`` or ``layer``, used by every :class:`SeqNorm` here.
+    :param normalization: either ``batch`` or ``layer``, used by every norm here.
     :param activation: either ``relu`` or ``silu``, used in the feed-forward sub-layers.
     """
 
     def __init__(
         self,
         in_dim: int,
-        nconstituents: int,
         embed_dim: int,
         num_heads: int,
         num_transformers: int,
@@ -117,19 +117,20 @@ class JetFormerNet(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        num_tokens = nconstituents + 1  # the CLS token sits in front of the constituents
         self.embedding = nn.Linear(in_dim, embed_dim)
-        self.input_norm = SeqNorm(embed_dim, normalization)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        block_args = (embed_dim, num_heads, num_tokens, dropout, activation, normalization)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
+        block_args = (embed_dim, num_heads, dropout, activation, normalization)
         self.blocks = nn.ModuleList([JetFormerBlock(*block_args) for _ in range(num_transformers)])
+        self.norm = (
+            nn.BatchNorm1d(embed_dim) if normalization == "batch" else nn.LayerNorm(embed_dim)
+        )
         self.classifier = nn.Linear(embed_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits for a batch of shape (jets, constituents, features)."""
-        x = self.input_norm(self.embedding(x))
+        x = self.embedding(x)
         cls = self.cls_token.expand(x.size(0), -1, -1)
         x = torch.cat([cls, x], dim=1)  # (jets, 1 + constituents, embed_dim)
         for block in self.blocks:
             x = block(x)
-        return self.classifier(x[:, 0, :])
+        return self.classifier(self.norm(x[:, 0, :]))

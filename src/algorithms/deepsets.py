@@ -1,8 +1,6 @@
 """DeepSets jet tagger.
 
-The network is invariant under a permutation of the constituents by construction, but under nothing
-else, so the rotations and boosts have to be learnt from the data. That is what makes it the
-reference architecture for comparing augmentation with the SCL.
+The network is invariant under a permutation of the constituents by construction.
 """
 
 from torch import nn
@@ -23,7 +21,7 @@ class DeepSets(JetTaggingModule):
         dropout: float = 0.0,
         mask: bool = True,
     ) -> nn.Module:
-        """Build the network; the arguments are documented on :class:`DeepSetsNet`."""
+        """Build the network; the arguments are documented in components/deepsets.py."""
         return DeepSetsNet(
             in_dim=self.hparams.nbr_feats,
             phi_layers=phi_layers,

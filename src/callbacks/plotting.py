@@ -14,7 +14,7 @@ import torch
 from lightning import Callback, LightningModule, Trainer
 from lightning.pytorch.loggers import MLFlowLogger
 
-from src.plot import confusion, curves, roc
+from src.plot import confusion, roc
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -30,18 +30,6 @@ def _step_logits(pl_module: LightningModule, outputs: Any, x: torch.Tensor) -> t
     if isinstance(outputs, dict) and "logits" in outputs:
         return outputs["logits"]
     return pl_module(x)
-
-
-def _scalar(value: torch.Tensor | float | None) -> float:
-    """Return a logged metric as a float, NaN when the metric was not logged."""
-    return float("nan") if value is None else float(value)
-
-
-def _current_lr(trainer: Trainer) -> float:
-    """Return the learning rate of the first parameter group, NaN before it exists."""
-    if not trainer.optimizers:
-        return float("nan")
-    return float(trainer.optimizers[0].param_groups[0]["lr"])
 
 
 class _Predictions:
@@ -99,8 +87,8 @@ def _log_artifacts(trainer: Trainer, paths: list[Path]) -> None:
 class PlottingCallback(Callback):
     """Write the diagnostic plots of a run under ``<default_root_dir>/plots``.
 
-    Three families: the training curves once the fit ends, and one-vs-rest ROC curves with a
-    confusion matrix, both for the last validation epoch and for the test pass.
+    Two families, one-vs-rest ROC curves and a confusion matrix, each for the last validation epoch
+    and for the test pass. No training curves: the per-epoch metrics are the logger's.
 
     :param class_names: display names of the output classes, in column order.
     """
@@ -108,23 +96,11 @@ class PlottingCallback(Callback):
     def __init__(self, class_names: Sequence[str] = ("g", "q", "W", "Z", "t")) -> None:
         super().__init__()
         self.class_names = list(class_names)
-        self._history: dict[str, list[float]] = {
-            key: [] for key in ("epoch", "train/loss", "train/acc", "val/loss", "val/acc", "lr")
-        }
+        # eval.py sets this to the checkpoint's label ("main", "fold_1"), so that the checkpoints
+        # it tests in one process do not draw over each other's figures.
+        self.subdir: str | None = None
         self._val = _Predictions()
         self._test = _Predictions()
-        self._epoch_lr: float = float("nan")
-        # The entry points set this to the run label ("main", "fold_1"), so that the folds of
-        # one training do not draw over each other's figures.
-        self.subdir: str | None = None
-
-    def on_train_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Note the rate the epoch is about to run at.
-
-        Lightning steps the epoch-interval schedulers before ``on_train_epoch_end``, so reading the
-        rate there would report the next epoch's.
-        """
-        self._epoch_lr = _current_lr(trainer)
 
     def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Start the epoch empty: only the last epoch's predictions are ever plotted."""
@@ -146,26 +122,8 @@ class PlottingCallback(Callback):
         x, y = batch
         self._val.add(_step_logits(pl_module, outputs, x), y)
 
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Append this epoch's point to every curve.
-
-        Not at the end of the validation epoch: that loop runs inside the training epoch, so
-        ``callback_metrics`` still carries the previous epoch's ``train/*`` there, and none at all
-        in the first epoch.
-        """
-        metrics = trainer.callback_metrics
-        self._history["epoch"].append(trainer.current_epoch)
-        for key in ("train/loss", "train/acc", "val/loss", "val/acc"):
-            self._history[key].append(_scalar(metrics.get(key)))
-        self._history["lr"].append(self._epoch_lr)
-
     def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Draw the curves of the whole fit and the plots of the last validation epoch."""
-        if not self._history["epoch"]:
-            log.warning("No epoch metrics were collected, so no training curves are drawn.")
-        else:
-            path = curves.plot(self._history, self._save_dir(trainer))
-            _log_artifacts(trainer, [path])
+        """Draw the plots of the last validation epoch."""
         self._draw_classification(trainer, self._val, "val")
 
     def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:

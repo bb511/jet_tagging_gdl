@@ -13,7 +13,6 @@ seed: 12345
 tags: ["hls4ml", "lorentznet", "nconst-50"]
 
 experiment_name: hls4ml_lorentznet_nconst50
-run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 # Half the usual batch: only real-constituent edges are built, so memory follows the squared
 # multiplicity (mean 1 800 at 50 slots), 22 GiB of a 32 GB V100 at 1024 jets and no fit at 1536.

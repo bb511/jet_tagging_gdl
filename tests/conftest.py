@@ -2,12 +2,13 @@ import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import pytest
 import rootutils
 import torch
 from hydra import compose, initialize
-from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.utils.omegaconf import register_resolvers
 
@@ -101,6 +102,9 @@ def compose_root(config_name: str, *overrides: str) -> DictConfig:
 
 
 def point_into(cfg: DictConfig, tmp_path: Path) -> DictConfig:
+    # HydraConfig().set_config makes the hydra node read-only, and a copy taken afterwards keeps
+    # that, so a second run's copy (a fold beside its main run) needs the flag lifted first.
+    OmegaConf.set_readonly(cfg.hydra, False)
     with open_dict(cfg):
         cfg.paths.output_dir = str(tmp_path)
         cfg.paths.log_dir = str(tmp_path)
@@ -109,6 +113,19 @@ def point_into(cfg: DictConfig, tmp_path: Path) -> DictConfig:
         # HydraConfig; a test that needs it calls HydraConfig().set_config(cfg).
         cfg.hydra.runtime.output_dir = str(tmp_path)
     return cfg
+
+
+def mlflow_logger(tmp_path: Path) -> dict[str, Any]:
+    # A file store under the test's directory; MLflow 3 opens one only with MLFLOW_ALLOW_FILE_STORE.
+    return {
+        "mlflow": {
+            "_target_": "lightning.pytorch.loggers.mlflow.MLFlowLogger",
+            "experiment_name": "test",
+            "run_name": "${run_name}",
+            "tracking_uri": f"file:{tmp_path}/mlruns",
+            "tags": None,
+        }
+    }
 
 
 def _cheap(config_name: str) -> DictConfig:

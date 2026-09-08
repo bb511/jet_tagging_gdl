@@ -1,22 +1,16 @@
 """LorentzNet, the architecture of arXiv:2201.08187 (Gong et al., 2022).
 
-A jet is a fully connected graph over its constituents, self-loops excluded, each node carrying its
-four-momentum :math:`x_i = (E, p_x, p_y, p_z)` and one Lorentz scalar, the signed log of its
-squared mass. A block (LGEB) builds a message on each edge from the two Minkowski invariants of its
-endpoints, updates the node scalars with the summed messages, and moves the four-momenta along
-:math:`x_i - x_j`, leaving the scalars invariant and the coordinates equivariant, so the logits
-read off the pooled scalars are invariant too.
+A jet is a fully connected graph over its constituents, self-loops excluded.
+Each node has its four-momentum :math:`x_i = (E, p_x, p_y, p_z)` and one Lorentz scalar,
+the signed log of its squared mass.
 
-The metric is :math:`(+, -, -, -)` and the momenta are in GeV throughout: the edge invariants are
-dimensionful and the signed log compresses them assuming that scale, so batches must be
-de-normalised before they reach this module.
+The metric is :math:`(+, -, -, -)` and the momenta are in GeV throughout: the edge
+invariants are dimensionful and the signed log compresses them assuming that scale.
+Batches must be de-normalised before they reach this module!!!
 """
 
 import torch
 from torch import nn
-
-# The squared mass is the only scalar attached to a node; the four-momentum carries the rest.
-N_SCALAR = 1
 
 
 def normsq4(p: torch.Tensor) -> torch.Tensor:
@@ -32,68 +26,32 @@ def dotsq4(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
 
 
 def psi(p: torch.Tensor) -> torch.Tensor:
-    """Signed log :math:`\\mathrm{sign}(p)\\,\\log(|p| + 1)`, equation (5) of arXiv:2201.08187.
+    """Signed log :math:`\\mathrm{sign}(p)\\,\\log(|p| + 1)`.
 
-    The edge invariants span several orders of magnitude in GeV squared; the signed log brings them
-    into the linear layers' range while keeping the sign that separates timelike from spacelike.
+    This is equation (5) of arXiv:2201.08187.
+    The edge invariants span several orders of magnitude in GeV squared; the signed log
+    brings them into the linear layers' range while keeping the sign that separates
+    timelike from spacelike.
     """
     return torch.sign(p) * torch.log(p.abs() + 1)
 
 
-def unsorted_segment_sum(
-    data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int
-) -> torch.Tensor:
-    """Sum rows of *data* (rows, width) into *num_segments* buckets by *segment_ids* (rows,)."""
-    # index_add_ has no deterministic CUDA implementation, hence the trainer's deterministic=False.
-    result = data.new_zeros((num_segments, data.shape[1]))
-    result.index_add_(0, segment_ids, data)
-    return result
-
-
-def unsorted_segment_mean(
-    data: torch.Tensor, segment_ids: torch.Tensor, num_segments: int
-) -> torch.Tensor:
-    """Mean of the rows of *data* per bucket; buckets that receive no row stay zero."""
-    result = data.new_zeros((num_segments, data.shape[1]))
-    count = data.new_zeros((num_segments, data.shape[1]))
-    result.index_add_(0, segment_ids, data)
-    count.index_add_(0, segment_ids, torch.ones_like(data))
-    return result / count.clamp(min=1)
-
-
-def _build_phi_x(n_hidden: int) -> nn.Sequential:
-    """Return the network weighting each coordinate step, initialised near zero.
-
-    The last-layer gain of 0.001 is the reference implementation's: the coordinate update feeds
-    the next block's invariants, and full-gain initial steps stall training.
-    """
-    last = nn.Linear(n_hidden, 1, bias=False)
-    nn.init.xavier_uniform_(last.weight, gain=0.001)
-    return nn.Sequential(nn.Linear(n_hidden, n_hidden), nn.ReLU(), last)
-
-
 class LGEB(nn.Module):
-    """Lorentz Group Equivariant Block: one round of message passing.
+    """Lorentz Group Equivariant Block: one round of message passing over a flat node set.
 
-    :param n_node_attr: width of the invariant node attributes appended to every update.
+    Two edge attributes enter the messages, the norm of :math:`x_i - x_j` and the product
+    :math:`x_i \\cdot x_j`.
+
+    :param n_hidden: width of the node scalars and of the messages.
     :param c_weight: step size of the coordinate update.
     :param last_layer: drop the coordinate update, whose result no later block reads.
     """
 
-    def __init__(
-        self,
-        n_input: int,
-        n_output: int,
-        n_hidden: int,
-        n_node_attr: int = 1,
-        c_weight: float = 1.0,
-        last_layer: bool = False,
-    ) -> None:
+    def __init__(self, n_hidden: int, c_weight: float = 1.0, last_layer: bool = False) -> None:
         super().__init__()
         self.c_weight = c_weight
-        # Two edge attributes: the norm of x_i - x_j and the product x_i . x_j.
         self.phi_e = nn.Sequential(
-            nn.Linear(2 * n_input + 2, n_hidden, bias=False),
+            nn.Linear(2 * n_hidden + 2, n_hidden, bias=False),
             nn.BatchNorm1d(n_hidden),
             nn.ReLU(),
             nn.Linear(n_hidden, n_hidden),
@@ -101,12 +59,16 @@ class LGEB(nn.Module):
         )
         self.phi_m = nn.Sequential(nn.Linear(n_hidden, 1), nn.Sigmoid())
         self.phi_h = nn.Sequential(
-            nn.Linear(n_hidden + n_input + n_node_attr, n_hidden),
+            nn.Linear(2 * n_hidden + 1, n_hidden),
             nn.BatchNorm1d(n_hidden),
             nn.ReLU(),
-            nn.Linear(n_hidden, n_output),
+            nn.Linear(n_hidden, n_hidden),
         )
-        self.phi_x = None if last_layer else _build_phi_x(n_hidden)
+        self.phi_x = None
+        if not last_layer:
+            last = nn.Linear(n_hidden, 1, bias=False)
+            nn.init.xavier_uniform_(last.weight, gain=0.001)
+            self.phi_x = nn.Sequential(nn.Linear(n_hidden, n_hidden), nn.ReLU(), last)
 
     def forward(
         self,
@@ -116,11 +78,13 @@ class LGEB(nn.Module):
         dst: torch.Tensor,
         node_attr: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run one block over a flat node set, returning the updated ``(h, x)``.
+        """Return the updated ``(h, x)``.
 
-        Shapes: *h* (nodes, n_input) scalars, *x* (nodes, 4) four-momenta, *node_attr* (nodes,
-        n_node_attr) invariant attributes, and *src*, *dst* (edges,) the nodes each edge updates
-        and reads from.
+        :param h: hidden nodes with shape (nodes, n_hidden)
+        :param x: data 4-vector with shape (nodes, 4)
+        :param src: the source edges (edges,)
+        :param dst: the destination edges (edges,)
+        :param node_attr: the attributes associated with each node, here just (nodes, 1)
         """
         x_diff = x[src] - x[dst]
         m = self._messages(h, x, x_diff, src, dst)
@@ -136,7 +100,7 @@ class LGEB(nn.Module):
         src: torch.Tensor,
         dst: torch.Tensor,
     ) -> torch.Tensor:
-        """Return the (edges, n_hidden) messages, each gated by its own learned weight."""
+        """The (edges, n_hidden) messages, each gated by its own learned weight."""
         norms = psi(normsq4(x_diff)).unsqueeze(1)
         dots = psi(dotsq4(x[src], x[dst])).unsqueeze(1)
         m = self.phi_e(torch.cat([h[src], h[dst], norms, dots], dim=1))
@@ -146,42 +110,29 @@ class LGEB(nn.Module):
         self, h: torch.Tensor, m: torch.Tensor, node_attr: torch.Tensor, src: torch.Tensor
     ) -> torch.Tensor:
         """Add to each node the response to its summed incoming messages."""
-        agg = unsorted_segment_sum(m, src, h.shape[0])
+        agg = h.new_zeros(h.shape[0], m.shape[1]).index_add_(0, src, m)
         return h + self.phi_h(torch.cat([h, agg, node_attr], dim=1))
 
     def _update_coordinates(
         self, x: torch.Tensor, x_diff: torch.Tensor, m: torch.Tensor, src: torch.Tensor
     ) -> torch.Tensor:
-        """Move each node along the weighted mean of its edge differences.
+        """Move each node along the mean of its weighted edge differences.
 
-        The step is a combination of four-momentum differences, so it transforms like one and the
-        block stays equivariant.
+        The step is a combination of four-momentum differences.
+        This transforms like a four-momentum so the net stays equivariant.
         """
         trans = x_diff * self.phi_x(m)
-        # Clamped at +-100 GeV per component as in the reference implementation: one outlying pair
-        # would otherwise move a node far enough to overflow the next block's signed log.
+        # Clamped at +-100 GeV per component as in the reference implementation.
+        # One outlying pair would otherwise move a node far enough to overflow in the
+        # next block's signed log. This breaks equivariance unfortunately.
         trans = trans.clamp(min=-100, max=100)
-        return x + self.c_weight * unsorted_segment_mean(trans, src, x.shape[0])
-
-
-def _build_blocks(n_hidden: int, n_layers: int, c_weight: float) -> nn.ModuleList:
-    """Stack the message-passing blocks, the last of them without its coordinate update."""
-    blocks = [
-        LGEB(
-            n_hidden,
-            n_hidden,
-            n_hidden,
-            n_node_attr=N_SCALAR,
-            c_weight=c_weight,
-            last_layer=(layer == n_layers - 1),
-        )
-        for layer in range(n_layers)
-    ]
-    return nn.ModuleList(blocks)
+        step = x.new_zeros(x.shape).index_add_(0, src, trans)
+        count = x.new_zeros(x.shape).index_add_(0, src, torch.ones_like(trans))
+        return x + self.c_weight * step / count.clamp(min=1)
 
 
 class LorentzNetGraph(nn.Module):
-    """LorentzNet over a batch of jets held as a fixed-width four-momentum tensor.
+    """LorentzNet over a batch of jets that are a fixed-width four-momentum tensor.
 
     :param n_hidden: width of the node scalars inside the blocks.
     :param c_weight: step size of the coordinate updates.
@@ -199,34 +150,27 @@ class LorentzNetGraph(nn.Module):
     ) -> None:
         super().__init__()
         self.n_hidden = n_hidden
-        self.embedding = nn.Linear(N_SCALAR, n_hidden)
-        self.blocks = _build_blocks(n_hidden, n_layers, c_weight)
+        # The squared mass is a node's only scalar; the four-momentum carries the rest.
+        self.embedding = nn.Linear(1, n_hidden)
+        self.blocks = nn.ModuleList(
+            [LGEB(n_hidden, c_weight, last_layer=(i == n_layers - 1)) for i in range(n_layers)]
+        )
         self.graph_dec = nn.Sequential(
             nn.Linear(n_hidden, n_hidden),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(n_hidden, n_class),
         )
-        self._register_edge_template(nconstituents)
-
-    def _register_edge_template(self, nconstituents: int) -> None:
-        """Store the edges of one fully connected jet, self-loops excluded.
-
-        Buffers, so they follow the module onto the device and no edge list is rebuilt from Python
-        at every step; not persistent, since *nconstituents* alone determines them.
-        """
+        # The edges of one fully connected jet, self-loops excluded.
         idx = torch.arange(nconstituents)
         src, dst = torch.meshgrid(idx, idx, indexing="ij")
-        off_diagonal = src != dst
-        self.register_buffer("edge_src", src[off_diagonal], persistent=False)
-        self.register_buffer("edge_dst", dst[off_diagonal], persistent=False)
+        self.register_buffer("edge_src", src[src != dst], persistent=False)
+        self.register_buffer("edge_dst", dst[src != dst], persistent=False)
 
     def _batch_edges(self, atom_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Index the edges that join two real constituents, over the flattened node axis.
 
-        Padded constituents are dropped here rather than masked downstream, so the cost follows the
-        jet multiplicity and not the slot count: the dense graph on 150 slots carries 22 350 edges
-        per jet against the 2 900 that the record's mean multiplicity of 49 constituents needs.
+        Padded constituents are dropped to reduce the cost of the graphs.
 
         :param atom_mask: (jets, constituents) boolean, true on real constituents.
         :return: two (edges,) index tensors into the flattened jets * constituents axis.
@@ -239,18 +183,17 @@ class LorentzNetGraph(nn.Module):
     def forward(self, pmu: torch.Tensor) -> torch.Tensor:
         """Return the class logits of a batch of jets.
 
-        :param pmu: (jets, constituents, 4) four-momenta [E, px, py, pz] in GeV, with padded
-            constituents as all-zero rows.
-        :return: (jets, n_class) logits, invariant under a Lorentz transformation of *pmu* and
-            unchanged by how many slots the padding fills.
+        :param pmu: (jets, constituents, 4) four-momenta [E, px, py, pz] in GeV,
+            with padded constituents as all-zero rows.
+        :return: (jets, n_class) logits, invariant under a Lorentz transformation of
+            *pmu* and unchanged by how many slots the padding fills.
         """
         n_jets, n_constituents, _ = pmu.shape
         atom_mask = pmu[..., 0] != 0.0
         src, dst = self._batch_edges(atom_mask)
-        # Conditioning: psi(m^2), as in the beamless reference implementation, rather than psi(m)
-        # of the beam variant. A nominally massless constituent has m^2 at the float32 rounding of
-        # E^2 - |p|^2, whose root is O(10 MeV) at 20 GeV, enough to move the logits by a per cent
-        # under a Lorentz transformation that should leave them alone.
+        # A nominally massless constituent has m^2 at the float32 rounding of
+        # E^2 - |p|^2, whose root is O(10 MeV) at 20 GeV, enough to move the logits by
+        # a per cent under a Lorentz transformation that should not shift them.
         scalars = psi(normsq4(pmu)).reshape(n_jets * n_constituents, 1)
         x = pmu.reshape(n_jets * n_constituents, 4)
 
@@ -262,8 +205,8 @@ class LorentzNetGraph(nn.Module):
     def _pool(self, h: torch.Tensor, atom_mask: torch.Tensor) -> torch.Tensor:
         """Average the node scalars of each jet over its real constituents.
 
-        Over the real constituents rather than the slots, unlike the reference implementation, so
-        that widening the padding leaves the logits alone.
+        Over the real constituents rather than the slots, unlike the reference
+        implementation, so that widening the padding leaves the logits alone.
         """
         counts = atom_mask.sum(dim=1, keepdim=True).clamp(min=1).to(h.dtype)
         masked = h * atom_mask.reshape(-1, 1).to(h.dtype)

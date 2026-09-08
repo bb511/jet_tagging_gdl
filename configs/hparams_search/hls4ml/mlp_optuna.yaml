@@ -3,6 +3,7 @@
 defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: tpe
+  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
 
 # One TPE study per (nconstituents, method, augmentation_scheme) regime for the MLP, on the main
 # run's val/acc_best. Every regime shares this space and its 200 trials, so augmentation and SCL are

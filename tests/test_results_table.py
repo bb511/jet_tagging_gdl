@@ -187,7 +187,7 @@ def test_a_baseline_row_carries_no_comparison_of_its_own(tmp_path: Path) -> None
     assert row["delta_flip_ci_lower"] == "nan"
     assert row["delta_flip_bootstrap_pvalue"] == "nan"
     # Nothing reported is not no difference.
-    assert row["delta_flip_significant_boot_005"] == "no"
+    assert row["delta_flip_significant_boot_005"] == "nan"
 
 
 def test_the_regime_and_the_feature_list_or_the_subdir_name_the_table(tmp_path: Path) -> None:

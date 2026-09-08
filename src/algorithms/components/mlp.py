@@ -1,8 +1,4 @@
-"""Plain multi-layer perceptron, the network behind the flattened-input tagger.
-
-The hidden layers are linear, then the optional batch normalisation, then the activation; the
-output layer carries neither.
-"""
+"""Multi-layer preceptron implementation."""
 
 import torch
 from torch import nn
