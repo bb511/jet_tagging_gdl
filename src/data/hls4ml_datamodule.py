@@ -32,6 +32,12 @@ REPO_ID = "fastmachinelearning/hls4ml_lhc_jets_150p"
 SUPPORTED_METHODS = ("augmentation", "symm_loss")
 SUPPORTED_SCHEMES = ("none", "so2", "so3", "lorentz", "lorentz_iso")
 
+# Loader processes for validation and test. They only gather, where the training loader may also
+# run the online transform, and every worker is a fork whose private memory grows to hundreds of
+# MB as Python's refcounting breaks copy-on-write. Four NGT pods were OOMKilled on 2026-09-09
+# carrying 32 persistent workers per run at 150 constituents, half of them validating.
+EVAL_WORKERS = 2
+
 warnings.filterwarnings(
     "ignore",
     message=r"Your `IterableDataset` has `__len__` defined\..*",
@@ -171,13 +177,18 @@ class HLS4MLDataModule(LightningDataModule):
         return 0 if self.data_val is None else self.data_val.n
 
     def train_dataloader(self) -> DataLoader:
-        return self._make_dataloader(self.data_train)
+        return self._make_dataloader(self.data_train, self.num_workers)
 
     def val_dataloader(self) -> DataLoader:
-        return self._make_dataloader(self.data_val)
+        return self._make_dataloader(self.data_val, self._eval_workers)
 
     def test_dataloader(self) -> DataLoader:
-        return self._make_dataloader(self.data_test)
+        return self._make_dataloader(self.data_test, self._eval_workers)
+
+    @property
+    def _eval_workers(self) -> int:
+        """Loader processes for a pass that never transforms; 0 workers stays 0."""
+        return min(self.num_workers, EVAL_WORKERS)
 
     def _record_root(self) -> str:
         """Where the data is stored on the machine."""
@@ -293,7 +304,7 @@ class HLS4MLDataModule(LightningDataModule):
     def _dataset(self, x: torch.Tensor, y: torch.Tensor, **kwargs) -> HLS4MLDataset:
         return HLS4MLDataset(x.float(), y.float(), batch_size=self.batch_size, **kwargs)
 
-    def _make_dataloader(self, dataset: HLS4MLDataset) -> DataLoader:
+    def _make_dataloader(self, dataset: HLS4MLDataset, num_workers: int) -> DataLoader:
         """Make the loader for each of the train, validation, and test data.
 
         The dataset batches internally. An element of this loader is one batch.
@@ -302,8 +313,8 @@ class HLS4MLDataModule(LightningDataModule):
         return DataLoader(
             dataset=dataset,
             batch_size=1,
-            num_workers=self.num_workers,
-            persistent_workers=self.num_workers > 0,
+            num_workers=num_workers,
+            persistent_workers=num_workers > 0,
             pin_memory=self.pin_memory,
             collate_fn=lambda batch: batch[0],
         )

@@ -199,13 +199,26 @@ def test_composing_the_record_leaves_the_running_hydra_alone(tmp_path: Path) -> 
         assert GlobalHydra.instance().hydra is outer
 
 
+def test_only_the_training_loader_takes_the_configured_worker_count() -> None:
+    # Validation and test only gather, and a persistent worker per pass is what filled the pods'
+    # memory: 16 training plus 16 validating forks per run at 150 constituents.
+    module = _datamodule(num_workers=16)
+    dataset = HLS4MLDataset(torch.zeros(16, 1, 1), labels(16), batch_size=8)
+    module.data_train = module.data_val = module.data_test = dataset
+
+    assert module.train_dataloader().num_workers == 16
+    assert module.val_dataloader().num_workers == datamodule_module.EVAL_WORKERS
+    assert module.test_dataloader().num_workers == datamodule_module.EVAL_WORKERS
+    assert _datamodule(num_workers=0).val_dataloader().num_workers == 0
+
+
 def test_persistent_workers_reshuffle_every_epoch_and_cover_every_jet_once() -> None:
     # A worker forked afresh each epoch would draw from the shuffler's untouched state and replay
     # the first permutation; persistence lets its copy advance as the driver's own would.
     x = torch.arange(40.0).view(40, 1, 1)
     shuffler = torch.Generator().manual_seed(0)
     dataset = HLS4MLDataset(x, labels(40), batch_size=10, shuffler=shuffler)
-    loader = _datamodule(num_workers=2)._make_dataloader(dataset)
+    loader = _datamodule(num_workers=2)._make_dataloader(dataset, 2)
 
     epochs = [[int(batch_x[0, 0, 0]) for batch_x, _ in loader] for _ in range(3)]
 
