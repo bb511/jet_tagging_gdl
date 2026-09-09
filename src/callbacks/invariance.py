@@ -1,24 +1,4 @@
-"""Measure the invariance of a trained classifier under SO(2), SO(3) and Lorentz boosts.
-
-Four groups are probed: SO(2), SO(3), the boost along the beam (``lorentz``) and the boost of
-isotropic direction (``lorentz_iso``), the last being the full-group check LorentzNet embeds.
-The results table tabulates the first three, so ``lorentz_iso`` reaches MLflow alone.
-
-The probe runs on the test set alone, reporting two families per group. The flip family is
-paired, each jet against its own transform, and its label-aware breakdown says whether a flip
-repaired a wrong prediction or broke a right one. The Wasserstein family is unpaired, over the
-whole test set, so a model that scrambles individual jets while preserving the ensemble scores
-well there and badly on the flips. Transforms come from
-:func:`~src.data.components.augmentation.make_transform`, the factory the online augmentation and
-the symmetry-consistency loss also draw from, so what is measured cannot drift from what was
-trained on.
-
-A second model may be attached as :attr:`InvarianceMetricCallback.baseline_module`, the same
-architecture and constituent count trained without any symmetry. Both models then see the same
-transformed batches, the baseline's own metrics are reported under ``baseline/``, and the
-difference between the two is reported as ``delta_*``, signed so that a positive value means the
-trained model does better.
-"""
+"""Measure the invariance of a trained classifier under various symmetry groups."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -36,7 +16,7 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 GROUPS = ("so2", "so3", "lorentz", "lorentz_iso")
 
-# The four populations a group's label transitions are counted into.
+# The four categories that the labels are counted into.
 FLIP_KEYS = ("wrong_before", "recovered", "correct_before", "stable")
 
 
@@ -46,12 +26,7 @@ def _zero_counts() -> dict[str, int]:
 
 
 def _flip_rates(counts: dict[str, int]) -> dict[str, float]:
-    """The three transition probabilities of one group, conditioned on being right before.
-
-    ``flip_recover`` is P(correct after | wrong before), ``flip_stable`` is P(correct after |
-    correct before) and ``flip_degrade`` its complement. NaN where the conditioning population is
-    empty: a classifier that was never wrong has nothing to recover, which is not a zero rate.
-    """
+    """The three transition probabilities of one group, conditioned on being right."""
     wrong, recovered = counts["wrong_before"], counts["recovered"]
     correct, stable = counts["correct_before"], counts["stable"]
     nan = float("nan")

@@ -1,5 +1,6 @@
 # Run the training.
 
+import gc
 from typing import Any
 
 import hydra
@@ -147,8 +148,15 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 def main(cfg: DictConfig) -> float | None:
     """Train, and return ``cfg.optimized_metric`` for Optuna to maximise."""
     extras(cfg)
-    metric_dict, _ = train(cfg)
-    return get_metric_value(metric_dict, cfg.get("optimized_metric"))
+    metric_dict, object_dict = train(cfg)
+    value = get_metric_value(metric_dict, cfg.get("optimized_metric"))
+    # A sweep runs its trials in one process, and the trainer, the module and the datamodule
+    # reference one another, so a finished trial's split tensors are cyclic garbage that only a
+    # collection frees: CPython's own trigger counts allocations, not bytes, and a driver of the
+    # 150-constituent studies grows by a dataset per trial without this.
+    del metric_dict, object_dict
+    gc.collect()
+    return value
 
 
 if __name__ == "__main__":
