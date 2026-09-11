@@ -32,7 +32,7 @@
 #     algorithm.optimizer.lr=0.004229335353885937 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/lorentznet/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/lorentznet/nconst16/baseline
@@ -57,7 +57,7 @@
 #     algorithm.optimizer.lr=0.0016318812488392122 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/lorentznet/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/lorentznet/nconst50/baseline
@@ -82,7 +82,7 @@
 #     algorithm.optimizer.lr=0.0019270787396216814 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/lorentznet/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/lorentznet/nconst150/baseline

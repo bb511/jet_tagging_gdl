@@ -19,7 +19,6 @@ from src.utils.omegaconf import register_resolvers
 # Before Hydra composes: the configs interpolate ${len:}, ${short_hash:} and ${fold_label:}.
 register_resolvers()
 
-from src.callbacks.results_table import ResultsTableCallback
 from src.utils import (
     RankedLogger,
     extras,
@@ -59,8 +58,8 @@ def _fold_kwargs(cfg: DictConfig) -> dict[str, int]:
 def _manifest_run(cfg: DictConfig, trainer: Trainer) -> ManifestRun | None:
     """This run's manifest entry, or ``None`` when it saved no checkpoint.
 
-    ``src/eval.py`` depends on loading checkpoints, so if no checkpoints are produced
-    then no evaluation can be made.
+    ``src/eval.py`` depends on loading checkpoints, so if no checkpoints are produced then no
+    evaluation can be made.
     """
     try:
         checkpoint_path = best_or_last_checkpoint(trainer)
@@ -112,7 +111,6 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     log.info("Instantiating callbacks...")
     callbacks: list[Callback] = instantiate_callbacks(cfg.get("callbacks"))
     # The results table writes its row at test end, in src/eval.py; here it would only log.
-    callbacks = [cb for cb in callbacks if not isinstance(cb, ResultsTableCallback)]
 
     log.info("Instantiating loggers...")
     logger: list[Logger] = instantiate_loggers(cfg.get("logger"))

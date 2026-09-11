@@ -5,6 +5,7 @@ defaults:
   - data: hls4ml
   - algorithm: deepsets
   - callbacks: default
+  - results_table: default
   - trainer: default
   - paths: default
   - extras: default
@@ -29,13 +30,6 @@ ckpt_path: null
 # tested in turn. A directory instead merges the main run's manifest there with the fold_<i>/ ones
 # of folds trained as separate processes (fold=<i>).
 checkpoint_manifest_path: null
-
-# The manifest of the augmentation/none training of the same architecture and constituent count,
-# a file or a run directory as above. Its runs are matched to this one's by fold label and scored
-# on the same transformed batches, which is where the baseline_* and delta_* columns come from.
-# Left null on a baseline run, and on LorentzNet, which is trained in the baseline regime alone
-# and so has no baseline to compare with.
-baseline_checkpoint_manifest_path: null
 
 seed: 12345
 

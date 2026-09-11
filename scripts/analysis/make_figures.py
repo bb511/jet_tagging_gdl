@@ -5,25 +5,33 @@ One figure per training regime (augmentation, SCL), a grid of one bar row per me
 per architecture. Every bar is a delta against the unaugmented baseline of the same model and
 constituent count, so positive is better in every row::
 
-    accuracy (clean)        pp, group - baseline
-    accuracy (transformed)  pp, from delta_accuracy_transformed_*
-    <invariance metric>     from delta_<metric>_*, e.g. the Wasserstein distance between the
-                            clean and the transformed logits
+    accuracy (clean)        pp, the deltas table's test_acc rows
+    accuracy (transformed)  pp, its accuracy_transformed rows
+    <invariance metric>     its wasserstein rows, the distance between the clean and the
+                            transformed logits
     self-consistency        stable fraction 1 - FR, the recover rate overlaid as a band
     FLOPs                   a text footer, one regime-independent number per (model, N)
 
 Bars cover SO(2), SO(3) and Lorentz; the unaugmented run is the zero line by construction.
 
 ``--features`` names the one ``results/<features>/`` directory to read, since the directories hold
-different input feature lists and their rows are not comparable. The delta columns are written at
-evaluation time, so a row carries them only if its eval run was given a
-``baseline_checkpoint_manifest_path``::
+different input feature lists and their rows are not comparable. A results row holds one run's own
+numbers, so every delta comes from the tables ``compare_to_baseline.py`` writes, named with
+``--deltas``: which run is the reference is chosen there. Their rows are matched on the method as
+well as the model, so both regimes are named on one command line::
 
-    python3 scripts/analysis/make_figures.py --features px_py_pz_e
+    python3 scripts/analysis/compare_to_baseline.py \\
+        results/px_py_pz_e/results_table_augmentation.csv \\
+        results/px_py_pz_e/results_table_baseline.csv
+    python3 scripts/analysis/compare_to_baseline.py \\
+        results/px_py_pz_e/results_table_symm_loss.csv \\
+        results/px_py_pz_e/results_table_baseline.csv
+    python3 scripts/analysis/make_figures.py --features px_py_pz_e \\
+        --deltas results/px_py_pz_e/deltas_augmentation_vs_baseline.csv \\
+                 results/px_py_pz_e/deltas_symm_loss_vs_baseline.csv
 
-The accuracy and stable-fraction deltas are paired per fold, the unit every ``delta_<metric>``
-column of the results table averages over: KFold splits on a fixed seed, so fold i is the same
-data in every condition.
+Every delta is paired per fold, the unit ``compare_to_baseline.py`` averages over, and signed there
+so that positive is the better model, which is what puts every row of the figure the same way up.
 
 The figures are SVG rather than PDF because matplotlib's PDF backend emits mathtext as Type 3
 fonts, which PDF.js and the VSCode viewers built on it garble.
@@ -32,32 +40,33 @@ fonts, which PDF.js and the VSCode viewers built on it garble.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import math
-import statistics
 import sys
 from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+
+# common.py puts the repository root on the import path, so it is imported before src.symmetry.
+from common import (
+    AUG_DISPLAY,
+    GROUP_LABEL,
+    REPO_ROOT,
+    delta_key,
+    detect_inv_metric_suffix,
+    index_deltas,
+    metric_display,
+    model_display,
+    opt_float,
+    read_csv,
+    read_deltas,
+    shorten,
+)
 from matplotlib import patheffects
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-# make_latex_table.py is loaded by path, not imported: scripts/ is not a package, so there is no
-# module name to import it under, and anchoring on the sibling file keeps the two in step wherever
-# the directory is copied to.
-_SPEC = importlib.util.spec_from_file_location(
-    "make_latex_table", Path(__file__).resolve().parent / "make_latex_table.py"
-)
-_make_latex_table = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_make_latex_table)
-_read_csv = _make_latex_table.read_csv
-_metric_display = _make_latex_table._metric_display
-_model_display = _make_latex_table._model_display
-_detect_inv_metric = _make_latex_table._detect_inv_metric_suffix
+from src.symmetry import TABULATED_GROUPS
 
 # Match the thesis body font: Latin Modern Roman is Computer Modern.
 mpl.rcParams.update(
@@ -79,17 +88,13 @@ mpl.rcParams.update(
 )
 
 # Colourblind-safe palette (davidmathlogic.com/colorblind, the IBM/Wong four-colour set).
-COL = {
-    "None": "#004D40",
-    "SO(2)": "#1E88E5",
-    "SO(3)": "#FFC107",
-    "Lorentz": "#D81B60",
-}
+COL = {"None": "#004D40", "SO(2)": "#1E88E5", "SO(3)": "#FFC107", "Lorentz": "#D81B60"}
 RECOVER_COLOR = "#1a1a1a"
 
-# Display label -> augmentation_scheme, the three groups a figure draws bars for.
-GROUPS = {"SO(2)": "so2", "SO(3)": "so3", "Lorentz": "lorentz"}
-AUG_DISPLAY = {"none": "None", "so2": "SO(2)", "so3": "SO(3)", "lorentz": "Lorentz"}
+# Display label -> augmentation_scheme, the groups a figure draws bars for. Which groups, and in
+# what order, is TABULATED_GROUPS, so a group the study adds raises here rather than going missing
+# from the figures; it needs a colour in COL and an offset in OFFSET as well.
+GROUPS = {GROUP_LABEL[group]: group for group in TABULATED_GROUPS}
 
 WIDTH = 0.26
 OFFSET = {"SO(2)": -WIDTH, "SO(3)": 0.0, "Lorentz": WIDTH}
@@ -99,6 +104,12 @@ OFFSET = {"SO(2)": -WIDTH, "SO(3)": 0.0, "Lorentz": WIDTH}
 FLOPS_RATIO = 0.16
 BOX = dict(boxstyle="round,pad=0.25", facecolor="#f0f0f0", edgecolor="#bbbbbb", linewidth=0.6)
 
+# The style of the error whiskers, and of the recover-rate band. The recover rate is
+# P(correct after | wrong before), a different conditional from the stable fraction the bar
+# carries, so it is drawn as a band across the bar rather than as a tick on it.
+WHISKER = dict(fmt="none", ecolor="#333", elinewidth=0.9, capsize=2.2, capthick=0.9, zorder=3)
+BAND = dict(colors=RECOVER_COLOR, linewidth=6.0, capstyle="butt", zorder=4, alpha=0.9)
+
 # Preferred column order; a model present in the data but not listed here is appended
 # alphabetically, so a re-added architecture (see ARCHITECTURES.md) needs no edit here.
 MODEL_ORDER = ["DeepSets", "MLP", "JetFormer", "LorentzNet"]
@@ -106,53 +117,18 @@ MODEL_ORDER = ["DeepSets", "MLP", "JetFormer", "LorentzNet"]
 # Regime label -> results_table_<stem>.csv filename stem.
 REGIME_FILE_STEM = {"Augmentation": "augmentation", "SCL": "symm_loss"}
 
+# One results row as the panels read it: a (mean, deviation) pair per metric, None where the deltas
+# tables hold no row for it, and the FLOPs count.
+Entry = dict[str, tuple[float, float] | float | None]
 
-def _opt_float(row: dict[str, str], key: str) -> float | None:
-    """A numeric column, or None when it is absent, blank or NaN."""
-    try:
-        value = float(row.get(key, "nan"))
-    except (TypeError, ValueError):
+
+def _delta(deltas: dict, key: tuple, scale: float = 1.0) -> tuple[float, float] | None:
+    """One deltas row as (mean, deviation), or None when the tables hold no such row."""
+    row = deltas.get(key)
+    mean = opt_float(row, "delta_mean") if row else None
+    if mean is None:
         return None
-    return None if math.isnan(value) else value
-
-
-def _parse_folds(raw) -> list[float] | None:
-    """Parse a semicolon-separated per-fold column; None if it is empty or unparsable."""
-    if not raw:
-        return None
-    try:
-        values = [float(v) for v in str(raw).strip().split(";") if v != ""]
-    except ValueError:
-        return None
-    return None if not values or any(math.isnan(v) for v in values) else values
-
-
-def _stats(values: list[float]) -> tuple[float, float]:
-    """Mean and sample standard deviation; the deviation is zero for a single value."""
-    return sum(values) / len(values), (statistics.stdev(values) if len(values) > 1 else 0.0)
-
-
-def _acc_folds_pct(row: dict[str, str]) -> list[float] | None:
-    """Per-fold test accuracy in percent, whatever units the CSV used."""
-    folds = _parse_folds(row.get("test_acc_folds", ""))
-    if folds is None:
-        return None
-    scale = 100.0 if max(folds) < 2.0 else 1.0
-    return [v * scale for v in folds]
-
-
-def _paired_delta(
-    a_folds: list[float] | None, b_folds: list[float] | None
-) -> tuple[float | None, float | None]:
-    """Mean and deviation of (a - b) over paired per-fold values.
-
-    KFold splits on a fixed seed, so fold i is the same data in both conditions and the per-fold
-    difference is the unit to average, as it is for every ``delta_<metric>`` column of the results
-    table.
-    """
-    if a_folds is None or b_folds is None or len(a_folds) != len(b_folds) or not a_folds:
-        return None, None
-    return _stats([a - b for a, b in zip(a_folds, b_folds)])
+    return mean * scale, (opt_float(row, "delta_std") or 0.0) * scale
 
 
 def _fmt_flops(value: float | None) -> str:
@@ -171,60 +147,32 @@ def _scheme_of(row: dict[str, str]) -> str:
     return str(row.get("augmentation_scheme", "")).lower()
 
 
-def _cell(row: dict[str, str]) -> tuple[str, int]:
-    """The (model, constituent count) the row belongs to."""
-    return _model_display(row.get("model", "")), int(row.get("nconstituents", 0))
-
-
-def _discover_rows(results_dir: Path, filename_stem: str, features: str) -> list[dict[str, str]]:
+def _discover_rows(results_dir: Path, stem: str, features: str) -> list[dict[str, str]]:
     """Read results/<features>/results_table_<stem>.csv, the one directory --features names."""
     rows: list[dict[str, str]] = []
-    for csv_path in sorted(results_dir.glob(f"{features}/results_table_{filename_stem}.csv")):
-        found = _read_csv(csv_path)
+    for path in sorted(results_dir.glob(f"{features}/results_table_{stem}.csv")):
+        found = read_csv(path)
         rows.extend(found)
-        shown = csv_path.relative_to(REPO_ROOT) if REPO_ROOT in csv_path.parents else csv_path
-        print(f"[load] {len(found):3d} rows <- {shown}")
+        print(f"[load] {len(found):3d} rows <- {shorten(path)}")
     return rows
 
 
-def _group_folds(row: dict[str, str], suffix: str) -> dict[str, list[float]]:
-    """The per-group fold columns (``so2_flip_stable_folds`` and the like), keyed by scheme.
+def _extract_entry(row: dict[str, str], deltas: dict, inv_metric: str) -> Entry:
+    """One results row as the entry a panel reads, its deltas looked up rather than computed.
 
-    Read per group rather than off the row's own scheme, so an unaugmented row can be paired
-    against an SO(2)-trained one on the SO(2) value specifically.
+    Every lookup is keyed on the row's own method, model, constituent count and group, so an
+    unaugmented row finds nothing: it is the zero line the others are drawn against. The two
+    accuracies are scaled to percentage points, the units the results tables write them in being
+    proportions.
     """
-    folds = {g: _parse_folds(row.get(f"{g}_{suffix}", "")) for g in GROUPS.values()}
-    return {g: v for g, v in folds.items() if v is not None}
-
-
-def _delta_pp(row: dict[str, str], key: str, trained: bool) -> float | None:
-    """A delta column in percentage points; the callback writes accuracies as proportions."""
-    value = _opt_float(row, key) if trained else None
-    return None if value is None else value * 100.0
-
-
-def _extract_entry(row: dict[str, str], inv_metric: str) -> dict[str, float | None]:
-    """One results row as the entry a panel reads.
-
-    The ``dAcc``, ``dStab`` and ``dRec`` keys stay empty here: they are paired against the row's
-    own baseline, which is known only once every row is indexed (see :func:`_fill_deltas`).
-    """
-    trained = _scheme_of(row) in set(GROUPS.values())
+    group = _scheme_of(row)
     return {
-        "accfolds": _acc_folds_pct(row),
-        "stabfolds_by_group": _group_folds(row, "flip_stable_folds"),
-        "recfolds_by_group": _group_folds(row, "flip_recover_folds"),
-        "flops": _opt_float(row, "flops_mean"),
-        "dW": _opt_float(row, f"delta_{inv_metric}_mean") if trained else None,
-        "dWsd": _opt_float(row, f"delta_{inv_metric}_std") if trained else None,
-        "dAccTrans": _delta_pp(row, "delta_accuracy_transformed_mean", trained),
-        "dAccTransSd": _delta_pp(row, "delta_accuracy_transformed_std", trained),
-        "dAcc": None,
-        "dAccSd": None,
-        "dStab": None,
-        "dStabSd": None,
-        "dRec": None,
-        "dRecSd": None,
+        "flops": opt_float(row, "flops_mean"),
+        "acc": _delta(deltas, delta_key(row, "", "test_acc"), 100.0),
+        "acc_t": _delta(deltas, delta_key(row, group, "accuracy_transformed"), 100.0),
+        "inv": _delta(deltas, delta_key(row, group, inv_metric)),
+        "stable": _delta(deltas, delta_key(row, group, "flip_stable")),
+        "recover": _delta(deltas, delta_key(row, group, "flip_recover")),
     }
 
 
@@ -235,61 +183,34 @@ def _baseline_rows(results_dir: Path, features: str, regime_rows: dict) -> list[
     the rows can be present while results_table_baseline.csv is not.
     """
     rows = _discover_rows(results_dir, "baseline", features)
-    if rows:
-        return rows
-    return [r for found in regime_rows.values() for r in found if _scheme_of(r) == "none"]
+    return rows or [r for found in regime_rows.values() for r in found if _scheme_of(r) == "none"]
 
 
-def _index_regime(D: dict, regime: str, rows: list[dict], baselines: list[dict], metric: str):
-    """Index one regime's rows, and the unaugmented rows again under that regime.
+def _index_rows(regime_rows: dict, baselines: list[dict], deltas: dict, metric: str) -> dict:
+    """(regime, model, N, group) -> entry, over the regimes that have a table.
 
-    Every bar is a delta against the unaugmented run of the same model and constituent count, so
-    each regime needs its own copy of that row to be measured against.
+    The unaugmented rows are indexed again under every regime: each regime's bars are deltas
+    against the unaugmented run of the same model and constituent count, whose row carries the
+    FLOPs and holds the zero line. A row of a scheme the figures draw no bars for is left out.
     """
-    for row in baselines:
-        if _scheme_of(row) == "none":
-            D[(regime, *_cell(row), "None")] = _extract_entry(row, metric)
-    for row in rows:
-        group = AUG_DISPLAY.get(_scheme_of(row), "None")
-        if group != "None":
-            D[(regime, *_cell(row), group)] = _extract_entry(row, metric)
-
-
-def _index_rows(regime_rows: dict, baselines: list[dict], metric: str) -> dict:
-    """(regime, model, N, group) -> entry, over the regimes that have a table."""
-    D: dict[tuple[str, str, int, str], dict[str, float | None]] = {}
+    zero = [row for row in baselines if _scheme_of(row) == "none"]
+    index: dict[tuple[str, str, int, str], Entry] = {}
     for regime, rows in regime_rows.items():
-        if rows:
-            _index_regime(D, regime, rows, baselines, metric)
-    return D
-
-
-def _fill_deltas(D: dict) -> None:
-    """Fill each transformed group's delta keys against the unaugmented entry of the same cell."""
-    for (regime, model, n, group), entry in D.items():
-        base = D.get((regime, model, n, "None"))
-        if group == "None" or base is None:
+        if not rows:
             continue
-        scheme = GROUPS[group]
-        entry["dAcc"], entry["dAccSd"] = _paired_delta(entry["accfolds"], base["accfolds"])
-        entry["dStab"], entry["dStabSd"] = _paired_delta(
-            entry["stabfolds_by_group"].get(scheme), base["stabfolds_by_group"].get(scheme)
-        )
-        entry["dRec"], entry["dRecSd"] = _paired_delta(
-            entry["recfolds_by_group"].get(scheme), base["recfolds_by_group"].get(scheme)
-        )
+        drawn = [r for r in rows if _scheme_of(r) in GROUPS.values()]
+        for row in zero + drawn:
+            model, n = model_display(row.get("model", "")), int(row.get("nconstituents", 0))
+            group = AUG_DISPLAY[_scheme_of(row)]
+            index[(regime, model, n, group)] = _extract_entry(row, deltas, metric)
+    return index
 
 
-def _ordered_models(D: dict) -> list[str]:
-    """MODEL_ORDER first, then whatever else the tables held, alphabetically."""
-    seen = {model for _, model, _, _ in D}
-    return [m for m in MODEL_ORDER if m in seen] + sorted(seen - set(MODEL_ORDER))
-
-
-def build_dataset(results_dir: Path, features: str):
+def build_dataset(results_dir: Path, features: str, deltas: dict):
     """Read one results directory and index it for the figures.
 
     :param features: the ``results/<features>/`` directory name.
+    :param deltas: the index of ``common.index_deltas``, every bar of every figure.
     :returns: the (regime, model, N, group) index, the models and constituent counts it covers, the
         regimes that have a table, and the invariance metric those tables carry.
     """
@@ -305,16 +226,20 @@ def build_dataset(results_dir: Path, features: str):
             "Evaluate the baseline runs first, e.g.:\n"
             "    python3 src/eval.py checkpoint_manifest_path=<baseline>/checkpoint_manifest.json"
         )
-    every_row = baselines + [r for rows in regime_rows.values() for r in rows]
-    metric = _detect_inv_metric(every_row) or "wasserstein"
-    D = _index_rows(regime_rows, baselines, metric)
-    _fill_deltas(D)
-    regimes = [r for r in REGIME_FILE_STEM if regime_rows[r]]
-    return D, _ordered_models(D), sorted({n for _, _, n, _ in D}), regimes, metric
+    every_row = baselines + [row for rows in regime_rows.values() for row in rows]
+    metric = detect_inv_metric_suffix(every_row) or "wasserstein"
+    index = _index_rows(regime_rows, baselines, deltas, metric)
+    # MODEL_ORDER first, then whatever else the tables held, alphabetically.
+    seen = {model for _, model, _, _ in index}
+    models = [m for m in MODEL_ORDER if m in seen] + sorted(seen - set(MODEL_ORDER))
+    regimes = [label for label in REGIME_FILE_STEM if regime_rows[label]]
+    return index, models, sorted({n for _, _, n, _ in index}), regimes, metric
 
 
 def scaffold(row_labels: list[str], models: list[str]):
     """The grid both figures use: one bar row per label, a FLOPs footer under them.
+
+    Every panel loses its top and right spine and gains a faint horizontal grid behind the bars.
 
     :param row_labels: the bar rows only; the footer row is added here.
     :returns: the figure and its (len(row_labels) + 1, len(models)) array of axes.
@@ -329,41 +254,17 @@ def scaffold(row_labels: list[str], models: list[str]):
         squeeze=False,
         gridspec_kw={"height_ratios": ratios},
     )
-    for ax, model in zip(axes[0], models):
-        ax.set_title(model, fontweight="bold", pad=8)
-    _style_panels(axes)
-    return fig, axes
-
-
-def _style_panels(axes) -> None:
-    """No top or right spine, and a faint horizontal grid behind the bars."""
     for ax in axes.flat:
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(axis="y", color="#000000", alpha=0.06, lw=0.8)
         ax.set_axisbelow(True)
         ax.tick_params(length=3)
+    for ax, model in zip(axes[0], models):
+        ax.set_title(model, fontweight="bold", pad=8)
+    return fig, axes
 
 
-def _band(ax, x: float, y: float) -> None:
-    """Overlay the recover rate, P(correct after | wrong before).
-
-    A different conditional from the stable fraction the bar carries, so it is drawn as a band and
-    not as a tick on the bar.
-    """
-    band = ax.hlines(
-        y,
-        x - WIDTH * 0.42,
-        x + WIDTH * 0.42,
-        colors=RECOVER_COLOR,
-        linewidth=6.0,
-        capstyle="butt",
-        zorder=4,
-        alpha=0.9,
-    )
-    band.set_path_effects([patheffects.withStroke(linewidth=8.0, foreground="white")])
-
-
-def _draw_group(ax, xs: list[float], ys: list[float], es: list[float], colour, bands=()):
+def _draw_group(ax, xs, ys, es, colour, bands=()):
     """One group's bar cluster, its error bars and any recover-rate bands.
 
     :param bands: (x, y) points to band, empty on a row that carries no recover rate.
@@ -373,39 +274,21 @@ def _draw_group(ax, xs: list[float], ys: list[float], es: list[float], colour, b
     if not xs:
         return []
     ax.bar(xs, ys, width=WIDTH, color=colour, edgecolor="white", lw=0.5, zorder=2)
-    ax.errorbar(
-        xs,
-        ys,
-        yerr=es,
-        fmt="none",
-        ecolor="#333",
-        elinewidth=0.9,
-        capsize=2.2,
-        capthick=0.9,
-        zorder=3,
-    )
+    ax.errorbar(xs, ys, yerr=es, **WHISKER)
     for x, y in bands:
-        _band(ax, x, y)
-    return (
-        [y + e for y, e in zip(ys, es)] + [y - e for y, e in zip(ys, es)] + [y for _, y in bands]
-    )
-
-
-def _set_ylim(ax, extent: list[float], headroom: float = 0.0) -> None:
-    """Fit the limits to everything drawn, keeping zero in view: the rows diverge about it.
-
-    :param headroom: extra fraction of the span left above, for a row carrying an annotation.
-    """
-    if not extent:
-        return
-    lo, hi = min(extent), max(extent)
-    pad = 0.15 * max(hi - lo, abs(hi), abs(lo), 1e-6)
-    lo, hi = min(0, lo - pad), max(0, hi + pad)
-    ax.set_ylim(lo, hi + headroom * (hi - lo))
+        band = ax.hlines(y, x - WIDTH * 0.42, x + WIDTH * 0.42, **BAND)
+        band.set_path_effects([patheffects.withStroke(linewidth=8.0, foreground="white")])
+    whiskers = [y + e for y, e in zip(ys, es)] + [y - e for y, e in zip(ys, es)]
+    return whiskers + [y for _, y in bands]
 
 
 def _finish_row(axes_row, ylabel: str, extent: list[float], ns, last: bool, headroom=0.0) -> None:
-    """Label and scale one row of panels; sharey='row' spreads the limits across it."""
+    """Label and scale one row of panels; sharey='row' spreads the limits across it.
+
+    The limits fit everything drawn and keep zero in view, the rows diverging about it.
+
+    :param headroom: extra fraction of the span left above, for a row carrying an annotation.
+    """
     for ax in axes_row:
         ax.axhline(0, color="#444444", lw=0.8, zorder=1)
         ax.set_xticks(list(range(len(ns))))
@@ -414,21 +297,18 @@ def _finish_row(axes_row, ylabel: str, extent: list[float], ns, last: bool, head
         if last:
             ax.set_xlabel("constituents $N$")
     axes_row[0].set_ylabel(ylabel)
-    _set_ylim(axes_row[0], extent, headroom)
-
-
-def _blank_axis(ax, n: int) -> None:
-    """Strip an axis to bare text: the FLOPs footer carries no bars, ticks or frame."""
-    ax.set_ylim(0, 1)
-    ax.set_yticks([])
-    ax.set_xticks([])
-    ax.set_xlim(-0.6, n - 0.4)
-    ax.grid(False)
-    ax.spines[:].set_visible(False)
+    if not extent:
+        return
+    lo, hi = min(extent), max(extent)
+    pad = 0.15 * max(hi - lo, abs(hi), abs(lo), 1e-6)
+    lo, hi = min(0, lo - pad), max(0, hi + pad)
+    axes_row[0].set_ylim(lo, hi + headroom * (hi - lo))
 
 
 def _flops_footer(axes_row, flops_rows: list[list[float | None]], ns) -> None:
     """The FLOPs footer: one number per (model, N), so architecture cost reads at a glance.
+
+    The footer carries bare text, so each of its axes is stripped of bars, ticks and frame.
 
     :param flops_rows: one list of values per model, in the order of ``ns``.
     """
@@ -436,7 +316,12 @@ def _flops_footer(axes_row, flops_rows: list[list[float | None]], ns) -> None:
         for k, value in enumerate(flops):
             text, where = _fmt_flops(value), ax.get_xaxis_transform()
             ax.text(k, 0.5, text, transform=where, ha="center", va="center", fontsize=10, bbox=BOX)
-        _blank_axis(ax, len(ns))
+        ax.set_ylim(0, 1)
+        ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_xlim(-0.6, len(ns) - 0.4)
+        ax.grid(False)
+        ax.spines[:].set_visible(False)
     axes_row[0].set_ylabel("FLOPs")
 
 
@@ -468,76 +353,62 @@ def _save(fig, out_dir: Path, name: str, missing: list[tuple]) -> None:
         print(f"        {key}")
 
 
-def _row_specs(inv_metric: str) -> list[tuple[str, str, str, str]]:
-    """(entry key, deviation key, row label, y-axis label) for each bar row, top to bottom."""
+def _row_specs(inv_metric: str) -> list[tuple[str, str, str]]:
+    """(entry key, row label, y-axis label) for each bar row, top to bottom."""
+    name = metric_display(inv_metric)
     return [
-        ("dAcc", "dAccSd", "Accuracy (clean)", "$\\Delta$ accuracy, clean (pp)"),
-        (
-            "dAccTrans",
-            "dAccTransSd",
-            "Accuracy (transformed)",
-            "$\\Delta$ accuracy, transformed (pp)",
-        ),
-        ("dW", "dWsd", _metric_display(inv_metric), f"$\\Delta$ {_metric_display(inv_metric)}"),
-        ("dStab", "dStabSd", "Self-consistency", "$\\Delta$ stable fraction $1-\\mathrm{FR}$"),
+        ("acc", "Accuracy (clean)", "$\\Delta$ accuracy, clean (pp)"),
+        ("acc_t", "Accuracy (transformed)", "$\\Delta$ accuracy, transformed (pp)"),
+        ("inv", name, f"$\\Delta$ {name}"),
+        ("stable", "Self-consistency", "$\\Delta$ stable fraction $1-\\mathrm{FR}$"),
     ]
 
 
-def _series(D, regime: str, model: str, ns, group: str, keys: tuple[str, str], missing):
-    """Bar positions, heights, deviations and recover rates for one group of one panel.
+def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
+    """Bar positions, heights, deviations and recover-rate bands for one group of one panel.
 
     Every (regime, model, N, group) with no row, or no value under the key, is appended to
-    ``missing`` and left out of the panel.
+    ``missing`` and left out of the panel. The recover rate is a different conditional from the
+    stable fraction, so only that row is banded with it.
     """
-    key, sdkey = keys
     found = []
     for k, n in enumerate(ns):
-        entry = D.get((regime, model, n, group)) or {}
+        entry = index.get((regime, model, n, group)) or {}
         if entry.get(key) is None:
             missing.append((regime, model, n, group, key))
             continue
-        found.append((k + OFFSET[group], entry[key], entry.get(sdkey) or 0.0, entry.get("dRec")))
-    return (
-        [f[0] for f in found],
-        [f[1] for f in found],
-        [f[2] for f in found],
-        [f[3] for f in found],
-    )
+        recover = entry.get("recover")
+        found.append((k + OFFSET[group], *entry[key], recover[0] if recover else None))
+    xs, ys, es, recs = zip(*found) if found else ((), (), (), ())
+    bands = [(x, r) for x, r in zip(xs, recs) if r is not None] if key == "stable" else []
+    return xs, ys, es, bands
 
 
-def _panel(ax, D, regime: str, model: str, ns, keys: tuple[str, str], missing) -> list[float]:
-    """One (row, model) panel: a bar cluster per group, recover bands on the last row."""
-    extent: list[float] = []
-    for group in GROUPS:
-        xs, ys, es, recs = _series(D, regime, model, ns, group, keys, missing)
-        bands = [(x, r) for x, r in zip(xs, recs) if r is not None] if keys[0] == "dStab" else []
-        extent += _draw_group(ax, xs, ys, es, COL[group], bands)
-    return extent
-
-
-def _draw_rows(axes, specs, D, regime: str, models, ns) -> list[tuple]:
+def _draw_rows(axes, specs, index, regime: str, models, ns) -> list[tuple]:
     """The bar rows of one regime figure; returns the cells that had no row to draw."""
     missing: list[tuple] = []
-    for i, (key, sdkey, _, ylabel) in enumerate(specs):
+    for i, (key, _, ylabel) in enumerate(specs):
         extent: list[float] = []
-        for j, model in enumerate(models):
-            extent += _panel(axes[i, j], D, regime, model, ns, (key, sdkey), missing)
+        for ax, model in zip(axes[i], models):
+            for group in GROUPS:
+                xs, ys, es, bands = _series(index, regime, model, ns, group, key, missing)
+                extent += _draw_group(ax, xs, ys, es, COL[group], bands)
         _finish_row(axes[i], ylabel, extent, ns, last=i == len(specs) - 1)
     return missing
 
 
-def _flops_of(D, regime: str, model: str, n: int) -> float | None:
+def _flops_of(index, regime: str, model: str, n: int) -> float | None:
     """FLOPs are a property of the architecture, so they are read off the unaugmented entry."""
-    entry = D.get((regime, model, n, "None"))
+    entry = index.get((regime, model, n, "None"))
     return entry.get("flops") if entry else None
 
 
-def fig_regime(D, models, ns, regime: str, out_dir: Path, inv_metric: str) -> None:
+def fig_regime(index, models, ns, regime: str, out_dir: Path, inv_metric: str) -> None:
     """Draw one regime's figure and write it as ``fig_<stem>.svg`` under ``out_dir``."""
     specs = _row_specs(inv_metric)
-    fig, axes = scaffold([label for _, _, label, _ in specs], models)
-    missing = _draw_rows(axes, specs, D, regime, models, ns)
-    flops = [[_flops_of(D, regime, model, n) for n in ns] for model in models]
+    fig, axes = scaffold([label for _, label, _ in specs], models)
+    missing = _draw_rows(axes, specs, index, regime, models, ns)
+    flops = [[_flops_of(index, regime, model, n) for n in ns] for model in models]
     _flops_footer(axes[len(specs)], flops, ns)
     _legend(fig, ncol=len(GROUPS) + 1)
     fig.tight_layout(rect=[0.0, 0.035, 1, 0.975], h_pad=0.4)
@@ -564,6 +435,15 @@ def _parse_args() -> argparse.Namespace:
         "rather than guessed. The figures go there unless --out-dir says otherwise.",
     )
     parser.add_argument(
+        "--deltas",
+        nargs="+",
+        type=Path,
+        required=True,
+        help="The deltas tables written by compare_to_baseline.py, one per regime. Required: "
+        "every bar of these figures is a delta, and which run is the reference is chosen there "
+        "rather than here.",
+    )
+    parser.add_argument(
         "--out-dir",
         type=Path,
         default=None,
@@ -587,7 +467,16 @@ def _require_rows(regimes: list[str], models: list[str], ns: list[int], args) ->
 def main() -> None:
     """Draw one figure per regime the results directory holds a table for."""
     args = _parse_args()
-    D, models, ns, regimes, inv_metric = build_dataset(args.results_dir, args.features)
+    rows = read_deltas(args.deltas)
+    if not rows:
+        sys.exit(
+            f"No delta rows under {[str(p) for p in args.deltas]}. Write them first, e.g.:\n"
+            "    python3 scripts/analysis/compare_to_baseline.py "
+            "results/<features>/results_table_augmentation.csv "
+            "results/<features>/results_table_baseline.csv"
+        )
+    deltas = index_deltas(rows)
+    index, models, ns, regimes, inv_metric = build_dataset(args.results_dir, args.features, deltas)
     _require_rows(regimes, models, ns, args)
     out_dir = args.out_dir or args.results_dir / args.features
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -596,7 +485,7 @@ def main() -> None:
         f"n_constituents={ns} inv_metric={inv_metric}"
     )
     for regime in regimes:
-        fig_regime(D, models, ns, regime, out_dir, inv_metric)
+        fig_regime(index, models, ns, regime, out_dir, inv_metric)
     names = ", ".join(f"fig_{REGIME_FILE_STEM[regime]}" for regime in regimes)
     print(f"\ndone: {names} (svg) -> {out_dir}")
 

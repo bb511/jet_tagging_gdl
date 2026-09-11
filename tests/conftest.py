@@ -1,6 +1,4 @@
 import os
-import subprocess
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -78,19 +76,6 @@ def jets(
 def labels(n_jets: int, seed: int = 1) -> torch.Tensor:
     generator = torch.Generator().manual_seed(seed)
     return torch.eye(5)[torch.randint(0, 5, (n_jets,), generator=generator)]
-
-
-@lru_cache
-def dry_run(task: str, catalogue: str, *flags: str) -> tuple[str, ...]:
-    # The commands a submitter would launch, one per "[" line. Cached: a read is a subprocess.
-    result = subprocess.run(
-        ["bash", f"scripts/cluster/submit_{task}.sh", "--dry-run", *flags, catalogue],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    return tuple(line for line in result.stdout.splitlines() if line.startswith("["))
 
 
 def compose_root(config_name: str, *overrides: str) -> DictConfig:

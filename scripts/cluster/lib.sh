@@ -39,8 +39,7 @@ extract_cmds() {
 
 # The value of an override, e.g. field "$cmd" 'data\.method'. Empty when absent.
 # The key is a regex, and it has to sit at the start of the command or behind a
-# space: unanchored, 'checkpoint_manifest_path' would also match the tail of
-# 'baseline_checkpoint_manifest_path' and return the wrong manifest.
+# space, so that a key is never read as the tail of a longer one.
 field() {
     printf "%s" "$1" |
         grep -oE "(^|[[:space:]])$2=[^ ]+" |
@@ -128,15 +127,12 @@ pin_gpu() {
 }
 
 # Turn a single-run command into a multirun one. Hydra writes a multirun job to
-# <sweep.dir>/<job number>, so both manifest paths of an eval block have to gain
-# the same '/0/' that the train job's checkpoints did. The alternation is
-# anchored and the substitution global: without the 'g', sed would rewrite
-# whichever of checkpoint_manifest_path and baseline_checkpoint_manifest_path
-# came first and leave the other pointing one directory too high.
+# <sweep.dir>/<job number>, so an eval block's manifest path has to gain the same
+# '/0/' that the train job's checkpoints did.
 to_sweep_dir() {
     printf "%s" "$1" |
         sed -E 's#hydra\.run\.dir=#hydra.sweep.dir=#' |
-        sed -E 's#(^|[[:space:]])(baseline_)?checkpoint_manifest_path=([^ ]*)/checkpoint_manifest\.json#\1\2checkpoint_manifest_path=\3/0/checkpoint_manifest.json#g'
+        sed -E 's#checkpoint_manifest_path=([^ ]*)/checkpoint_manifest\.json#checkpoint_manifest_path=\1/0/checkpoint_manifest.json#'
 }
 
 # $1 = cluster, $2 = slurm time limit in minutes (the launcher's own default of

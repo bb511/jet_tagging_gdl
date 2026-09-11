@@ -41,14 +41,12 @@ def test_a_fold_still_missing_is_counted_out_with_a_warning(tmp_path: Path, capl
     assert "still running" in caplog.text
 
 
-def test_a_missing_main_manifest_is_refused(tmp_path: Path) -> None:
+def test_a_layout_the_merge_cannot_trust_is_refused(tmp_path: Path) -> None:
     _write(tmp_path / "fold_1", 2, _fold(1))
 
     with pytest.raises(FileNotFoundError, match="main run"):
         merge_manifests(tmp_path)
 
-
-def test_a_fold_manifest_holding_more_than_its_fold_is_refused(tmp_path: Path) -> None:
     # A sequential k-fold manifest dropped into fold_1/ would count its folds twice over.
     _write(tmp_path, 0, MAIN)
     _write(tmp_path / "fold_1", 2, MAIN, _fold(1), _fold(2))

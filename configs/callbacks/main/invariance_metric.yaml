@@ -4,6 +4,3 @@ _target_: src.callbacks.invariance.InvarianceMetricCallback
 # The transform knobs of the data pipeline, so the probe measures the trained regime. They define
 # the probe and are therefore never tuned.
 transform_kwargs: ${data.transform_kwargs}
-compute_wasserstein: true
-compute_flip_breakdown: true
-class_names: ["g", "q", "W", "Z", "t"]

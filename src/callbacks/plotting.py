@@ -1,9 +1,4 @@
-"""Draw the per-run plots and attach them to MLflow when MLflow is logging.
-
-Every number comes from Lightning's hooks rather than from a logger backend, so the plots are drawn
-under ``logger=none`` too. They go to ``<default_root_dir>/plots``, which the trainer config
-anchors to the run's Hydra output directory.
-"""
+"""Draw the per-run plots and attach them to MLflow when MLflow is logging."""
 
 from collections.abc import Sequence
 from pathlib import Path
@@ -24,8 +19,9 @@ log = RankedLogger(__name__, rank_zero_only=True)
 def _step_logits(pl_module: LightningModule, outputs: Any, x: torch.Tensor) -> torch.Tensor:
     """Return the logits for a batch, reusing the step's own when it hands them over.
 
-    :class:`~src.algorithms.JetTaggingModule` returns its ``model_step`` dict, so the logits come
-    free; a module whose step returns nothing pays one forward pass here.
+    :param pl_module:`~src.algorithms.JetTaggingModule` returns its ``model_step`` dict
+        and hence the logits can be extracted from there; for a model that does not have
+        logits in its output, compute the forward pass here.
     """
     if isinstance(outputs, dict) and "logits" in outputs:
         return outputs["logits"]
@@ -45,14 +41,14 @@ class _Predictions:
         self.labels.clear()
 
     def add(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
-        """Accumulate one batch; labels arrive one-hot and are stored as class indices."""
+        """Accumulate one batch; labels arrive one-hot and are stored as class idxs."""
         self.logits.append(logits.detach().cpu())
         if labels.ndim > 1 and labels.shape[1] > 1:
             labels = labels.argmax(dim=1)
         self.labels.append(labels.detach().cpu())
 
     def as_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return the true classes, the class probabilities and the predicted classes."""
+        """Return the true classes, the class probabilities and the predictions."""
         probs = torch.softmax(torch.cat(self.logits), dim=1).numpy()
         return torch.cat(self.labels).numpy(), probs, probs.argmax(axis=1)
 
@@ -60,18 +56,16 @@ class _Predictions:
 def _scores(
     predictions: _Predictions, split: str
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """The true classes, the probabilities and the predictions, None when nothing is plottable.
-
-    A pass that collected nothing, and one whose scores hold NaN because the run diverged, both
-    leave the figures undrawn rather than writing an empty or a blank one.
-    """
+    """The true classes, the probabilities and the predictions."""
     if not predictions.logits:
-        log.warning(f"No {split} predictions were collected, so those plots are skipped.")
+        log.warning(f"No {split} predictions were collected; plots are skipped...")
         return None
+
     labels, probs, preds = predictions.as_arrays()
     if np.isnan(probs).any():
-        log.warning(f"The {split} scores hold NaN, so the run diverged; plots skipped.")
+        log.warning(f"The {split} scores are NaN; plots skipped...")
         return None
+
     return labels, probs, preds
 
 
@@ -87,8 +81,9 @@ def _log_artifacts(trainer: Trainer, paths: list[Path]) -> None:
 class PlottingCallback(Callback):
     """Write the diagnostic plots of a run under ``<default_root_dir>/plots``.
 
-    Two families, one-vs-rest ROC curves and a confusion matrix, each for the last validation epoch
-    and for the test pass. No training curves: the per-epoch metrics are the logger's.
+    Draw the following figures for the val and test datasets:
+    * one-vs-rest ROC curves
+    * confusion matrix
 
     :param class_names: display names of the output classes, in column order.
     """
@@ -96,8 +91,7 @@ class PlottingCallback(Callback):
     def __init__(self, class_names: Sequence[str] = ("g", "q", "W", "Z", "t")) -> None:
         super().__init__()
         self.class_names = list(class_names)
-        # eval.py sets this to the checkpoint's label ("main", "fold_1"), so that the checkpoints
-        # it tests in one process do not draw over each other's figures.
+        # eval.py sets this to the checkpoint's label ("main", "fold_1").
         self.subdir: str | None = None
         self._val = _Predictions()
         self._test = _Predictions()
@@ -127,7 +121,7 @@ class PlottingCallback(Callback):
         self._draw_classification(trainer, self._val, "val")
 
     def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Start the test pass empty, so a second pass does not stack on the first."""
+        """Start the test pass empty."""
         self._test.clear()
 
     def on_test_batch_end(
@@ -155,7 +149,7 @@ class PlottingCallback(Callback):
     def _draw_classification(
         self, trainer: Trainer, predictions: _Predictions, split: str
     ) -> None:
-        """Draw the ROC curves and the confusion matrix of one split, if it has scores."""
+        """Draw the ROC curves and the confusion matrix of one split."""
         scores = _scores(predictions, split)
         if scores is None:
             return

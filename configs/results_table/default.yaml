@@ -1,14 +1,10 @@
-# One row per run in the results table of its regime.
+# One CSV row per evaluated training, written by src/eval.py once every fold has been tested.
+# Read by src/eval.py alone; train.yaml composes it too so that one experiment config, which both
+# entry points share, can set the subdirectory below.
 
-_target_: src.callbacks.results_table.ResultsTableCallback
 # Anchored to the repository: a run launched from a queue or a batch job must still find the table.
 output_path: ${paths.results_dir}/results_table.csv
-n_folds: ${data.n_folds}
-method: ${data.method}
-model_name: ${algorithm.name}
-augmentation_scheme: ${data.augmentation_scheme}
-nconstituents: ${data.nconstituents}
-features: ${data.features}
+
 subdir: null # replaces the <features>/ directory; the embedded class sets embedded
 selected_metric_mode: scheme # scheme: judge the run on the group it was trained on | mean_all
 invariance_metric: wasserstein # the family filling the selected and per-group columns

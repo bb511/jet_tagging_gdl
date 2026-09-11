@@ -7,12 +7,8 @@
 # submitit driver.
 #
 # A cluster training ran as a multirun and wrote to <sweep.dir>/0, so --cluster
-# rewrites both manifest paths to match: cluster-trained checkpoints have to be
-# evaluated with --cluster, or the manifests are not found.
-#
-# A non-baseline block carries a second manifest, the baseline run it is scored
-# against. Its absence is reported but does not hold the block back: eval then
-# writes the row without the delta, confidence-interval and p-value columns.
+# rewrites the manifest path to match: cluster-trained checkpoints have to be
+# evaluated with --cluster, or the manifest is not found.
 #
 # Usage (from the repository root):
 #   bash scripts/cluster/submit_eval.sh --list    scripts/hls4ml/rundeepsets_eval.sh
@@ -128,8 +124,8 @@ while IFS= read -r cmd; do
     selected "$i" "$label" || continue
 
     if [ -n "$cluster" ]; then
-        # One GPU per slurm job; the run dir becomes a sweep dir and both
-        # manifest paths pick up the '/0/' of the training multirun.
+        # One GPU per slurm job; the run dir becomes a sweep dir and the
+        # manifest path picks up the '/0/' of the training multirun.
         cmd=$(to_sweep_dir "$(pin_gpu "$cmd" 0)")
     elif [ -n "$gpu" ]; then
         cmd=$(pin_gpu "$cmd" "$gpu")
@@ -143,14 +139,6 @@ while IFS= read -r cmd; do
     if [ "$dry" -eq 0 ] && [ ! -f "$manifest" ]; then
         echo "warning: no manifest yet for $label ($manifest)" >&2
         n_missing=$((n_missing + 1))
-    fi
-
-    # The baseline is what the delta columns are measured against, so its
-    # absence costs those columns and nothing else: the block still runs.
-    baseline=$(field "$cmd" 'baseline_checkpoint_manifest_path')
-    if [ "$dry" -eq 0 ] && [ -n "$baseline" ] && [ ! -f "$baseline" ]; then
-        echo "warning: no baseline manifest yet for $label ($baseline)" >&2
-        echo "         the row will be written without the delta columns." >&2
     fi
 
     n_sub=$((n_sub + 1))

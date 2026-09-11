@@ -6,8 +6,9 @@ model trained in the baseline regime alone (LorentzNet, the embedded class) neve
 This figure keeps that grid, one column per model and one bar cluster per constituent count with
 SO(2), SO(3) and Lorentz bars, and measures the model against its own clean prediction::
 
-    accuracy (transformed)  pp, transformed minus clean, paired per fold and reconstructed from
-                            the flip breakdown; the clean accuracy is printed on the panel
+    accuracy (transformed)  pp, transformed minus clean, paired per fold, read off the table's
+                            own accuracy_transformed columns; the clean accuracy is printed on
+                            the panel
     <invariance metric>     the results table's own value (Wasserstein distance), absolute
     self-consistency        flip rate 1 - stable fraction (%), the recover rate overlaid as a band
     FLOPs                   a text footer, one number per (model, N)
@@ -23,63 +24,42 @@ Reads results_table_*.csv files, keeps the augmentation_scheme=none rows and wri
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+import common
 
+# make_figures.py applies the thesis rcParams on import and owns the drawing helpers and the
+# palette the two figures share; everything taken from it is spelled make_figures.<name> below.
+import make_figures
 
-def _load(name: str):
-    """Import a sibling script by path; scripts/ is not a package."""
-    spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-# make_figures.py applies the thesis rcParams on import, loads make_latex_table.py itself, and owns
-# the drawing helpers and the palette both figures share.
-_figs = _load("make_figures")
-_tex = _figs._make_latex_table
-COL, GROUPS, OFFSET = _figs.COL, _figs.GROUPS, _figs.OFFSET
+COL, GROUPS, OFFSET = make_figures.COL, make_figures.GROUPS, make_figures.OFFSET
 
 
 def _folds(row: dict[str, str], key: str) -> list[float] | None:
-    return _figs._parse_folds(row.get(key, ""))
-
-
-def _acc_after_transform_folds(
-    acc: list[float] | None, stable: list[float] | None, recover: list[float] | None
-) -> list[float] | None:
-    """Per-fold accuracy on the transformed test set, by total probability over correct-before::
-
-        acc_after = acc_before * stable + (1 - acc_before) * recover
-
-    All three are proportions, the units the results table's ``*_folds`` columns are written in.
-    ``stable`` and ``recover`` are the model's own P(correct after | correct before) and
-    P(correct after | wrong before) for one group.
-    """
-    if acc is None or stable is None or recover is None:
-        return None
-    if not len(acc) == len(stable) == len(recover):
-        return None
-    return [a * s + (1.0 - a) * r for a, s, r in zip(acc, stable, recover)]
+    """One ``_folds`` cell of a results row, or None when no fold reported the quantity."""
+    return common.parse_folds(row.get(key, ""))
 
 
 def _group_entry(row: dict[str, str], acc: list[float], scheme: str, metric: str) -> dict | None:
-    """One group's three panels for one row, each as (mean, deviation) over the folds."""
+    """One group's three panels for one row, each as (mean, deviation) over the folds.
+
+    The accuracy after the transform is the probe's own measurement, not a reconstruction from the
+    transition rates, which is what it used to be before the table carried the column.
+    """
+    acc_t = _folds(row, f"{scheme}_accuracy_transformed_folds")
     stable = _folds(row, f"{scheme}_flip_stable_folds")
     recover = _folds(row, f"{scheme}_flip_recover_folds")
     distance = _folds(row, f"{scheme}_{metric}_folds")
-    acc_t = _acc_after_transform_folds(acc, stable, recover)
-    if acc_t is None or distance is None:
+    if acc_t is None or stable is None or recover is None or distance is None:
+        return None
+    if len(acc_t) != len(acc):
         return None
     return {
-        "dacc": _figs._stats([100.0 * (t - a) for t, a in zip(acc_t, acc)]),
-        "w": _figs._stats(distance),
-        "flip": _figs._stats([100.0 * (1.0 - s) for s in stable]),
-        "recover": _figs._stats(recover)[0] * 100.0,
+        "dacc": common.stats([100.0 * (t - a) for t, a in zip(acc_t, acc)]),
+        "w": common.stats(distance),
+        "flip": common.stats([100.0 * (1.0 - s) for s in stable]),
+        "recover": common.stats(recover)[0] * 100.0,
     }
 
 
@@ -89,8 +69,8 @@ def _row_entry(row: dict[str, str], metric: str) -> dict | None:
     if acc is None:
         return None
     entry = {
-        "acc": _figs._stats([100.0 * a for a in acc]),
-        "flops": _figs._opt_float(row, "flops_mean"),
+        "acc": common.stats([100.0 * a for a in acc]),
+        "flops": common.opt_float(row, "flops_mean"),
     }
     for group, scheme in GROUPS.items():
         entry[group] = _group_entry(row, acc, scheme, metric)
@@ -99,16 +79,13 @@ def _row_entry(row: dict[str, str], metric: str) -> dict | None:
 
 def _read_rows(paths: list[Path]) -> list[dict[str, str]]:
     """The augmentation_scheme=none rows of every table named on the command line."""
-    rows = []
-    for path in paths:
-        found = _tex.read_csv(path)
-        rows += [r for r in found if r.get("augmentation_scheme", "").lower() == "none"]
-    return rows
+    rows = [row for path in paths for row in common.read_csv(path)]
+    return [row for row in rows if row.get("augmentation_scheme", "").lower() == "none"]
 
 
 def _model_rank(model: str) -> tuple[int, str]:
     """MODEL_ORDER first, then whatever else the tables held, alphabetically."""
-    order = _figs.MODEL_ORDER
+    order = make_figures.MODEL_ORDER
     return (order.index(model) if model in order else len(order), model)
 
 
@@ -121,14 +98,14 @@ def build_dataset(rows: list[dict[str, str]], metric: str):
     for row in rows:
         entry = _row_entry(row, metric)
         if entry is not None:
-            data[(_tex._model_display(row["model"]), int(row["nconstituents"]))] = entry
+            data[(common.model_display(row["model"]), int(row["nconstituents"]))] = entry
     models = sorted({m for m, _ in data}, key=_model_rank)
     return data, models, sorted({n for _, n in data})
 
 
 def _row_specs(metric: str) -> list[tuple[str, str, str]]:
     """(entry key, row label, y-axis label) for each bar row, top to bottom."""
-    name = _tex._metric_display(metric)
+    name = common.metric_display(metric)
     return [
         ("dacc", "Accuracy (transformed)", "$\\Delta$ accuracy (pp)"),
         ("w", name, name),
@@ -151,25 +128,23 @@ def _annotate_clean(ax, entries_by_n) -> None:
             ha="center",
             va="top",
             fontsize=9,
-            bbox=_figs.BOX,
+            bbox=make_figures.BOX,
             zorder=5,
         )
-
-
-def _group_values(entries_by_n, group: str, key: str) -> list[tuple[int, float, float]]:
-    """(constituent-count index, mean, deviation) for the entries that hold this group."""
-    return [(k, *e[group][key]) for k, e in enumerate(entries_by_n) if e and e.get(group)]
 
 
 def _panel(ax, entries_by_n, key: str) -> list[float]:
     """One (row, model) panel: a bar cluster per group, recover bands on the flip-rate row."""
     extent: list[float] = []
     for group in GROUPS:
-        vals = _group_values(entries_by_n, group, key)
+        # (constituent-count index, mean, deviation), for the entries that hold this group.
+        vals = [(k, *e[group][key]) for k, e in enumerate(entries_by_n) if e and e.get(group)]
         xs = [k + OFFSET[group] for k, _, _ in vals]
         ys, es = [m for _, m, _ in vals], [s for _, _, s in vals]
         bands = [(x, entries_by_n[k][group]["recover"]) for x, (k, _, _) in zip(xs, vals)]
-        extent += _figs._draw_group(ax, xs, ys, es, COL[group], bands if key == "flip" else [])
+        extent += make_figures._draw_group(
+            ax, xs, ys, es, COL[group], bands if key == "flip" else []
+        )
     return extent
 
 
@@ -184,21 +159,21 @@ def _draw_rows(axes, specs, data, models, ns) -> None:
                 _annotate_clean(axes[i, j], entries)
         # The clean-accuracy annotation sits at the top of its panel, so that row is given room.
         headroom = 0.3 if key == "dacc" else 0.0
-        _figs._finish_row(axes[i], ylabel, extent, ns, i == len(specs) - 1, headroom)
+        make_figures._finish_row(axes[i], ylabel, extent, ns, i == len(specs) - 1, headroom)
 
 
 def draw(data, models, ns, metric: str, out_dir: Path, name: str) -> None:
     """Draw the figure and write it as ``<name>.svg`` under ``out_dir``."""
     specs = _row_specs(metric)
-    fig, axes = _figs.scaffold([label for _, label, _ in specs], models)
+    fig, axes = make_figures.scaffold([label for _, label, _ in specs], models)
     _draw_rows(axes, specs, data, models, ns)
     flops = [[(data.get((model, n)) or {}).get("flops") for n in ns] for model in models]
-    _figs._flops_footer(axes[len(specs)], flops, ns)
+    make_figures._flops_footer(axes[len(specs)], flops, ns)
     # Four legend entries do not fit on one row of a single-column figure.
     legend_rows = 1 if len(models) > 1 else 2
-    _figs._legend(fig, ncol=4 // legend_rows)
+    make_figures._legend(fig, ncol=4 // legend_rows)
     fig.tight_layout(rect=[0.0, 0.035 * legend_rows, 1, 0.975], h_pad=0.4)
-    _figs._save(fig, out_dir, name, [])
+    make_figures._save(fig, out_dir, name, [])
 
 
 def _parse_args() -> argparse.Namespace:
@@ -220,7 +195,7 @@ def main() -> None:
     """Draw the baseline figure from the tables named on the command line."""
     args = _parse_args()
     rows = _read_rows(args.tables)
-    metric = _tex._detect_inv_metric_suffix(rows)
+    metric = common.detect_inv_metric_suffix(rows)
     if not rows or metric is None:
         sys.exit("no augmentation_scheme=none rows with per-fold invariance columns found")
     data, models, ns = build_dataset(rows, metric)

@@ -4,8 +4,6 @@
 # ========================================================================
 # One block per (constituent count, regime): 3 x 7 = 21 eval runs. Generated
 # by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
-# Every non-baseline block also names its baseline run's manifest, the model the
-# results table's delta, confidence-interval and p-value columns are measured against.
 # Each block carries the best trial of its own study under logs/optuna/hls4ml/;
 # a block whose study is missing carries none and says so (transferred ablation).
 #
@@ -26,7 +24,7 @@
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/baseline
@@ -41,8 +39,7 @@
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/aug_so2/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/aug_so2
@@ -57,8 +54,7 @@
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/aug_so3/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/aug_so3
@@ -73,8 +69,7 @@
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/aug_lorentz/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/aug_lorentz
@@ -89,8 +84,7 @@
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/symm_so2/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/symm_so2
@@ -105,8 +99,7 @@
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/symm_so3/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/symm_so3
@@ -121,8 +114,7 @@
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/symm_lorentz/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst16/symm_lorentz
@@ -141,7 +133,7 @@
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/baseline
@@ -156,8 +148,7 @@
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/aug_so2/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/aug_so2
@@ -172,8 +163,7 @@
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/aug_so3/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/aug_so3
@@ -188,8 +178,7 @@
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/aug_lorentz/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/aug_lorentz
@@ -204,8 +193,7 @@
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/symm_so2/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/symm_so2
@@ -220,8 +208,7 @@
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/symm_so3/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/symm_so3
@@ -236,8 +223,7 @@
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/symm_lorentz/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst50/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst50/symm_lorentz
@@ -256,7 +242,7 @@
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/baseline
@@ -271,8 +257,7 @@
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/aug_so2/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/aug_so2
@@ -287,8 +272,7 @@
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/aug_so3/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/aug_so3
@@ -303,8 +287,7 @@
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/aug_lorentz/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/aug_lorentz
@@ -319,8 +302,7 @@
 #     data.augmentation_scheme=so2 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/symm_so2/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/symm_so2
@@ -335,8 +317,7 @@
 #     data.augmentation_scheme=so3 \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/symm_so3/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/symm_so3
@@ -351,8 +332,7 @@
 #     data.augmentation_scheme=lorentz \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/symm_lorentz/checkpoint_manifest.json \
-#     baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst150/baseline/checkpoint_manifest.json \
-#     callbacks.results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/deepsets/nconst150/symm_lorentz

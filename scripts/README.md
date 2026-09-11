@@ -45,7 +45,10 @@ logs/train/hls4ml/<model>/nconst<N>/<variant>/checkpoint_manifest.json
   v
 results/<features>/results_table_{baseline,augmentation,symm_loss}.csv
   (LorentzNet: results/embedded/results_table_baseline.csv)
-  |  analysis/make_figures.py --features <features>
+  |  analysis/compare_to_baseline.py <run table> <baseline table>
+  v
+results/<features>/deltas_<run>_vs_<baseline>.csv
+  |  analysis/make_figures.py --features <features> --deltas <deltas table>
   v
 results/<features>/fig_{augmentation,symm_loss}.svg
 ```
@@ -69,6 +72,7 @@ bash scripts/cluster/submit_train.sh --dry-run --only baseline --gpu 0 scripts/h
 | `cluster/lib.sh`                   | Shared by the submitters: parser, `--only`, `.env`, GPU pinning, the rewrite.     |
 | `optuna/fetch_best_params.py`      | A study's best trial as hydra overrides and as YAML; `--all`, `--csv`.            |
 | `optuna/make_train_catalogues.py`  | Study databases to `run*_{train,eval}.sh`; `--dry-run`, `--transferred`.          |
-| `analysis/make_figures.py`         | Deltas against each model's baseline, one figure per regime; `--features <dir>`.  |
+| `analysis/compare_to_baseline.py`  | Joins a run table with a baseline table into a deltas table; the reference is free.|
+| `analysis/make_figures.py`         | Deltas against a baseline, one figure per regime; `--features <dir> --deltas <p>`. |
 | `analysis/make_baseline_figure.py` | The absolute counterpart for baseline rows, e.g. `results/embedded/`.             |
 | `analysis/make_latex_table.py`     | Results tables to `.tex`, formatting only.                                        |

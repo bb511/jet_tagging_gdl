@@ -32,6 +32,5 @@ extras:
   matmul_precision: high
 
 # Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
-callbacks:
-  results_table:
-    subdir: embedded
+results_table:
+  subdir: embedded

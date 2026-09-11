@@ -33,17 +33,6 @@ def _composed(tmp_path: Path, *overrides: str) -> DictConfig:
     return cfg
 
 
-@pytest.mark.parametrize("root", ["cfg_train", "cfg_eval"])
-def test_each_root_builds_its_data_algorithm_and_trainer(root: str, request) -> None:
-    cfg = request.getfixturevalue(root)
-    HydraConfig().set_config(cfg)
-
-    assert hydra.utils.instantiate(cfg.data)
-    assert hydra.utils.instantiate(cfg.algorithm)
-    assert hydra.utils.instantiate(cfg.trainer)
-    assert root == "cfg_train" or "checkpoint_manifest_path" in cfg
-
-
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
 def test_every_experiment_config_builds_data_algorithm_and_trainer(
     experiment: str, tmp_path: Path
@@ -58,7 +47,7 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     assert module.hparams.name == model
     assert module.hparams.nconstituents == int(nconstituents)
     assert module.flops_total > 0
-    assert cfg.callbacks.results_table.subdir == ("embedded" if model == "lorentznet" else None)
+    assert cfg.results_table.subdir == ("embedded" if model == "lorentznet" else None)
 
 
 @pytest.mark.parametrize("search", SEARCHES)

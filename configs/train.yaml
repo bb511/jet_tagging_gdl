@@ -6,6 +6,7 @@ defaults:
   - data: hls4ml
   - algorithm: deepsets
   - callbacks: default
+  - results_table: default
   - trainer: default
   - paths: default
   - extras: default

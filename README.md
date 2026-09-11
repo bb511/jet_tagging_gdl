@@ -122,7 +122,12 @@ The evaluation script can also take a baseline model corresponding to an augment
 python src/eval.py experiment=hls4ml/deepsets_16 \
     data.method=augmentation data.augmentation_scheme=so2 \
     checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/aug_so2/checkpoint_manifest.json \
-    baseline_checkpoint_manifest_path=logs/train/hls4ml/deepsets/nconst16/baseline/checkpoint_manifest.json
+```
+
+Deltas against a reference are a separate step:
+
+```bash
+python scripts/analysis/compare_to_baseline.py <run table> <baseline table>.
 ```
 
 After the evaluation is completed, you can make figures of the results by using:

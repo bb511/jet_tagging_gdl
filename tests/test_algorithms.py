@@ -148,7 +148,7 @@ def test_lorentznet_logits_survive_a_boost() -> None:
     torch.manual_seed(0)
     module = _algorithm("lorentznet", nconstituents=16).eval()
     batch = jets(8, 16, 11)
-    boosted, _ = make_transform("lorentz", FOUR_MOMENTUM, None, 2.0)(batch)
+    boosted = make_transform("lorentz", FOUR_MOMENTUM, None, 2.0)(batch)
 
     with torch.no_grad():
         shift = (module(batch) - module(boosted)).abs().max().item()

@@ -16,6 +16,7 @@ from src.data.components.augmentation import (
     sample_haar_so3_rot_matrices,
     sample_so2_rot_matrices,
 )
+from src.symmetry import GROUPS
 from tests.conftest import FOUR_MOMENTUM, RECORD_COLUMNS, jets
 
 
@@ -97,7 +98,7 @@ def test_a_column_is_found_by_either_name_and_scaled_by_its_own_factor() -> None
 
 def test_the_factory_builds_one_transform_per_group_and_refuses_none() -> None:
     batch = jets()
-    for scheme in ("so2", "so3", "lorentz", "lorentz_iso"):
+    for scheme in GROUPS:
         assert make_transform(scheme, FOUR_MOMENTUM)(batch).shape == batch.shape
 
     # 'none' is a legitimate value of data.augmentation_scheme, but not a transform.

@@ -8,7 +8,6 @@ defaults:
   - util@model_summary: model_summary
   - util@rich_progress_bar: rich_progress_bar
   - main@invariance_metric: invariance_metric
-  - main@results_table: results_table
   - main@plotting: plotting
   - main@throughput: throughput
   - _self_

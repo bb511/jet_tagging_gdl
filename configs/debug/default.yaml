@@ -7,6 +7,8 @@ task_name: "debug" # keeps these logs out of logs/train/
 # Without the callbacks nothing is checkpointed, so the manifest train.py writes is empty.
 callbacks: null
 logger: null
+# A throwaway evaluation must not append to the real results tables.
+results_table: null
 
 extras:
   ignore_warnings: False

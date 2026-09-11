@@ -46,8 +46,8 @@ VARIANTS = [
 # at baseline alone, never under augmentation or the SCL.
 VARIANTS_OF = {model: VARIANTS[:1] if model == "lorentznet" else VARIANTS for model in MODELS}
 
-# The searches use one fold; five is what the paired bootstrap of the results table callback
-# needs to put a confidence interval on a delta against the baseline.
+# The searches use one fold; five is what the results table callback needs to put a confidence
+# interval on a run's numbers.
 N_FOLDS = 5
 
 BANNER = "# " + 72 * "="
@@ -163,20 +163,12 @@ def train_block(
 def eval_block(
     model: str, nconst: int, variant: Variant, trial: Trial | None, suffix: str
 ) -> list[str]:
-    """One evaluation command, reading the manifest its training block wrote.
-
-    A non-baseline block names a second manifest, the baseline run of the same architecture and
-    constituent count, which ``src/eval.py`` scores on the same transformed batches to fill the
-    delta, confidence-interval and p-value columns.
-    """
+    """One evaluation command, reading the manifest its training block wrote."""
     label = variant[0]
     manifest = f"{run_dir('train', model, nconst, label, suffix)}/checkpoint_manifest.json"
-    baseline = f"{run_dir('train', model, nconst, 'baseline', suffix)}/checkpoint_manifest.json"
-    body = _common_body(model, nconst, variant, trial) + [f"checkpoint_manifest_path={manifest}"]
-    # A baseline block is its own comparison, so it names none and is scored without deltas.
-    body += [] if label == "baseline" else [f"baseline_checkpoint_manifest_path={baseline}"]
-    body += [
-        "callbacks.results_table.invariance_metric=wasserstein",
+    body = _common_body(model, nconst, variant, trial) + [
+        f"checkpoint_manifest_path={manifest}",
+        "results_table.invariance_metric=wasserstein",
         "trainer=gpu",
         "trainer.devices=[0]",
         f"hydra.run.dir={run_dir('eval', model, nconst, label, suffix)}",
@@ -196,10 +188,6 @@ BASELINE_ONLY_NOTE = [
     "# Baseline only: this architecture embeds the symmetry rather than acquiring it,",
     "# so the augmentation and SCL regimes are not run on it.",
 ]
-EVAL_BASELINE_NOTE = [
-    "# Every non-baseline block also names its baseline run's manifest, the model the",
-    "# results table's delta, confidence-interval and p-value columns are measured against.",
-]
 
 
 def file_header(model: str, task: str, transferred: bool) -> list[str]:
@@ -207,7 +195,6 @@ def file_header(model: str, task: str, transferred: bool) -> list[str]:
     what = "TRAINING" if task == "train" else "EVALUATION"
     nvariants = len(VARIANTS_OF[model])
     grid = f"{len(NCONSTITUENTS)} x {nvariants} = {len(NCONSTITUENTS) * nvariants}"
-    baseline_note = EVAL_BASELINE_NOTE if task == "eval" and nvariants > 1 else []
     return [
         "#!/usr/bin/env bash",
         BANNER,
@@ -216,7 +203,6 @@ def file_header(model: str, task: str, transferred: bool) -> list[str]:
         f"# One block per (constituent count, regime): {grid} {task} runs. Generated",
         "# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.",
         *([] if nvariants == len(VARIANTS) else BASELINE_ONLY_NOTE),
-        *baseline_note,
         *(TRANSFERRED_NOTE if transferred else TUNED_NOTE),
         "#",
         "# Every command is commented out: copy one to run it by hand, or feed the whole",

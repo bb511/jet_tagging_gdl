@@ -1,9 +1,4 @@
-"""Manifest of the checkpoints one training run produced.
-
-``src/train.py`` writes it, ``src/eval.py`` reads it, and the two entry points share no other
-state. Its paths are absolute, so moving ``logs/`` after training breaks a later evaluation: run
-``scripts/symbolink.sh`` before the first training, not after.
-"""
+"""Manifest of the checkpoints one training run produced."""
 
 import json
 from dataclasses import asdict, dataclass, field
@@ -23,8 +18,8 @@ MANIFEST_FILENAME = "checkpoint_manifest.json"
 class ManifestRun:
     """One fitted model: the main run, or one cross-validation fold.
 
-    ``mlflow_run_id`` is the MLflow run it logged into, ``None`` under ``logger=none``; the folds
-    of a training nest under the main run's.
+    ``mlflow_run_id`` is the MLflow run it logged into, ``None`` under ``logger=none``;
+    the folds of a training nest under the main run's.
     """
 
     fold_label: str
@@ -36,7 +31,7 @@ class ManifestRun:
 
 @dataclass
 class Manifest:
-    """Everything ``src/eval.py`` needs to find and label a training run's checkpoints."""
+    """Everything ``src/eval.py`` needs to find and label a run's checkpoints."""
 
     n_folds: int
     hydra_output_dir: str
@@ -57,8 +52,8 @@ def write_manifest(manifest: Manifest, output_dir: str | Path) -> Path:
 def read_manifest(path: str | Path) -> Manifest:
     """Load a manifest written by :func:`write_manifest`.
 
-    :raises ValueError: on a version mismatch, since an older manifest may name fields this reader
-        would silently drop.
+    :raises ValueError: on a version mismatch, since an older manifest may name fields
+        this reader would silently drop.
     """
     payload = json.loads(Path(path).read_text())
     version = payload.get("version")
@@ -72,21 +67,22 @@ def read_manifest(path: str | Path) -> Manifest:
 
 
 def _fold_number(path: Path) -> int:
-    """Sort key of a ``fold_<i>/`` manifest: its index, so that fold_10 follows fold_2."""
+    """Sort key of a ``fold_<i>/`` manifest: its index, so fold_10 follows fold_2."""
     return int(path.parent.name.removeprefix("fold_"))
 
 
 def _main_manifest(base_dir: Path) -> Manifest:
     """The main run's manifest, at the top of *base_dir*.
 
-    :raises FileNotFoundError: when it is missing: the merge takes the run's name and directory
-        from it, and the folds are the uncertainty on it, not a run of their own.
+    :raises FileNotFoundError: when it is missing: the merge takes the run's name and
+        directory from it, and the folds are the uncertainty on it, not a run of their
+        own.
     """
     path = base_dir / MANIFEST_FILENAME
     if not path.is_file():
         raise FileNotFoundError(
-            f"No main run manifest at {path}. A fold=null process with data.n_folds=1 writes it "
-            "there; the fold_<i>/ directories beside it hold the folds alone."
+            f"No main run manifest at {path}. A fold=null process with data.n_folds=1 "
+            "writes it there; the fold_<i>/ directories beside it hold the folds alone."
         )
     return read_manifest(path)
 
@@ -94,8 +90,8 @@ def _main_manifest(base_dir: Path) -> Manifest:
 def _one_fold_manifest(path: Path) -> Manifest:
     """The manifest a ``fold=<i>`` process wrote, holding that one fold and nothing else.
 
-    :raises ValueError: otherwise, as for a sequential k-fold manifest dropped into a ``fold_<i>/``
-        directory, whose folds would then be counted twice.
+    :raises ValueError: otherwise, as for a sequential k-fold manifest dropped into a
+        ``fold_<i>/`` directory, whose folds would then be counted twice.
     """
     manifest = read_manifest(path)
     if len(manifest.runs) != 1 or manifest.runs[0].fold_idx is None:

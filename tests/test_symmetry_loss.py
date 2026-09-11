@@ -2,12 +2,13 @@ import pytest
 import torch
 
 from src.algorithms.losses.symmetry import SUPPORTED_METRICS, SymmetryConsistencyLoss
+from src.symmetry import GROUPS
 from tests.conftest import FOUR_MOMENTUM, jets
 
 
 def test_the_partner_batch_keeps_the_constituent_grid() -> None:
     batch = jets(16)
-    for group in SymmetryConsistencyLoss.GROUPS:
+    for group in GROUPS:
         partner = SymmetryConsistencyLoss(group).transform(batch, FOUR_MOMENTUM)
 
         assert partner.shape == batch.shape

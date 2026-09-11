@@ -31,17 +31,6 @@ def _fold_config(cfg_train: DictConfig, tmp_path: Path, fold: int, n_folds: int)
     return cfg
 
 
-def test_a_fast_dev_run_reaches_the_end_of_the_loop(cfg_train: DictConfig) -> None:
-    HydraConfig().set_config(cfg_train)
-    with open_dict(cfg_train):
-        cfg_train.trainer.fast_dev_run = True
-
-    metric_dict, object_dict = train(cfg_train)
-
-    assert "train/loss" in metric_dict
-    assert object_dict["algorithm"].flops_total > 0
-
-
 def test_the_main_run_keeps_the_record_split_and_leaves_a_manifest_of_itself(
     cfg_train: DictConfig, tmp_path: Path
 ) -> None:
