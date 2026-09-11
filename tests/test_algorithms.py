@@ -143,14 +143,35 @@ def test_lorentznet_ignores_padding_and_undoes_the_normalisation_of_its_batch() 
     assert torch.allclose(physical, normalised, atol=1e-3)
 
 
-def test_lorentznet_logits_survive_a_boost() -> None:
-    # In eval mode: in train mode the node-level batch normalisation sees the padded nodes.
+def _with_large_coordinate_steps(module: JetTaggingModule) -> JetTaggingModule:
+    # A freshly initialised gate is near zero and so is every coordinate step it takes, which is
+    # how the reference implementation's per-component clamp went unnoticed here: it only breaks
+    # the equivariance once a gate exceeds it, as every trained gate did. At the config's
+    # c_weight of 1e-3 a 100 GeV step moves nothing either; at 1 it is a momentum.
+    with torch.no_grad():
+        for block in module.net.blocks:
+            if block.phi_x is not None:
+                block.phi_x[-1].weight.mul_(1e5)
+            block.c_weight = 1.0
+    return module
+
+
+@pytest.mark.parametrize("scheme", ["so2", "so3", "lorentz", "lorentz_iso"])
+def test_lorentznet_logits_survive_any_group_at_large_coordinate_steps(scheme: str) -> None:
+    # Invariance by construction is LorentzNet's whole claim, and the reference the augmented
+    # models are read against. In eval mode: in train mode the node-level batch normalisation
+    # sees the padded nodes. double() carries the graph into float64: forward() rounds the batch
+    # to float32, but the de-normalisation against the float64 buffer promotes everything after.
     torch.manual_seed(0)
-    module = _algorithm("lorentznet", nconstituents=16).eval()
-    batch = jets(8, 16, 11)
-    boosted = make_transform("lorentz", FOUR_MOMENTUM, None, 2.0)(batch)
+    module = _with_large_coordinate_steps(_algorithm("lorentznet", nconstituents=16).eval())
+    module = module.double()
+    batch = jets(8, 16, 11).double() * 10.0
+    transformed = make_transform(scheme, FOUR_MOMENTUM, None, 2.0)(batch)
 
     with torch.no_grad():
-        shift = (module(batch) - module(boosted)).abs().max().item()
+        logits, logits_transformed = module(batch), module(transformed)
 
-    assert shift < 1e-3
+    # Relative to the logit scale: an absolute 1e-3 on a near-zero network says nothing. The
+    # floor is the float32 that forward() and the transform matrices round to, some 1e-7.
+    shift = (logits - logits_transformed).abs().max().item() / logits.abs().max().item()
+    assert shift < 1e-4

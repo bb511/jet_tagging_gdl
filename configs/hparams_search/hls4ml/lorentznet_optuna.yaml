@@ -26,12 +26,15 @@ hydra:
 
     # n_hidden and n_layers bracket the paper's (72, 6) LGEB stack from below, a smaller graph net
     # possibly saturating already. c_weight scales the Minkowski-coordinate update against the
-    # scalar one in each LGEB, log-scaled since that trade-off spans orders of magnitude. lr and
-    # weight_decay follow JetFormer's ranges, weight_decay capped lower for the smaller net.
+    # scalar one in each LGEB, and under the tanh gate it scales it alone: the per-edge step
+    # saturates at |x_diff|, so the useful range runs up to c_weight = 1, where a node moves by a
+    # whole mean edge difference per block. Log-scaled, since the trade-off spans orders of
+    # magnitude. lr and weight_decay follow JetFormer's ranges, weight_decay capped lower for the
+    # smaller net.
     params:
       algorithm.n_hidden: choice(16, 24, 32, 48, 72)
       algorithm.n_layers: choice(2, 3, 4, 6)
-      algorithm.c_weight: tag(log, interval(1e-4, 1e-1))
+      algorithm.c_weight: tag(log, interval(1e-4, 1))
       algorithm.dropout: choice(0.0, 0.1, 0.2)
       algorithm.optimizer.lr: tag(log, interval(1e-4, 5e-3))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5)

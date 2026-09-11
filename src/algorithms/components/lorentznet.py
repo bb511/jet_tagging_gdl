@@ -118,14 +118,14 @@ class LGEB(nn.Module):
     ) -> torch.Tensor:
         """Move each node along the mean of its weighted edge differences.
 
-        The step is a combination of four-momentum differences.
-        This transforms like a four-momentum so the net stays equivariant.
+        The step is a combination of four-momentum differences, so it transforms like one and the
+        block stays equivariant.
         """
-        trans = x_diff * self.phi_x(m)
-        # Clamped at +-100 GeV per component as in the reference implementation.
-        # One outlying pair would otherwise move a node far enough to overflow in the
-        # next block's signed log. This breaks equivariance unfortunately.
-        trans = trans.clamp(min=-100, max=100)
+        # tanh bounds the gate at 1, so no step exceeds |x_diff| and the next block's signed log
+        # cannot overflow. Not the reference implementation's per-component clamp at +-100 GeV: a
+        # rotation mixes the components, so the clamp is not equivariant, and a trained gate
+        # exceeds it on most edges (flip rates of 8 to 20 % under the probe, 2026-09-03).
+        trans = x_diff * torch.tanh(self.phi_x(m))
         step = x.new_zeros(x.shape).index_add_(0, src, trans)
         count = x.new_zeros(x.shape).index_add_(0, src, torch.ones_like(trans))
         return x + self.c_weight * step / count.clamp(min=1)

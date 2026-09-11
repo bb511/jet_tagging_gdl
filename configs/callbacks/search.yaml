@@ -24,5 +24,5 @@ early_stopping:
   min_delta: 1.0e-4
   # Above the 50-epoch trial length, so no trial stops early: a trial is judged on its best epoch,
   # and a one-cycle schedule (JetFormer) earns its accuracy in the anneal. check_finite still ends a
-  # trial whose val/acc turns NaN. The LorentzNet studies (2026-09-02) ran with 15.
+  # trial whose val/acc turns NaN.
   patience: 100
