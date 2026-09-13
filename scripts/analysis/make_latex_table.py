@@ -57,8 +57,9 @@ def _percent_pair(
 ) -> tuple[float, float] | None:
     """Two accuracy columns as percentages, None when they do not read as numbers.
 
-    An accuracy is written as a proportion by the callback and as a percentage by the MLflow
-    export, so a first value below 2 is taken to be the former and both are scaled.
+    An accuracy is written as a proportion by the callback and as a percentage by the
+    MLflow export, so a first value below 2 is taken to be the former and both are
+    scaled.
     """
     try:
         first, second = float(row.get(first_key, "nan")), float(
@@ -71,7 +72,8 @@ def _percent_pair(
 
 
 def _acc_cell(row: dict) -> str:
-    """The test accuracy as ``mean \\pm std`` in percent, whatever units the row used."""
+    """The test accuracy as ``mean \\pm std`` in percent, whatever units the row
+    used."""
     pair = _percent_pair(row, "test_acc_mean", "test_acc_std")
     return (
         "N/A" if pair is None else f"{safe_fmt(pair[0], 2)} \\pm {safe_fmt(pair[1], 2)}"
@@ -87,7 +89,8 @@ def _ci_cell(row: dict) -> str:
 
 
 def _pm_cell(row: dict, prefix: str, digits: int = 3) -> str:
-    """The ``<prefix>_mean`` and ``<prefix>_std`` pair, the mean alone when the std is absent."""
+    """The ``<prefix>_mean`` and ``<prefix>_std`` pair, the mean alone when the std is
+    absent."""
     mean = safe_fmt(row.get(f"{prefix}_mean", "nan"), digits)
     std = safe_fmt(row.get(f"{prefix}_std", "nan"), digits)
     return f"{mean} \\pm {std}" if std != "N/A" else mean
@@ -105,7 +108,8 @@ def _pval_cell(pvalue: str | None) -> str:
 
 
 def _delta_cell(delta: dict | None, digits: int = 3) -> str:
-    """One deltas row as ``mean \\pm std``, starred when its bootstrap p-value clears 0.05.
+    """One deltas row as ``mean \\pm std``, starred when its bootstrap p-value clears
+    0.05.
 
     A dash marks a row the deltas tables hold nothing for: a baseline row, which is the reference
     rather than a run measured against it, or LorentzNet, trained in the baseline regime alone.
@@ -134,7 +138,8 @@ def _multirow(span: int, body: str) -> str:
 
 
 def _blocks(rows: list[dict], column: str) -> list[list[dict]]:
-    """Sorted rows cut into the runs of equal *column*, one run per spanning cell and per rule."""
+    """Sorted rows cut into the runs of equal *column*, one run per spanning cell and
+    per rule."""
     return [
         list(block)
         for _, block in groupby(rows, key=lambda row: str(row.get(column, "")))
@@ -144,7 +149,8 @@ def _blocks(rows: list[dict], column: str) -> list[list[dict]]:
 def _table_row(
     row: dict, cells: tuple[str, str, str], deltas: dict, metric: str
 ) -> str:
-    """One tabular line: the spanning cells, this row's own numbers, then its two deltas."""
+    """One tabular line: the spanning cells, this row's own numbers, then its two
+    deltas."""
     model_cell, nconst_cell, flops_cell = cells
     inv_delta = deltas.get(delta_key(row, _group_of(row), metric))
     acc_delta = deltas.get(delta_key(row, "", "test_acc"))
@@ -160,7 +166,8 @@ def _table_row(
 def _count_lines(
     block: list[dict], model_cell: str, deltas: dict, metric: str
 ) -> list[str]:
-    """One constituent count of one model: its first line opens the spans, the rest are blank."""
+    """One constituent count of one model: its first line opens the spans, the rest are
+    blank."""
     opening = (
         model_cell,
         _multirow(len(block), str(block[0].get("nconstituents", ""))),
@@ -240,10 +247,10 @@ def write_latex_table(
 ) -> None:
     """Write ``rows`` as a standalone LaTeX table.
 
-    :param inv_metric: the metric whose delta becomes the delta column, ``flip`` when nothing is
-        given.
-    :param deltas: the index of :func:`common.index_deltas`; the delta and p-value columns are
-        dashes without it.
+    :param inv_metric: the metric whose delta becomes the delta column, ``flip`` when
+        nothing is given.
+    :param deltas: the index of :func:`common.index_deltas`; the delta and p-value
+        columns are dashes without it.
     """
     if not rows:
         return

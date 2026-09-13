@@ -38,7 +38,8 @@ COL, GROUPS, OFFSET = make_figures.COL, make_figures.GROUPS, make_figures.OFFSET
 
 
 def _folds(row: dict[str, str], key: str) -> list[float] | None:
-    """One ``_folds`` cell of a results row, or None when no fold reported the quantity."""
+    """One ``_folds`` cell of a results row, or None when no fold reported the
+    quantity."""
     return common.parse_folds(row.get(key, ""))
 
 
@@ -47,8 +48,9 @@ def _group_entry(
 ) -> dict | None:
     """One group's three panels for one row, each as (mean, deviation) over the folds.
 
-    The accuracy after the transform is the probe's own measurement, not a reconstruction from the
-    transition rates, which is what it used to be before the table carried the column.
+    The accuracy after the transform is the probe's own measurement, not a
+    reconstruction from the transition rates, which is what it used to be before the
+    table carried the column.
     """
     acc_t = _folds(row, f"{scheme}_accuracy_transformed_folds")
     flip = _folds(row, f"{scheme}_flip_folds")
@@ -67,7 +69,8 @@ def _group_entry(
 
 
 def _row_entry(row: dict[str, str], metric: str) -> dict | None:
-    """One results row as the entry a panel reads, or None when it carries no per-fold accuracy."""
+    """One results row as the entry a panel reads, or None when it carries no per-fold
+    accuracy."""
     acc = _folds(row, "test_acc_folds")
     if acc is None:
         return None
@@ -95,15 +98,16 @@ def _model_rank(model: str) -> tuple[int, str]:
 def build_dataset(rows: list[dict[str, str]], metric: str):
     """Index the rows as (model, N) -> entry.
 
-    :returns: the index, the models it covers and the constituent counts, both in figure order.
+    :returns: the index, the models it covers and the constituent counts, both in figure
+        order.
     """
     data = {}
     for row in rows:
         entry = _row_entry(row, metric)
         if entry is not None:
-            data[(common.model_display(row["model"]), int(row["nconstituents"]))] = (
-                entry
-            )
+            data[
+                (common.model_display(row["model"]), int(row["nconstituents"]))
+            ] = entry
     models = sorted({m for m, _ in data}, key=_model_rank)
     return data, models, sorted({n for _, n in data})
 
@@ -139,7 +143,8 @@ def _annotate_clean(ax, entries_by_n) -> None:
 
 
 def _panel(ax, entries_by_n, key: str) -> list[float]:
-    """One (row, model) panel: a bar cluster per group, recover bands on the flip-rate row."""
+    """One (row, model) panel: a bar cluster per group, recover bands on the flip-rate
+    row."""
     extent: list[float] = []
     for group in GROUPS:
         # (constituent-count index, mean, deviation), for the entries that hold this group.
@@ -160,7 +165,8 @@ def _panel(ax, entries_by_n, key: str) -> list[float]:
 
 
 def _draw_rows(axes, specs, data, models, ns) -> None:
-    """The bar rows, each scaled to its own extent; the clean accuracy annotates the first."""
+    """The bar rows, each scaled to its own extent; the clean accuracy annotates the
+    first."""
     for i, (key, _, ylabel) in enumerate(specs):
         extent: list[float] = []
         for j, model in enumerate(models):

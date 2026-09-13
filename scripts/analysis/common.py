@@ -1,12 +1,12 @@
 """What every analysis script needs: reading the tables, and naming things for a reader.
 
-The scripts in this directory are run as scripts, so Python puts this directory first on the import
-path and a plain ``import common`` finds this file. The bootstrap below adds the repository root as
-well, for ``src.symmetry``, and re-adds this directory for the case where a script is loaded by
-path rather than run, as the tests do.
+The scripts in this directory are run as scripts, so Python puts this directory first on
+the import path and a plain ``import common`` finds this file. The bootstrap below adds
+the repository root as well, for ``src.symmetry``, and re-adds this directory for the
+case where a script is loaded by path rather than run, as the tests do.
 
-Nothing heavy is imported here or by anything it pulls in, so a bare interpreter with matplotlib
-alone still runs the figure scripts.
+Nothing heavy is imported here or by anything it pulls in, so a bare interpreter with
+matplotlib alone still runs the figure scripts.
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ NO_VALUE = {"", "nan", "n/a", "baseline", "no_baseline", "no_folds", "—"}
 def read_csv(path: Path) -> list[dict[str, str]]:
     """Read a results table into one dict per row, keyed by column name.
 
-    Short rows are padded rather than truncated, so a table whose header grew between runs still
-    yields every column the header names.
+    Short rows are padded rather than truncated, so a table whose header grew between
+    runs still yields every column the header names.
     """
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.reader(handle)
@@ -72,9 +72,10 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 def parse_folds(raw, keep_nan: bool = False) -> list[float] | None:
     """Parse a semicolon-separated per-fold column; None if it is empty or unparsable.
 
-    :param keep_nan: keep the folds that reported nothing, as NaN. A figure needs a complete series
-        to draw a bar from and so takes the default; a paired comparison keeps them, so that it can
-        drop the pairs it cannot form and still use the folds that did report.
+    :param keep_nan: keep the folds that reported nothing, as NaN. A figure needs a
+        complete series to draw a bar from and so takes the default; a paired comparison
+        keeps them, so that it can drop the pairs it cannot form and still use the folds
+        that did report.
     """
     if not raw:
         return None
@@ -130,8 +131,9 @@ def index_deltas(
 ) -> dict[tuple[str, str, str, str, str], dict]:
     """Index the rows of the deltas tables ``compare_to_baseline.py`` writes.
 
-    The key carries the method and the group, so the augmentation and the SCL tables, which cover
-    the same models, counts and groups, can be named on one command line without colliding.
+    The key carries the method and the group, so the augmentation and the SCL tables,
+    which cover the same models, counts and groups, can be named on one command line
+    without colliding.
     """
     return {
         delta_key(row, row.get("group", ""), row.get("metric", "")): row for row in rows
@@ -139,7 +141,8 @@ def index_deltas(
 
 
 def read_deltas(paths: list[Path]) -> list[dict[str, str]]:
-    """Every deltas row the given tables hold, reporting what was read and what was missing.
+    """Every deltas row the given tables hold, reporting what was read and what was
+    missing.
 
     The caller decides what an empty result means: a figure of deltas cannot be drawn at all,
     whereas a LaTeX table prints dashes in those columns.
@@ -161,11 +164,12 @@ def shorten(path: Path) -> Path:
 
 
 def detect_inv_metric_suffix(rows: list[dict[str, str]]) -> str | None:
-    """Infer the invariance metric (``wasserstein``, ``flip``) from a ``so2_<metric>_folds``
-    column.
+    """Infer the invariance metric (``wasserstein``, ``flip``) from a
+    ``so2_<metric>_folds`` column.
 
-    None when every per-group column is a flip family, which is what a table written with
-    ``invariance_metric=flip`` looks like: the family is then written once, not twice.
+    None when every per-group column is a flip family, which is what a table written
+    with ``invariance_metric=flip`` looks like: the family is then written once, not
+    twice.
     """
     for row in rows:
         for column in row:

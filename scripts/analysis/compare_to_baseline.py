@@ -90,10 +90,12 @@ def _label(row: dict[str, str]) -> str:
 def _fold_pair(
     run: dict[str, str], baseline: dict[str, str], column: str
 ) -> tuple[list[float], list[float]] | None:
-    """The two tables' fold values for one column, or None when no fold of it can be paired.
+    """The two tables' fold values for one column, or None when no fold of it can be
+    paired.
 
-    Both sides keep their gaps through the fold-count check, so that a fold neither table could
-    report costs that fold alone. A column no fold reported on either side drops out entirely.
+    Both sides keep their gaps through the fold-count check, so that a fold neither
+    table could report costs that fold alone. A column no fold reported on either side
+    drops out entirely.
     """
     ours = common.parse_folds(run.get(column, ""), keep_nan=True)
     theirs = common.parse_folds(baseline.get(column, ""), keep_nan=True)
@@ -123,10 +125,11 @@ def _difference(
 
 
 def _delta_columns(deltas: list[float]) -> dict[str, object]:
-    """The eight columns of one difference series: the summary, the interval, the paired test.
+    """The eight columns of one difference series: the summary, the interval, the paired
+    test.
 
-    The test is paired, so the null hypothesis is a mean of zero; a single fold leaves it undecided
-    rather than answered.
+    The test is paired, so the null hypothesis is a mean of zero; a single fold leaves
+    it undecided rather than answered.
     """
     nan = float("nan")
     mean, std = common.stats(deltas)
@@ -147,10 +150,12 @@ def _delta_columns(deltas: list[float]) -> dict[str, object]:
 
 
 def metrics_covered(rows: list[dict[str, str]]) -> tuple[str, ...]:
-    """The per-group metrics a deltas table covers: the flip families and the invariance one.
+    """The per-group metrics a deltas table covers: the flip families and the invariance
+    one.
 
-    The invariance metric is read off the columns rather than assumed. A table written with
-    ``invariance_metric=flip`` names none, that family being tabulated for every group already.
+    The invariance metric is read off the columns rather than assumed. A table written
+    with ``invariance_metric=flip`` names none, that family being tabulated for every
+    group already.
     """
     metric = common.detect_inv_metric_suffix(rows)
     return tuple(dict.fromkeys(FLIP_FAMILIES + ((metric,) if metric else ())))
@@ -159,7 +164,8 @@ def metrics_covered(rows: list[dict[str, str]]) -> tuple[str, ...]:
 def delta_rows(
     run: dict[str, str], baseline: dict[str, str], metrics: tuple[str, ...]
 ) -> list[dict[str, object]]:
-    """Every long-format row of one pair: the run's own accuracy, then each group and metric."""
+    """Every long-format row of one pair: the run's own accuracy, then each group and
+    metric."""
     head = {name: run.get(name, "") for name in HEAD}
     wanted = [("", "test_acc")] + [
         (group, m) for group in TABULATED_GROUPS for m in metrics
@@ -178,7 +184,8 @@ def delta_rows(
 def index_baselines(
     rows: list[dict[str, str]],
 ) -> dict[tuple[str, str], dict[str, str]]:
-    """(model, nconstituents) -> baseline row; the tables are appended to, so the last one wins."""
+    """(model, nconstituents) -> baseline row; the tables are appended to, so the last
+    one wins."""
     index: dict[tuple[str, str], dict[str, str]] = {}
     for row in rows:
         key = _pair_key(row)
@@ -195,7 +202,8 @@ def compare(
     baseline_rows: list[dict[str, str]],
     metrics: tuple[str, ...],
 ) -> list[dict[str, object]]:
-    """The deltas rows of every run row that has a baseline row; the others are reported."""
+    """The deltas rows of every run row that has a baseline row; the others are
+    reported."""
     baselines = index_baselines(baseline_rows)
     rows: list[dict[str, object]] = []
     for run in run_rows:
@@ -210,7 +218,8 @@ def compare(
 
 
 def write_deltas(rows: list[dict[str, object]], output_path: Path) -> None:
-    """Write the deltas table, replacing whatever stood there: it is derived from its inputs."""
+    """Write the deltas table, replacing whatever stood there: it is derived from its
+    inputs."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=COLUMNS)
@@ -219,19 +228,22 @@ def write_deltas(rows: list[dict[str, object]], output_path: Path) -> None:
 
 
 def _trimmed_stem(path: Path) -> str:
-    """A table's stem without the ``results_table_`` the callback puts on every one of them."""
+    """A table's stem without the ``results_table_`` the callback puts on every one of
+    them."""
     prefix = "results_table_"
     return path.stem[len(prefix) :] if path.stem.startswith(prefix) else path.stem
 
 
 def default_output(run_table: Path, baseline_table: Path) -> Path:
-    """``deltas_<run>_vs_<baseline>.csv`` beside the run table, named after both inputs."""
+    """``deltas_<run>_vs_<baseline>.csv`` beside the run table, named after both
+    inputs."""
     name = f"deltas_{_trimmed_stem(run_table)}_vs_{_trimmed_stem(baseline_table)}.csv"
     return run_table.parent / name
 
 
 def _parse_args() -> argparse.Namespace:
-    """Command line: the run table, the baseline it is measured against, where the deltas go."""
+    """Command line: the run table, the baseline it is measured against, where the
+    deltas go."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

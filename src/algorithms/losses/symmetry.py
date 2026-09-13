@@ -68,8 +68,8 @@ class SymmetryConsistencyLoss(nn.Module):
     ) -> torch.Tensor:
         """Draw one transformation of the group per jet and return ``T(x)``.
 
-        :param x: batch of shape (jets, constituents, features), whose columns *feature_names*
-            lists in order.
+        :param x: batch of shape (jets, constituents, features), whose columns
+            *feature_names* lists in order.
         :param norm_scales: per-column factors returning the stored values to GeV.
         :param transform_kwargs: additional args for ``make_transform``.
         :return: the transformed batch, of the shape and normalisation of *x*.

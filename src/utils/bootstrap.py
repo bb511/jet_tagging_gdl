@@ -1,7 +1,7 @@
 """Bootstrap the spread of a quantity measured once per cross-validation fold.
 
-The results table uses this for two things: a percentile interval on a fold-averaged quantity, and
-a two-sided test on a per-fold difference between a run and its baseline.
+The results table uses this for two things: a percentile interval on a fold-averaged
+quantity, and a two-sided test on a per-fold difference between a run and its baseline.
 """
 
 from collections.abc import Sequence

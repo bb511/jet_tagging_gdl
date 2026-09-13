@@ -1,13 +1,14 @@
 """Log the wall-clock cost of each training epoch.
 
-The metrics answer whether a run is limited by the GPU or by the input pipeline, the question an
-augmentation run raises: its transforms run in the worker processes, where the training step cannot
-time them, and surface instead as the gap between one batch ending and the next beginning,
-``perf/avg_data_ms``, which is comparable with the pure input/output wait of a symmetry-consistency
-run. ``avg_step_ms`` is the complement, the forward and backward pass without that wait;
-``gpu_util_pct`` and ``gpu_mem_alloc_gb`` are sampled once at the end of the epoch, and
-``gpu_mem_peak_gb`` is the largest tensor footprint since the process started, which is what
-decides whether a configuration fits a card.
+The metrics answer whether a run is limited by the GPU or by the input pipeline, the
+question an augmentation run raises: its transforms run in the worker processes, where
+the training step cannot time them, and surface instead as the gap between one batch
+ending and the next beginning, ``perf/avg_data_ms``, which is comparable with the pure
+input/output wait of a symmetry-consistency run. ``avg_step_ms`` is the complement, the
+forward and backward pass without that wait; ``gpu_util_pct`` and ``gpu_mem_alloc_gb``
+are sampled once at the end of the epoch, and ``gpu_mem_peak_gb`` is the largest tensor
+footprint since the process started, which is what decides whether a configuration fits
+a card.
 """
 
 import time
@@ -21,7 +22,8 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def _gpu_utilization() -> float:
-    """Percentage of the last sampling period the GPU was busy; 0 on CPU, NaN if unqueryable."""
+    """Percentage of the last sampling period the GPU was busy; 0 on CPU, NaN if
+    unqueryable."""
     if not torch.cuda.is_available():
         return 0.0
     try:
@@ -121,7 +123,9 @@ def _mean_ms(durations: list[float]) -> float:
 
 def _allocated_gb() -> float:
     """GPU memory the caching allocator holds for tensors, in GB."""
-    return torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
+    return (
+        torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
+    )
 
 
 def _peak_gb() -> float:

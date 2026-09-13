@@ -72,10 +72,11 @@ def quote(value: str) -> str:
 
 
 def best_trial(db: Path, study: str) -> Trial | None:
-    """Best trial of ``study``, or None when there is no such study and no completed trial.
+    """Best trial of ``study``, or None when there is no such study and no completed
+    trial.
 
-    Optuna is imported here, not at module scope, so the generator runs with no study database
-    present, which is the state the checked-in catalogues were generated in.
+    Optuna is imported here, not at module scope, so the generator runs with no study
+    database present, which is the state the checked-in catalogues were generated in.
     """
     if not db.exists():
         return None
@@ -125,7 +126,8 @@ def _provenance(trial: Trial | None, study: str) -> str:
 def _header(
     model: str, nconst: int, variant: Variant, trial: Trial | None
 ) -> list[str]:
-    """The two comment lines above a block: its grid cell, and its hyperparameters' provenance."""
+    """The two comment lines above a block: its grid cell, and its hyperparameters'
+    provenance."""
     label, method, scheme = variant
     return [
         f"# {model}  nconst={nconst}  {label}  (method={method}, group={scheme})",
@@ -138,8 +140,8 @@ def _common_body(
 ) -> list[str]:
     """The overrides a train and an eval block open with, in that shared order.
 
-    An eval block repeats the training block's ``algorithm.*`` overrides because the model is
-    rebuilt from the config before the checkpoint is loaded into it.
+    An eval block repeats the training block's ``algorithm.*`` overrides because the
+    model is rebuilt from the config before the checkpoint is loaded into it.
     """
     _, method, scheme = variant
     body = [
@@ -196,7 +198,8 @@ BASELINE_ONLY_NOTE = [
 
 
 def file_header(model: str, task: str, transferred: bool) -> list[str]:
-    """The banner a catalogue opens with, naming the grid it covers and where it came from."""
+    """The banner a catalogue opens with, naming the grid it covers and where it came
+    from."""
     what = "TRAINING" if task == "train" else "EVALUATION"
     nvariants = len(VARIANTS_OF[model])
     grid = f"{len(NCONSTITUENTS)} x {nvariants} = {len(NCONSTITUENTS) * nvariants}"
@@ -233,8 +236,8 @@ def render(model: str, task: str, dbs: Path, transferred: bool) -> str:
 def count_commands(lib: Path, text: str) -> int:
     """Commands lib.sh's own parser finds in ``text``.
 
-    Fed back through the submitters' parser rather than a second implementation of it here, so the
-    two cannot disagree about what a block is.
+    Fed back through the submitters' parser rather than a second implementation of it
+    here, so the two cannot disagree about what a block is.
     """
     with tempfile.NamedTemporaryFile("w", suffix=".sh") as fh:
         fh.write(text)
@@ -254,8 +257,8 @@ def _catalogue(
 ) -> tuple[str, int]:
     """One catalogue's text, and the number of commands lib.sh's parser finds in it.
 
-    :raises SystemExit: when the parser does not find the model's whole grid, which means the
-        generated layout and the parser have drifted apart.
+    :raises SystemExit: when the parser does not find the model's whole grid, which
+        means the generated layout and the parser have drifted apart.
     """
     text = render(model, task, dbs, transferred)
     found = count_commands(lib, text)
@@ -276,7 +279,8 @@ def _show(path: Path, repo: Path) -> str:
 
 
 def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
-    """Write one catalogue, or report what writing it would do; 1 when it would change it."""
+    """Write one catalogue, or report what writing it would do; 1 when it would change
+    it."""
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
@@ -290,7 +294,8 @@ def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
 
 
 def _generate(dbs: Path, out: Path, repo: Path, args: argparse.Namespace) -> int:
-    """Write or check every catalogue; returns how many differ from a fresh generation."""
+    """Write or check every catalogue; returns how many differ from a fresh
+    generation."""
     lib = repo / "scripts" / "cluster" / "lib.sh"
     suffix = "_transferred" if args.transferred else ""
     stale = 0
@@ -303,7 +308,8 @@ def _generate(dbs: Path, out: Path, repo: Path, args: argparse.Namespace) -> int
 
 
 def _parse_args() -> argparse.Namespace:
-    """Command line: where the studies are, where the catalogues go, and what to write."""
+    """Command line: where the studies are, where the catalogues go, and what to
+    write."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--dbs",

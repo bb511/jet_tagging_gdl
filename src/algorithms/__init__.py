@@ -41,8 +41,8 @@ def resolve_feature_indices(
 class JetTaggingModule(LightningModule):
     """Classify jets into five originating particles, under either training method.
 
-    Subclasses set `required_features` when the network needs specific features. These need to be
-    present in the data, otherwise an error is thrown.
+    Subclasses set `required_features` when the network needs specific features. These
+    need to be present in the data, otherwise an error is thrown.
     """
 
     # Features the network needs, in its own order; None means "whatever the data give".
@@ -106,7 +106,8 @@ class JetTaggingModule(LightningModule):
         record_flops(self, nconstituents, nbr_feats)
 
     def _build_metrics(self, output_dim: int, method: str) -> None:
-        """Register the metric objects; the SCL trackers exist only under ``symm_loss``."""
+        """Register the metric objects; the SCL trackers exist only under
+        ``symm_loss``."""
         self.train_acc = MulticlassAccuracy(num_classes=output_dim)
         self.val_acc = MulticlassAccuracy(num_classes=output_dim)
         self.test_acc = MulticlassAccuracy(num_classes=output_dim)
@@ -122,7 +123,8 @@ class JetTaggingModule(LightningModule):
         raise NotImplementedError(f"{type(self).__name__} must implement build_net().")
 
     def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
-        """Last step before the network sees a batch; subclasses de-normalise or reorder here."""
+        """Last step before the network sees a batch; subclasses de-normalise or reorder
+        here."""
         return x
 
     def _on_features_resolved(self) -> None:
@@ -143,10 +145,11 @@ class JetTaggingModule(LightningModule):
     ) -> dict[str, torch.Tensor]:
         """Run one forward pass and compute the loss.
 
-        :param batch: the pair ``(x, y)``, of shapes (jets, constituents, features) and one-hot
-            (jets, classes).
-        :return: dict of ``loss``, ``cls_loss``, ``logits``, ``preds``, ``targets``. If the method
-            uses symmetry loss, you also include the SCL term added to the cross entropy term.
+        :param batch: the pair ``(x, y)``, of shapes (jets, constituents, features) and
+            one-hot (jets, classes).
+        :return: dict of ``loss``, ``cls_loss``, ``logits``, ``preds``, ``targets``. If
+            the method uses symmetry loss, you also include the SCL term added to the
+            cross entropy term.
         """
         x, y = batch
         if y.ndim > 1 and y.shape[1] > 1:
@@ -194,7 +197,8 @@ class JetTaggingModule(LightningModule):
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
-        """One optimisation step, logging the epoch means of the loss and the accuracy."""
+        """One optimisation step, logging the epoch means of the loss and the
+        accuracy."""
         out = self.model_step(batch)
         self.train_loss(out["loss"])
         self.train_acc(out["preds"], out["targets"])
@@ -270,9 +274,9 @@ class JetTaggingModule(LightningModule):
     def _resolve_features(self, datamodule) -> None:
         """Record which columns of the incoming batches the network actually uses.
 
-        Under the SCL, and whenever the datamodule keeps all 16 record columns at test time,
-        batches are wider than the network's input and the reduction indices are needed; otherwise
-        only a network with `required_features` reorders anything.
+        Under the SCL, and whenever the datamodule keeps all 16 record columns at test
+        time, batches are wider than the network's input and the reduction indices are
+        needed; otherwise only a network with `required_features` reorders anything.
         """
         model_features = self.required_features or list(datamodule.features)
         if self.hparams.method == "symm_loss" or datamodule.keep_full_features_at_test:
@@ -323,8 +327,8 @@ class JetTaggingModule(LightningModule):
     def _set_up_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
         """Instantiate the scheduler partial and return it inside its Lightning dict.
 
-        If a scheduler needs to know the number of steps in the whole training, this is set at the
-        level of the trainer, not here.
+        If a scheduler needs to know the number of steps in the whole training, this is
+        set at the level of the trainer, not here.
         """
         scheduler_cfg = dict(self._scheduler)
         scheduler_fn = scheduler_cfg.pop("scheduler")

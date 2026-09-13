@@ -28,16 +28,16 @@ def dotsq4(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
 def psi(p: torch.Tensor) -> torch.Tensor:
     """Signed log :math:`\\mathrm{sign}(p)\\,\\log(|p| + 1)`.
 
-    This is equation (5) of arXiv:2201.08187.
-    The edge invariants span several orders of magnitude in GeV squared; the signed log
-    brings them into the linear layers' range while keeping the sign that separates
-    timelike from spacelike.
+    This is equation (5) of arXiv:2201.08187. The edge invariants span several orders of
+    magnitude in GeV squared; the signed log brings them into the linear layers' range
+    while keeping the sign that separates timelike from spacelike.
     """
     return torch.sign(p) * torch.log(p.abs() + 1)
 
 
 class LGEB(nn.Module):
-    """Lorentz Group Equivariant Block: one round of message passing over a flat node set.
+    """Lorentz Group Equivariant Block: one round of message passing over a flat node
+    set.
 
     Two edge attributes enter the messages, the norm of :math:`x_i - x_j` and the product
     :math:`x_i \\cdot x_j`.
@@ -124,8 +124,8 @@ class LGEB(nn.Module):
     ) -> torch.Tensor:
         """Move each node along the mean of its weighted edge differences.
 
-        The step is a combination of four-momentum differences, so it transforms like one and the
-        block stays equivariant.
+        The step is a combination of four-momentum differences, so it transforms like
+        one and the block stays equivariant.
         """
         # tanh bounds the gate at 1, so no step exceeds |x_diff| and the next block's signed log
         # cannot overflow. Not the reference implementation's per-component clamp at +-100 GeV: a
@@ -179,7 +179,8 @@ class LorentzNetGraph(nn.Module):
     def _batch_edges(
         self, atom_mask: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Index the edges that join two real constituents, over the flattened node axis.
+        """Index the edges that join two real constituents, over the flattened node
+        axis.
 
         Padded constituents are dropped to reduce the cost of the graphs.
 
@@ -194,8 +195,8 @@ class LorentzNetGraph(nn.Module):
     def forward(self, pmu: torch.Tensor) -> torch.Tensor:
         """Return the class logits of a batch of jets.
 
-        :param pmu: (jets, constituents, 4) four-momenta [E, px, py, pz] in GeV,
-            with padded constituents as all-zero rows.
+        :param pmu: (jets, constituents, 4) four-momenta [E, px, py, pz] in GeV, with
+            padded constituents as all-zero rows.
         :return: (jets, n_class) logits, invariant under a Lorentz transformation of
             *pmu* and unchanged by how many slots the padding fills.
         """

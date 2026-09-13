@@ -41,7 +41,8 @@ class Manifest:
 
 
 def write_manifest(manifest: Manifest, output_dir: str | Path) -> Path:
-    """Write *manifest* to ``<output_dir>/checkpoint_manifest.json`` and return its path."""
+    """Write *manifest* to ``<output_dir>/checkpoint_manifest.json`` and return its
+    path."""
     path = Path(output_dir) / MANIFEST_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(manifest), indent=2))
@@ -88,7 +89,8 @@ def _main_manifest(base_dir: Path) -> Manifest:
 
 
 def _one_fold_manifest(path: Path) -> Manifest:
-    """The manifest a ``fold=<i>`` process wrote, holding that one fold and nothing else.
+    """The manifest a ``fold=<i>`` process wrote, holding that one fold and nothing
+    else.
 
     :raises ValueError: otherwise, as for a sequential k-fold manifest dropped into a
         ``fold_<i>/`` directory, whose folds would then be counted twice.
@@ -106,8 +108,8 @@ def _one_fold_manifest(path: Path) -> Manifest:
 def _fold_manifests(base_dir: Path) -> list[Manifest]:
     """The manifests of the folds trained beside the main run, in fold order.
 
-    A fold still training has written none, so it is left out, with a warning, rather than waited
-    for.
+    A fold still training has written none, so it is left out, with a warning, rather
+    than waited for.
     """
     paths = sorted(base_dir.glob(f"fold_*/{MANIFEST_FILENAME}"), key=_fold_number)
     folds = [_one_fold_manifest(path) for path in paths]
@@ -123,14 +125,15 @@ def _fold_manifests(base_dir: Path) -> list[Manifest]:
 
 
 def merge_manifests(base_dir: str | Path) -> Manifest:
-    """Join the manifest of a main run with those of the folds trained beside it as processes.
+    """Join the manifest of a main run with those of the folds trained beside it as
+    processes.
 
-    The layout is the one ``scripts/cluster/submit_train.sh --folds`` launches: the main run
-    (``fold=null``, ``data.n_folds=1``) in *base_dir*, fold i (``fold=i``) in ``fold_<i>/`` under
-    it.
+    The layout is the one ``scripts/cluster/submit_train.sh --folds`` launches: the main
+    run (``fold=null``, ``data.n_folds=1``) in *base_dir*, fold i (``fold=i``) in
+    ``fold_<i>/`` under it.
 
-    :return: the main run first, then the folds by index. ``n_folds`` counts the fold manifests
-        found.
+    :return: the main run first, then the folds by index. ``n_folds`` counts the fold
+        manifests found.
     """
     base_dir = Path(base_dir)
     main = _main_manifest(base_dir)

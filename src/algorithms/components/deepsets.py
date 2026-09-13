@@ -17,8 +17,8 @@ _ACTIVATIONS = {
 class DeepSetsNet(nn.Module):
     """Apply phi to every constituent, pool over the jet, then read the pool with rho.
 
-    :param phi_layers: widths of the per-constituent network, the last entry being the width of the
-        pooled constituent embedding.
+    :param phi_layers: widths of the per-constituent network, the last entry being the
+        width of the pooled constituent embedding.
     :param rho_layers: hidden widths of the network applied to the pooled embedding.
     :param aggregation: pooling over the constituent axis, one of `AGGREGATIONS`.
     :param mask: zero the embeddings of padded constituents before pooling.
@@ -47,7 +47,8 @@ class DeepSetsNet(nn.Module):
         self.rho = self._stack([phi_layers[-1], *rho_layers, out_dim], False, dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Return the class logits for a batch of shape (jets, constituents, features)."""
+        """Return the class logits for a batch of shape (jets, constituents,
+        features)."""
         h = self.phi(x)
         # A padded constituent is an all-zero row.
         real = (x.abs().sum(dim=-1, keepdim=True) > 0).to(h.dtype)

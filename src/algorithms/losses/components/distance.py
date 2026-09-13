@@ -1,4 +1,5 @@
-"""Distances between the logits on ``x`` and on ``T(x)``, for the symmetry-consistency loss."""
+"""Distances between the logits on ``x`` and on ``T(x)``, for the symmetry-consistency
+loss."""
 
 import torch
 import torch.nn.functional as F
@@ -8,8 +9,8 @@ from torch import nn
 class LogitDistance(nn.Module):
     """Mean per-jet distance between two logit vectors.
 
-    ``l1`` and ``l2`` are the norms of the difference, ``mse`` its mean square per element,
-    and ``cosine`` one minus the cosine of the angle between the two vectors.
+    ``l1`` and ``l2`` are the norms of the difference, ``mse`` its mean square per
+    element, and ``cosine`` one minus the cosine of the angle between the two vectors.
     """
 
     METRICS = ("l1", "l2", "mse", "cosine")

@@ -58,8 +58,8 @@ def _fold_kwargs(cfg: DictConfig) -> dict[str, int]:
 def _manifest_run(cfg: DictConfig, trainer: Trainer) -> ManifestRun | None:
     """This run's manifest entry, or ``None`` when it saved no checkpoint.
 
-    ``src/eval.py`` depends on loading checkpoints, so if no checkpoints are produced then no
-    evaluation can be made.
+    ``src/eval.py`` depends on loading checkpoints, so if no checkpoints are produced
+    then no evaluation can be made.
     """
     try:
         checkpoint_path = best_or_last_checkpoint(trainer)
@@ -93,8 +93,8 @@ def _write_manifest(cfg: DictConfig, trainer: Trainer) -> None:
 
 @task_wrapper
 def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Fit one run and write its manifest: the main run on the record's own split, or the fold
-    ``fold`` names, nested under ``parent_run_id`` in MLflow.
+    """Fit one run and write its manifest: the main run on the record's own split, or
+    the fold ``fold`` names, nested under ``parent_run_id`` in MLflow.
 
     :return: the run's metrics, and the objects it was built from.
     """

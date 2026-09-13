@@ -82,8 +82,8 @@ class FlipProbe:
 class WassersteinProbe:
     """Compute the Wasserstein distance between two sets of logits.
 
-    This is used to see how different the predictions are when passing the basic data through a
-    model and then the augmented data.
+    This is used to see how different the predictions are when passing the basic data
+    through a model and then the augmented data.
     """
 
     def __init__(self) -> None:
@@ -110,11 +110,12 @@ class WassersteinProbe:
 
 
 class InvarianceMetricCallback(Callback):
-    """Log ``invariance/*`` metrics for every symmetry group at the end of the test pass.
+    """Log ``invariance/*`` metrics for every symmetry group at the end of the test
+    pass.
 
-    The metrics are the flip rate with its label-aware breakdown,
-    the accuracy after the transform, and the Wasserstein-1 distance between the clean
-    and transformed logit distributions averaged over the class-logit channels.
+    The metrics are the flip rate with its label-aware breakdown, the accuracy after the
+    transform, and the Wasserstein-1 distance between the clean and transformed logit
+    distributions averaged over the class-logit channels.
 
     :param transform_kwargs: they hyperparameters that a ``make_transform`` in the data
         module would take.
@@ -148,8 +149,8 @@ class InvarianceMetricCallback(Callback):
     def _names_for(self, width: int) -> list[str]:
         """Collect the first *width* features of the data.
 
-        A test batch has either all 16 columns (under ``keep_full_features_at_test``,
-        or always under the SCL) or the reduced set that the network consumes.
+        A test batch has either all 16 columns (under ``keep_full_features_at_test``, or
+        always under the SCL) or the reduced set that the network consumes.
         """
         if self._full_feature_names is not None and width == len(
             self._full_feature_names

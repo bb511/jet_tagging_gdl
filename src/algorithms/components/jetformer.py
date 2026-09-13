@@ -94,7 +94,8 @@ class JetFormerBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Attention, then the feed-forward sub-layer, each residual; dropout on the sum."""
+        """Attention, then the feed-forward sub-layer, each residual; dropout on the
+        sum."""
         x = self.attn(x)
         h = self.linear_0(self.activ_0(self.norm_0(x)))
         h = self.linear_1(self.activ_1(self.norm_1(h)))
@@ -135,7 +136,8 @@ class JetFormerNet(nn.Module):
         self.classifier = nn.Linear(embed_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Return the class logits for a batch of shape (jets, constituents, features)."""
+        """Return the class logits for a batch of shape (jets, constituents,
+        features)."""
         x = self.embedding(x)
         cls = self.cls_token.expand(x.size(0), -1, -1)
         x = torch.cat([cls, x], dim=1)  # (jets, 1 + constituents, embed_dim)

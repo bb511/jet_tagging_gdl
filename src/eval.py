@@ -36,10 +36,11 @@ log = RankedLogger(__name__, rank_zero_only=True)
 def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
     """Decide whether to compose the manifest for one run only or for a whole training.
 
-    You either evaluate one set of checkpoints, or you aggregate over kfolds; this is configured in
-    the main configuration.
+    You either evaluate one set of checkpoints, or you aggregate over kfolds; this is
+    configured in the main configuration.
 
-    :raises ValueError: when neither is set, so a mistyped path fails rather than test nothing.
+    :raises ValueError: when neither is set, so a mistyped path fails rather than test
+        nothing.
     """
     path = cfg.get("checkpoint_manifest_path")
     if path:
@@ -56,14 +57,16 @@ def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
 def _aggregated_labels(runs: list[ManifestRun]) -> set[str]:
     """Select which of the runs are considered and aggregated for the results table.
 
-    This is done so the main run is not mixed with the folds, since this would double- count jets.
+    This is done so the main run is not mixed with the folds, since this would double-
+    count jets.
     """
     folds = {run.fold_label for run in runs if run.fold_idx is not None}
     return folds or {run.fold_label for run in runs}
 
 
 def _callbacks(cfg: DictConfig, label: str) -> list[Callback]:
-    """Build the callbacks that run per checkpoint evaluation, drawing into *label*'s own plots."""
+    """Build the callbacks that run per checkpoint evaluation, drawing into *label*'s
+    own plots."""
     callbacks = instantiate_callbacks(cfg.get("callbacks"))
     for callback in callbacks:
         if isinstance(callback, PlottingCallback):
@@ -75,11 +78,12 @@ def _callbacks(cfg: DictConfig, label: str) -> list[Callback]:
 def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Test every checkpoint of one training on the held-out test split.
 
-    The folds are summarised into one results row once the last of them has been tested; the main
-    run is left out of it whenever folds exist, so no jet is counted twice. The k-fold runs are
-    nested underneath the main run in MLFlow.
+    The folds are summarised into one results row once the last of them has been tested;
+    the main run is left out of it whenever folds exist, so no jet is counted twice. The
+    k-fold runs are nested underneath the main run in MLFlow.
 
-    :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``, and the shared objects.
+    :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``, and the shared
+        objects.
     """
     runs = _runs_to_evaluate(cfg)
     aggregated = _aggregated_labels(runs)

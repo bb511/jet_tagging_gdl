@@ -125,14 +125,16 @@ def classify(log: str) -> tuple[str, float | None]:
 def worker_logs(logdir: str, idx: int, label: str) -> list[Path]:
     """The live-named driver logs of one block, one per worker sweeping its study.
 
-    A restart moves the previous log aside as ``<name>.log.<timestamp>``, so matching on the
-    ``.log`` suffix already drops those: they are the record of a death, not a worker.
+    A restart moves the previous log aside as ``<name>.log.<timestamp>``, so matching on
+    the ``.log`` suffix already drops those: they are the record of a death, not a
+    worker.
     """
     return sorted(Path(logdir).glob(f"{idx}_{label}*.log"))
 
 
 def classify_workers(logs: list[Path]) -> tuple[str, float | None]:
-    """(state, age) over a study's workers: alive if any is, else the most recently touched."""
+    """(state, age) over a study's workers: alive if any is, else the most recently
+    touched."""
     if not logs:
         return "no-log", None
     return max(
@@ -143,9 +145,10 @@ def classify_workers(logs: list[Path]) -> tuple[str, float | None]:
 def complete_of(db: str, study: str, writable: bool = False) -> int:
     """COMPLETE trials in a study.
 
-    A driver that crashed mid-transaction leaves a hot '<db>-journal' that a read-only open cannot
-    roll back, failing with 'database is locked'; ``writable`` is for reading copies of such
-    databases (copied with their -journal siblings) without touching the live files.
+    A driver that crashed mid-transaction leaves a hot '<db>-journal' that a read-only
+    open cannot roll back, failing with 'database is locked'; ``writable`` is for
+    reading copies of such databases (copied with their -journal siblings) without
+    touching the live files.
     """
     if not os.path.exists(db):
         return 0
@@ -187,7 +190,8 @@ def status_of(done: int, target: int, state: str) -> str:
 def _rows_of(
     path: Path, script: str, model: str, db_root: str, writable: bool
 ) -> list[dict]:
-    """One row per study of a single catalogue: its trial count and its workers' state."""
+    """One row per study of a single catalogue: its trial count and its workers'
+    state."""
     db = f"{db_root}/{model}.db"
     logdir = f"logs/searches/hls4ml_{path.stem}"
     rows = []

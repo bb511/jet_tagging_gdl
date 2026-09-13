@@ -153,7 +153,8 @@ def _scheme_of(row: dict[str, str]) -> str:
 
 
 def _discover_rows(results_dir: Path, stem: str, features: str) -> list[dict[str, str]]:
-    """Read results/<features>/results_table_<stem>.csv, the one directory --features names."""
+    """Read results/<features>/results_table_<stem>.csv, the one directory --features
+    names."""
     rows: list[dict[str, str]] = []
     for path in sorted(results_dir.glob(f"{features}/results_table_{stem}.csv")):
         found = read_csv(path)
@@ -163,7 +164,8 @@ def _discover_rows(results_dir: Path, stem: str, features: str) -> list[dict[str
 
 
 def _extract_entry(row: dict[str, str], deltas: dict, inv_metric: str) -> Entry:
-    """One results row as the entry a panel reads, its deltas looked up rather than computed.
+    """One results row as the entry a panel reads, its deltas looked up rather than
+    computed.
 
     Every lookup is keyed on the row's own method, model, constituent count and group, so an
     unaugmented row finds nothing: it is the zero line the others are drawn against. The two
@@ -186,8 +188,8 @@ def _baseline_rows(
 ) -> list[dict[str, str]]:
     """The unaugmented rows, from their own table or from the regime tables.
 
-    A regime catalogue evaluated on its own writes its ``none`` row into that regime's table, so
-    the rows can be present while results_table_baseline.csv is not.
+    A regime catalogue evaluated on its own writes its ``none`` row into that regime's
+    table, so the rows can be present while results_table_baseline.csv is not.
     """
     rows = _discover_rows(results_dir, "baseline", features)
     return rows or [
@@ -224,8 +226,9 @@ def build_dataset(results_dir: Path, features: str, deltas: dict):
 
     :param features: the ``results/<features>/`` directory name.
     :param deltas: the index of ``common.index_deltas``, every bar of every figure.
-    :returns: the (regime, model, N, group) index, the models and constituent counts it covers, the
-        regimes that have a table, and the invariance metric those tables carry.
+    :returns: the (regime, model, N, group) index, the models and constituent counts it
+        covers, the regimes that have a table, and the invariance metric those tables
+        carry.
     """
     regime_rows = {
         label: _discover_rows(results_dir, stem, features)
@@ -252,7 +255,8 @@ def build_dataset(results_dir: Path, features: str, deltas: dict):
 def scaffold(row_labels: list[str], models: list[str]):
     """The grid both figures use: one bar row per label, a FLOPs footer under them.
 
-    Every panel loses its top and right spine and gains a faint horizontal grid behind the bars.
+    Every panel loses its top and right spine and gains a faint horizontal grid behind
+    the bars.
 
     :param row_labels: the bar rows only; the footer row is added here.
     :returns: the figure and its (len(row_labels) + 1, len(models)) array of axes.
@@ -281,8 +285,8 @@ def _draw_group(ax, xs, ys, es, colour, bands=()):
     """One group's bar cluster, its error bars and any recover-rate bands.
 
     :param bands: (x, y) points to band, empty on a row that carries no recover rate.
-    :returns: the vertical extent drawn, whiskers and bands included, so a row's limits do not clip
-        them.
+    :returns: the vertical extent drawn, whiskers and bands included, so a row's limits
+        do not clip them.
     """
     if not xs:
         return []
@@ -304,7 +308,8 @@ def _finish_row(
 
     The limits fit everything drawn and keep zero in view, the rows diverging about it.
 
-    :param headroom: extra fraction of the span left above, for a row carrying an annotation.
+    :param headroom: extra fraction of the span left above, for a row carrying an
+        annotation.
     """
     for ax in axes_row:
         ax.axhline(0, color="#444444", lw=0.8, zorder=1)
@@ -323,9 +328,11 @@ def _finish_row(
 
 
 def _flops_footer(axes_row, flops_rows: list[list[float | None]], ns) -> None:
-    """The FLOPs footer: one number per (model, N), so architecture cost reads at a glance.
+    """The FLOPs footer: one number per (model, N), so architecture cost reads at a
+    glance.
 
-    The footer carries bare text, so each of its axes is stripped of bars, ticks and frame.
+    The footer carries bare text, so each of its axes is stripped of bars, ticks and
+    frame.
 
     :param flops_rows: one list of values per model, in the order of ``ns``.
     """
@@ -393,11 +400,12 @@ def _row_specs(inv_metric: str) -> list[tuple[str, str, str]]:
 
 
 def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
-    """Bar positions, heights, deviations and recover-rate bands for one group of one panel.
+    """Bar positions, heights, deviations and recover-rate bands for one group of one
+    panel.
 
-    Every (regime, model, N, group) with no row, or no value under the key, is appended to
-    ``missing`` and left out of the panel. The recover rate is a different conditional from the
-    flip rate, so only that row is banded with it.
+    Every (regime, model, N, group) with no row, or no value under the key, is appended
+    to ``missing`` and left out of the panel. The recover rate is a different
+    conditional from the flip rate, so only that row is banded with it.
     """
     found = []
     for k, n in enumerate(ns):
@@ -408,9 +416,7 @@ def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
         recover = entry.get("recover")
         found.append((k + OFFSET[group], *entry[key], recover[0] if recover else None))
     xs, ys, es, recs = zip(*found) if found else ((), (), (), ())
-    bands = (
-        [(x, r) for x, r in zip(xs, recs) if r is not None] if key == "flip" else []
-    )
+    bands = [(x, r) for x, r in zip(xs, recs) if r is not None] if key == "flip" else []
     return xs, ys, es, bands
 
 
@@ -430,7 +436,8 @@ def _draw_rows(axes, specs, index, regime: str, models, ns) -> list[tuple]:
 
 
 def _flops_of(index, regime: str, model: str, n: int) -> float | None:
-    """FLOPs are a property of the architecture, so they are read off the unaugmented entry."""
+    """FLOPs are a property of the architecture, so they are read off the unaugmented
+    entry."""
     entry = index.get((regime, model, n, "None"))
     return entry.get("flops") if entry else None
 

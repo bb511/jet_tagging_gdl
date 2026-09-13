@@ -122,7 +122,8 @@ class HLS4MLDataModule(LightningDataModule):
         self._ensure_record().prepare()
 
     def setup(self, stage: str | None = None) -> None:
-        """Build the datasets of *stage* (``fit``, ``validate`` or ``test``, None for all)."""
+        """Build the datasets of *stage* (``fit``, ``validate`` or ``test``, None for
+        all)."""
         record = self._ensure_record()
         indices = self.feature_indices()
 
@@ -206,8 +207,8 @@ class HLS4MLDataModule(LightningDataModule):
     def _ensure_record(self):
         """Fetch the record and instantiate the pipeline it comes with.
 
-        Because the record comes with its own dataloader, we need to insert the root path of the
-        that dataloader into sys. That's what 'root' refers to here.'
+        Because the record comes with its own dataloader, we need to insert the root
+        path of the that dataloader into sys. That's what 'root' refers to here.'
         """
         if self.record is not None:
             return self.record
@@ -277,7 +278,8 @@ class HLS4MLDataModule(LightningDataModule):
     def _fit_arrays(
         self, record
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """The training and validation tensors for the current fold, with normalisation."""
+        """The training and validation tensors for the current fold, with
+        normalisation."""
         train, val = record.load("train"), record.load("validation")
         if self.n_folds <= 1:
             return train.x, train.y, val.x, val.y
@@ -307,8 +309,8 @@ class HLS4MLDataModule(LightningDataModule):
     def _make_dataloader(self, dataset: HLS4MLDataset, num_workers: int) -> DataLoader:
         """Make the loader for each of the train, validation, and test data.
 
-        The dataset batches internally. An element of this loader is one batch. The workers draw
-        independently and hence persist throughout the epoch.
+        The dataset batches internally. An element of this loader is one batch. The
+        workers draw independently and hence persist throughout the epoch.
         """
         return DataLoader(
             dataset=dataset,
@@ -340,10 +342,10 @@ def compose_record_config(root: str, overrides: list) -> DictConfig:
 def _reduce_after(transform: Transform, indices: list[int]) -> Transform:
     """Wrapper for the data augmentation transformations.
 
-    :param transform: The data augmentation method that performs the transformation on the data;
-        takes all the features of the data set.
-    :param indices: List of integers that specified the list of features that the model actually
-        uses in its training.
+    :param transform: The data augmentation method that performs the transformation on
+        the data; takes all the features of the data set.
+    :param indices: List of integers that specified the list of features that the model
+        actually uses in its training.
     """
 
     def reduced(x: torch.Tensor) -> torch.Tensor:

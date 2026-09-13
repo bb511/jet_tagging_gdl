@@ -13,11 +13,12 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
 def nest_under(loggers: list[Logger], parent_run_id: str | None) -> None:
-    """Make the MLflow run of *loggers* a child of *parent_run_id*; ``None`` leaves it where it is.
+    """Make the MLflow run of *loggers* a child of *parent_run_id*; ``None`` leaves it
+    where it is.
 
-    A fold's training nests under the main run's, and a checkpoint's evaluation under the training
-    run that wrote it. The tag has to be in place before the run is created, which the logger does
-    on its first use.
+    A fold's training nests under the main run's, and a checkpoint's evaluation under
+    the training run that wrote it. The tag has to be in place before the run is
+    created, which the logger does on its first use.
     """
     for logger in loggers:
         if parent_run_id and isinstance(logger, MLFlowLogger):
@@ -26,10 +27,12 @@ def nest_under(loggers: list[Logger], parent_run_id: str | None) -> None:
 
 @rank_zero_only
 def log_hyperparameters(object_dict: dict[str, Any]) -> None:
-    """Send the config, the parameter counts and the FLOP count to every attached logger.
+    """Send the config, the parameter counts and the FLOP count to every attached
+    logger.
 
-    :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``; an evaluation adds the
-        runtime-only ``fold_idx`` and ``run_stage``, which a training reads off the config.
+    :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``; an evaluation adds
+        the runtime-only ``fold_idx`` and ``run_stage``, which a training reads off the
+        config.
     """
     if not object_dict["trainer"].logger:
         log.warning("Logger not found! Skipping hyperparameter logging...")
@@ -67,7 +70,8 @@ def _algorithm_hparams(
 ) -> dict[str, Any]:
     """The algorithm's config, its parameter counts and its per-jet FLOP count.
 
-    The FLOP count is computed at construction, so it is read off the module, not the config.
+    The FLOP count is computed at construction, so it is read off the module, not the
+    config.
     """
     parameters = list(algorithm.parameters())
     return {

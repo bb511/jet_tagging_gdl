@@ -43,11 +43,11 @@ class ResultsTable:
     :param model_name: short architecture label, ``algorithm.name``.
     :param features: the input feature list, labels the subdirectory unless ``subdir``.
     :param subdir: directory under the table's parent in place of the feature list.
-    :param selected_metric_mode: with ``scheme`` the run is judged on the group it was trained on,
-        and on the mean over the three groups when it was trained on none; ``mean_all`` always
-        reports that mean.
-    :param invariance_metric: which invariance family fills the selected and per-group columns,
-        e.g., ``wasserstein`` reads ``invariance/so2_wasserstein``.
+    :param selected_metric_mode: with ``scheme`` the run is judged on the group it was
+        trained on, and on the mean over the three groups when it was trained on none;
+        ``mean_all`` always reports that mean.
+    :param invariance_metric: which invariance family fills the selected and per-group
+        columns, e.g., ``wasserstein`` reads ``invariance/so2_wasserstein``.
     """
 
     def __init__(
@@ -76,7 +76,8 @@ class ResultsTable:
         self.output_path = _table_path(Path(output_path), label, self.display_method)
 
     def write(self, folds: list[dict[str, object]]) -> None:
-        """Append one row summarising *folds*, each one fold's metrics and its ``flops_total``."""
+        """Append one row summarising *folds*, each one fold's metrics and its
+        ``flops_total``."""
         if not folds:
             log.warning("No fold was evaluated, so no results row is written.")
             return
@@ -87,7 +88,8 @@ class ResultsTable:
     def _values(
         self, folds: list[dict[str, object]], suffix: str, group: str | None = None
     ) -> list[float]:
-        """One value per fold of *suffix*, on *group* or on the group the run is judged on.
+        """One value per fold of *suffix*, on *group* or on the group the run is judged
+        on.
 
         A run judged on no group reads the mean over the three groups instead.
         """
@@ -98,8 +100,8 @@ class ResultsTable:
         return [_mean(fold_values) for fold_values in zip(*per_group)]
 
     def _metric_columns(self, folds: list[dict[str, object]]) -> dict[str, object]:
-        """The families that vary by group: the selected metric on each group, then every tabulated
-        suffix on the judged group and once more on each."""
+        """The families that vary by group: the selected metric on each group, then
+        every tabulated suffix on the judged group and once more on each."""
         metric = self.invariance_metric
         columns: dict[str, object] = {}
         for group in TABULATED_GROUPS:
@@ -135,7 +137,8 @@ class ResultsTable:
         return row
 
     def _log(self, row: dict[str, object]) -> None:
-        """Announce the appended row, so a queue's log says what landed in which table."""
+        """Announce the appended row, so a queue's log says what landed in which
+        table."""
         log.info(
             f"Results row appended to {self.output_path}: method={self.display_method}, "
             f"model={self.model_name}, group={self.augmentation_scheme}, "
@@ -148,8 +151,8 @@ class ResultsTable:
 def write_results_row(cfg: DictConfig, folds: list[dict[str, object]]) -> None:
     """Summarise *folds* into one row of the table ``cfg.results_table`` names.
 
-    A composition without that node writes nothing, which is how ``debug`` keeps a throwaway
-    evaluation out of ``results/``.
+    A composition without that node writes nothing, which is how ``debug`` keeps a
+    throwaway evaluation out of ``results/``.
     """
     if not cfg.get("results_table"):
         log.info("No results_table config found, so no row is written.")
@@ -168,7 +171,8 @@ def write_results_row(cfg: DictConfig, folds: list[dict[str, object]]) -> None:
 
 
 def _judged_group(selected_metric_mode: str, augmentation_scheme: str) -> str | None:
-    """The group the run is judged on, None when it belongs to none and the three are averaged."""
+    """The group the run is judged on, None when it belongs to none and the three are
+    averaged."""
     judged = (
         selected_metric_mode == "scheme" and augmentation_scheme in TABULATED_GROUPS
     )
@@ -176,7 +180,8 @@ def _judged_group(selected_metric_mode: str, augmentation_scheme: str) -> str | 
 
 
 def _display_regime(method: str, augmentation_scheme: str) -> str:
-    """Name the regime as the tables report it: a run with no symmetry is the baseline."""
+    """Name the regime as the tables report it: a run with no symmetry is the
+    baseline."""
     if method == "augmentation" and augmentation_scheme == "none":
         return "baseline"
     return method
@@ -185,14 +190,16 @@ def _display_regime(method: str, augmentation_scheme: str) -> str:
 def _table_path(base: Path, subdir: str | None, display_method: str) -> Path:
     """Weave the subdirectory and the regime into the table name.
 
-    ``results/results_table.csv`` becomes ``results/px_py_pz_e/results_table_baseline.csv``.
+    ``results/results_table.csv`` becomes
+    ``results/px_py_pz_e/results_table_baseline.csv``.
     """
     directory = base.parent / subdir if subdir else base.parent
     return directory / f"{base.stem}_{display_method}{base.suffix}"
 
 
 def _to_float(value) -> float:
-    """Read a metric out of Lightning's dicts, whether it is a tensor, a number or absent."""
+    """Read a metric out of Lightning's dicts, whether it is a tensor, a number or
+    absent."""
     if value is None:
         return float("nan")
     return float(value.item()) if hasattr(value, "item") else float(value)
@@ -210,7 +217,8 @@ def _join(values: Sequence[float]) -> str:
 
 
 def _summary(prefix: str, values: Sequence[float]) -> dict[str, object]:
-    """The mean over the folds, its sample deviation, and the two rendered as one cell."""
+    """The mean over the folds, its sample deviation, and the two rendered as one
+    cell."""
     finite = [value for value in values if not math.isnan(value)]
     mean = _mean(values)
     # One fold has no spread to report, which is not the same as no fold having reported.
@@ -232,7 +240,8 @@ def _family(prefix: str, values: Sequence[float]) -> dict[str, object]:
 
 
 def _ci(prefix: str, values: Sequence[float]) -> dict[str, object]:
-    """The percentile interval of the mean, NaN below the two folds a resampling needs."""
+    """The percentile interval of the mean, NaN below the two folds a resampling
+    needs."""
     finite = [value for value in values if not math.isnan(value)]
     nan = (float("nan"), float("nan"))
     lower, upper = bootstrap_ci(finite) if len(finite) > 1 else nan
@@ -243,7 +252,8 @@ def _ci(prefix: str, values: Sequence[float]) -> dict[str, object]:
 
 
 def _check_header(path: Path, fieldnames: list[str]) -> None:
-    """Refuse to append under a header with other columns, which would misalign the row."""
+    """Refuse to append under a header with other columns, which would misalign the
+    row."""
     with open(path, newline="") as table:
         header = next(csv.reader(table), None)
     if header is None or header == fieldnames:

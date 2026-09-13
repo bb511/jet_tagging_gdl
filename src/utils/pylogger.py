@@ -7,7 +7,7 @@ from lightning_utilities.core.rank_zero import rank_prefixed_message, rank_zero_
 
 
 class RankedLogger(logging.LoggerAdapter):
-    """A logger for multi-process runs, prefixing each message with the rank that emitted it."""
+    """A logger for multi-process runs, prefixing each message with the rank."""
 
     def __init__(
         self,
@@ -21,7 +21,8 @@ class RankedLogger(logging.LoggerAdapter):
         self.rank_zero_only = rank_zero_only
 
     def _emits(self, current_rank: int, rank: int | None) -> bool:
-        """Whether this process logs the message: rank 0 alone, or the rank *rank* names."""
+        """Whether this process logs the message: rank 0 alone, or the rank *rank*
+        names."""
         if self.rank_zero_only:
             return current_rank == 0
         return rank is None or current_rank == rank
@@ -29,12 +30,14 @@ class RankedLogger(logging.LoggerAdapter):
     def log(
         self, level: int, msg: str, *args, rank: int | None = None, **kwargs
     ) -> None:
-        """Log *msg* at *level*, prefixed with the rank of the process it is logged from.
+        """Log *msg* at *level*, prefixed with the rank of the process it is logged
+        from.
 
-        :param rank: log on that process alone; ``None`` logs on every process, subject to
-            ``rank_zero_only``. Keyword-only, so ``log.info("%s", value)`` formats as logging does.
-        :raises RuntimeError: before Lightning has set ``rank_zero_only.rank``, without which the
-            rank of this process is unknown.
+        :param rank: log on that process alone; ``None`` logs on every process, subject
+            to ``rank_zero_only``. Keyword-only, so ``log.info("%s", value)`` formats as
+            logging does.
+        :raises RuntimeError: before Lightning has set ``rank_zero_only.rank``, without
+            which the rank of this process is unknown.
         """
         if not self.isEnabledFor(level):
             return

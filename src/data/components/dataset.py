@@ -20,13 +20,13 @@ class HLS4MLDataset(IterableDataset):
 
     :param x: the constituents, shape (jets, constituents, features).
     :param y: the one-hot flavour labels, shape (jets, classes).
-    :param batch_size: a trailing partial batch is dropped, so ``len(self)`` is exact and
-        OneCycleLR can be given a step count.
+    :param batch_size: a trailing partial batch is dropped, so ``len(self)`` is exact
+        and OneCycleLR can be given a step count.
     :param shuffler: seeded generator for the per-epoch permutation, or None to keep the
         stored order.
     :param max_batches: cap on the batches each worker yields.
-    :param transform: online augmentation, from a batch to its transformed batch of the same
-        shape.
+    :param transform: online augmentation, from a batch to its transformed batch of the
+        same shape.
     """
 
     def __init__(
@@ -66,12 +66,14 @@ class HLS4MLDataset(IterableDataset):
             emitted += 1
 
     def _order(self) -> torch.Tensor:
-        """The jet order of one epoch: a fresh permutation, or the order the tensors are in."""
+        """The jet order of one epoch: a fresh permutation, or the order the tensors are
+        in."""
         if self.shuffler is None:
             return torch.arange(self.n)
         return torch.randperm(self.n, generator=self.shuffler)
 
     def _batch(self, idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """One batch of jets and labels, transformed when the dataset carries a transform."""
+        """One batch of jets and labels, transformed when the dataset carries a
+        transform."""
         x, y = self.X[idx], self.y[idx]
         return (x, y) if self.transform is None else (self.transform(x), y)

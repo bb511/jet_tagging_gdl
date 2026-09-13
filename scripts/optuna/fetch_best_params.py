@@ -32,8 +32,9 @@ def study_names(storage: str, wanted: str | None) -> list[str]:
 def as_yaml(params: dict[str, object]) -> str:
     """The parameters as a nested YAML block.
 
-    Optuna parameter names are dotted hydra paths, so they are turned back into nesting; leaf lists
-    come out in flow style ('[128, 64, 32]'), as the experiment configs write widths.
+    Optuna parameter names are dotted hydra paths, so they are turned back into nesting;
+    leaf lists come out in flow style ('[128, 64, 32]'), as the experiment configs write
+    widths.
     """
     dotlist = [f"{k}={v}" for k, v in sorted(params.items())]
     nested = OmegaConf.to_container(OmegaConf.from_dotlist(dotlist), resolve=True)

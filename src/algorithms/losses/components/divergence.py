@@ -8,8 +8,8 @@ from torch import nn
 class SoftmaxDivergence(nn.Module):
     """Symmetrised divergence between the softmax logit vectors, mean over the jets.
 
-    ``js`` is the Jensen-Shannon divergence and ``kl`` the mean of the two
-    Kullback-Leibler divergences.
+    ``js`` is the Jensen-Shannon divergence and ``kl`` the mean of the two Kullback-
+    Leibler divergences.
     """
 
     METRICS = ("js", "kl")

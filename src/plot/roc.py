@@ -22,7 +22,8 @@ def plot(
     """Plot the one-vs-rest ROC curve of every jet class.
 
     :param labels: true class index per jet, shape (jets,).
-    :param probs: class probabilities, shape (jets, classes), columns ordered as *class_names*.
+    :param probs: class probabilities, shape (jets, classes), columns ordered as
+        *class_names*.
     :param split: the split the scores come from; it names the file and the title.
     """
     plt.style.use(hep.style.CMS)

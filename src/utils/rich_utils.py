@@ -19,8 +19,9 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 def _ordered_fields(cfg: DictConfig, print_order: Sequence[str]) -> list[str]:
     """The top-level fields of *cfg* to render, those of *print_order* first.
 
-    A field of *print_order* that the config does not hold is reported: the order is written by
-    hand, so a renamed config group would otherwise drop out of the tree unnoticed.
+    A field of *print_order* that the config does not hold is reported: the order is
+    written by hand, so a renamed config group would otherwise drop out of the tree
+    unnoticed.
     """
     ordered = []
     for field in print_order:
@@ -34,7 +35,8 @@ def _ordered_fields(cfg: DictConfig, print_order: Sequence[str]) -> list[str]:
 
 
 def _as_yaml(group: object, resolve: bool) -> str:
-    """One config group as the tree shows it, or its plain text when it is not a group."""
+    """One config group as the tree shows it, or its plain text when it is not a
+    group."""
     if isinstance(group, DictConfig):
         return OmegaConf.to_yaml(group, resolve=resolve)
     return str(group)
@@ -57,10 +59,11 @@ def print_config_tree(
 ) -> None:
     """Render the composed config as a Rich tree, one branch per top-level field.
 
-    :param print_order: the fields rendered first; anything else follows in the order the config
-        holds it.
+    :param print_order: the fields rendered first; anything else follows in the order
+        the config holds it.
     :param resolve: resolve the ``${...}`` interpolations before rendering them.
-    :param save_to_file: also write the tree to ``config_tree.log`` in the run directory.
+    :param save_to_file: also write the tree to ``config_tree.log`` in the run
+        directory.
     """
     style = "dim"
     tree = rich.tree.Tree("CONFIG", style=style, guide_style=style)

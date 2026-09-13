@@ -1,8 +1,4 @@
-"""Custom ``${...}`` resolvers for the Hydra configs.
-
-:func:`register_resolvers` must run before Hydra composes anything, hence the call at the top of
-both entry points and in the test ``conftest``.
-"""
+"""Custom ``${...}`` resolvers for the Hydra configs."""
 
 import hashlib
 
@@ -22,16 +18,17 @@ def short_hash(value: str, length: int = 12) -> str:
 
 
 def fold_label(fold: int | None, default: str) -> str:
-    """Return ``fold_<i>`` for fold *fold*, counted from one, or *default* for the main run.
+    """Return ``fold_<i>`` for fold *fold*, counted from one, or *default* for main.
 
-    Names a run after the one ``fold`` knob of ``train.yaml``, in the manifest and in MLflow.
+    Names a run after the one ``fold`` knob of ``train.yaml``, in the manifest and in
+    MLflow.
     """
     return default if fold is None else f"fold_{int(fold)}"
 
 
 def register_resolvers() -> None:
     """Register every resolver; ``replace=True`` makes a second call harmless."""
-    # ${len:${data.features}} derives nbr_feats from the feature list, so the two cannot disagree.
+    # ${len:${data.features}} derives nbr_feats from the feature list.
     OmegaConf.register_new_resolver("len", len, replace=True)
     OmegaConf.register_new_resolver("short_hash", short_hash, replace=True)
     OmegaConf.register_new_resolver("fold_label", fold_label, replace=True)

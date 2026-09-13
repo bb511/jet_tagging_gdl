@@ -31,7 +31,8 @@ class MLP(nn.Module):
         return self.net(x)
 
     def _get_activation(self, activation: str) -> nn.Module:
-        """Return the single instance every layer shares; none of these activations holds state."""
+        """Return the single instance every layer shares; none of these activations
+        holds state."""
         activation = activation.lower()
         if activation == "relu":
             return nn.ReLU()
@@ -43,7 +44,8 @@ class MLP(nn.Module):
         raise ValueError(f"Unsupported activation: {activation}")
 
     def _construct_net(self) -> nn.Sequential:
-        """Stack the hidden layers, then the output layer that reaches the caller unactivated."""
+        """Stack the hidden layers, then the output layer that reaches the caller
+        unactivated."""
         layers: list[nn.Module] = []
 
         current_dim = self.in_dim

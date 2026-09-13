@@ -15,9 +15,10 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 def extras(cfg: DictConfig) -> None:
     """Apply the optional conveniences configured under ``cfg.extras``.
 
-    Warning filters, tag prompting, the config tree, the float32 matmul precision (``high`` trades
-    a little accuracy for tensor cores on Volta and later; ``null`` leaves torch alone) and the
-    per-process GPU memory cap (a fraction of the card; ``null`` leaves torch alone).
+    Warning filters, tag prompting, the config tree, the float32 matmul precision
+    (``high`` trades a little accuracy for tensor cores on Volta and later; ``null``
+    leaves torch alone) and the per-process GPU memory cap (a fraction of the card;
+    ``null`` leaves torch alone).
     """
     if not cfg.get("extras"):
         log.warning("Extras config not found! <cfg.extras=null>")
@@ -66,9 +67,11 @@ def task_wrapper(task_func: Callable) -> Callable:
 
 
 def _require_metric(metric_dict: dict[str, Any], metric_name: str) -> None:
-    """Fail on a metric the run never logged, which a study would otherwise optimise blindly.
+    """Fail on a metric the run never logged, which a study would otherwise optimise
+    blindly.
 
-    :raises Exception: naming both places the name has to match, the module and the search config.
+    :raises Exception: naming both places the name has to match, the module and the
+        search config.
     """
     if metric_name in metric_dict:
         return
