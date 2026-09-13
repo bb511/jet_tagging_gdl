@@ -47,7 +47,9 @@ class LGEB(nn.Module):
     :param last_layer: drop the coordinate update, whose result no later block reads.
     """
 
-    def __init__(self, n_hidden: int, c_weight: float = 1.0, last_layer: bool = False) -> None:
+    def __init__(
+        self, n_hidden: int, c_weight: float = 1.0, last_layer: bool = False
+    ) -> None:
         super().__init__()
         self.c_weight = c_weight
         self.phi_e = nn.Sequential(
@@ -107,7 +109,11 @@ class LGEB(nn.Module):
         return m * self.phi_m(m)
 
     def _update_scalars(
-        self, h: torch.Tensor, m: torch.Tensor, node_attr: torch.Tensor, src: torch.Tensor
+        self,
+        h: torch.Tensor,
+        m: torch.Tensor,
+        node_attr: torch.Tensor,
+        src: torch.Tensor,
     ) -> torch.Tensor:
         """Add to each node the response to its summed incoming messages."""
         agg = h.new_zeros(h.shape[0], m.shape[1]).index_add_(0, src, m)
@@ -153,7 +159,10 @@ class LorentzNetGraph(nn.Module):
         # The squared mass is a node's only scalar; the four-momentum carries the rest.
         self.embedding = nn.Linear(1, n_hidden)
         self.blocks = nn.ModuleList(
-            [LGEB(n_hidden, c_weight, last_layer=(i == n_layers - 1)) for i in range(n_layers)]
+            [
+                LGEB(n_hidden, c_weight, last_layer=(i == n_layers - 1))
+                for i in range(n_layers)
+            ]
         )
         self.graph_dec = nn.Sequential(
             nn.Linear(n_hidden, n_hidden),
@@ -167,7 +176,9 @@ class LorentzNetGraph(nn.Module):
         self.register_buffer("edge_src", src[src != dst], persistent=False)
         self.register_buffer("edge_dst", dst[src != dst], persistent=False)
 
-    def _batch_edges(self, atom_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _batch_edges(
+        self, atom_mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Index the edges that join two real constituents, over the flattened node axis.
 
         Padded constituents are dropped to reduce the cost of the graphs.

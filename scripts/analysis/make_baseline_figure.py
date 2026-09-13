@@ -10,7 +10,8 @@ SO(2), SO(3) and Lorentz bars, and measures the model against its own clean pred
                             own accuracy_transformed columns; the clean accuracy is printed on
                             the panel
     <invariance metric>     the results table's own value (Wasserstein distance), absolute
-    self-consistency        flip rate 1 - stable fraction (%), the recover rate overlaid as a band
+    self-consistency        the unconditional flip rate FR (%), the recover rate overlaid as a
+                            band
     FLOPs                   a text footer, one number per (model, N)
 
 Lower is better in the last two rows, unlike the delta figures where positive is always better.
@@ -41,24 +42,26 @@ def _folds(row: dict[str, str], key: str) -> list[float] | None:
     return common.parse_folds(row.get(key, ""))
 
 
-def _group_entry(row: dict[str, str], acc: list[float], scheme: str, metric: str) -> dict | None:
+def _group_entry(
+    row: dict[str, str], acc: list[float], scheme: str, metric: str
+) -> dict | None:
     """One group's three panels for one row, each as (mean, deviation) over the folds.
 
     The accuracy after the transform is the probe's own measurement, not a reconstruction from the
     transition rates, which is what it used to be before the table carried the column.
     """
     acc_t = _folds(row, f"{scheme}_accuracy_transformed_folds")
-    stable = _folds(row, f"{scheme}_flip_stable_folds")
+    flip = _folds(row, f"{scheme}_flip_folds")
     recover = _folds(row, f"{scheme}_flip_recover_folds")
     distance = _folds(row, f"{scheme}_{metric}_folds")
-    if acc_t is None or stable is None or recover is None or distance is None:
+    if acc_t is None or flip is None or recover is None or distance is None:
         return None
     if len(acc_t) != len(acc):
         return None
     return {
         "dacc": common.stats([100.0 * (t - a) for t, a in zip(acc_t, acc)]),
         "w": common.stats(distance),
-        "flip": common.stats([100.0 * (1.0 - s) for s in stable]),
+        "flip": common.stats([100.0 * f for f in flip]),
         "recover": common.stats(recover)[0] * 100.0,
     }
 
@@ -98,7 +101,9 @@ def build_dataset(rows: list[dict[str, str]], metric: str):
     for row in rows:
         entry = _row_entry(row, metric)
         if entry is not None:
-            data[(common.model_display(row["model"]), int(row["nconstituents"]))] = entry
+            data[(common.model_display(row["model"]), int(row["nconstituents"]))] = (
+                entry
+            )
     models = sorted({m for m, _ in data}, key=_model_rank)
     return data, models, sorted({n for _, n in data})
 
@@ -138,10 +143,16 @@ def _panel(ax, entries_by_n, key: str) -> list[float]:
     extent: list[float] = []
     for group in GROUPS:
         # (constituent-count index, mean, deviation), for the entries that hold this group.
-        vals = [(k, *e[group][key]) for k, e in enumerate(entries_by_n) if e and e.get(group)]
+        vals = [
+            (k, *e[group][key])
+            for k, e in enumerate(entries_by_n)
+            if e and e.get(group)
+        ]
         xs = [k + OFFSET[group] for k, _, _ in vals]
         ys, es = [m for _, m, _ in vals], [s for _, _, s in vals]
-        bands = [(x, entries_by_n[k][group]["recover"]) for x, (k, _, _) in zip(xs, vals)]
+        bands = [
+            (x, entries_by_n[k][group]["recover"]) for x, (k, _, _) in zip(xs, vals)
+        ]
         extent += make_figures._draw_group(
             ax, xs, ys, es, COL[group], bands if key == "flip" else []
         )
@@ -159,7 +170,9 @@ def _draw_rows(axes, specs, data, models, ns) -> None:
                 _annotate_clean(axes[i, j], entries)
         # The clean-accuracy annotation sits at the top of its panel, so that row is given room.
         headroom = 0.3 if key == "dacc" else 0.0
-        make_figures._finish_row(axes[i], ylabel, extent, ns, i == len(specs) - 1, headroom)
+        make_figures._finish_row(
+            axes[i], ylabel, extent, ns, i == len(specs) - 1, headroom
+        )
 
 
 def draw(data, models, ns, metric: str, out_dir: Path, name: str) -> None:
@@ -167,7 +180,9 @@ def draw(data, models, ns, metric: str, out_dir: Path, name: str) -> None:
     specs = _row_specs(metric)
     fig, axes = make_figures.scaffold([label for _, label, _ in specs], models)
     _draw_rows(axes, specs, data, models, ns)
-    flops = [[(data.get((model, n)) or {}).get("flops") for n in ns] for model in models]
+    flops = [
+        [(data.get((model, n)) or {}).get("flops") for n in ns] for model in models
+    ]
     make_figures._flops_footer(axes[len(specs)], flops, ns)
     # Four legend entries do not fit on one row of a single-column figure.
     legend_rows = 1 if len(models) > 1 else 2
@@ -181,9 +196,14 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("tables", nargs="+", type=Path, help="raw results_table_*.csv files")
     parser.add_argument(
-        "--out-dir", type=Path, default=None, help="default: the first table's directory"
+        "tables", nargs="+", type=Path, help="raw results_table_*.csv files"
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="default: the first table's directory",
     )
     parser.add_argument(
         "--name", default="fig_baseline", help="output stem, written as <name>.svg"
@@ -197,7 +217,9 @@ def main() -> None:
     rows = _read_rows(args.tables)
     metric = common.detect_inv_metric_suffix(rows)
     if not rows or metric is None:
-        sys.exit("no augmentation_scheme=none rows with per-fold invariance columns found")
+        sys.exit(
+            "no augmentation_scheme=none rows with per-fold invariance columns found"
+        )
     data, models, ns = build_dataset(rows, metric)
     out_dir = args.out_dir or args.tables[0].parent
     out_dir.mkdir(parents=True, exist_ok=True)

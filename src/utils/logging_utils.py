@@ -62,7 +62,9 @@ def _config_hparams(cfg: dict[str, Any], object_dict: dict[str, Any]) -> dict[st
     }
 
 
-def _algorithm_hparams(cfg: dict[str, Any], algorithm: LightningModule) -> dict[str, Any]:
+def _algorithm_hparams(
+    cfg: dict[str, Any], algorithm: LightningModule
+) -> dict[str, Any]:
     """The algorithm's config, its parameter counts and its per-jet FLOP count.
 
     The FLOP count is computed at construction, so it is read off the module, not the config.
@@ -72,7 +74,9 @@ def _algorithm_hparams(cfg: dict[str, Any], algorithm: LightningModule) -> dict[
         "algorithm": cfg["algorithm"],
         "algorithm/name": cfg["algorithm"].get("name"),
         "algorithm/params/total": sum(p.numel() for p in parameters),
-        "algorithm/params/trainable": sum(p.numel() for p in parameters if p.requires_grad),
+        "algorithm/params/trainable": sum(
+            p.numel() for p in parameters if p.requires_grad
+        ),
         "algorithm/params/non_trainable": sum(
             p.numel() for p in parameters if not p.requires_grad
         ),

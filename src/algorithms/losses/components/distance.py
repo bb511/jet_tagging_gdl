@@ -17,7 +17,9 @@ class LogitDistance(nn.Module):
     def __init__(self, metric: str = "l2") -> None:
         super().__init__()
         if metric not in self.METRICS:
-            raise ValueError(f"metric must be one of {list(self.METRICS)}, got {metric!r}.")
+            raise ValueError(
+                f"metric must be one of {list(self.METRICS)}, got {metric!r}."
+            )
         self.metric = metric
 
     def forward(self, logits: torch.Tensor, logits_sym: torch.Tensor) -> torch.Tensor:

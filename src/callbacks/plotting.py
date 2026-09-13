@@ -16,7 +16,9 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 
 @torch.no_grad()
-def _step_logits(pl_module: LightningModule, outputs: Any, x: torch.Tensor) -> torch.Tensor:
+def _step_logits(
+    pl_module: LightningModule, outputs: Any, x: torch.Tensor
+) -> torch.Tensor:
     """Return the logits for a batch, reusing the step's own when it hands them over.
 
     :param pl_module:`~src.algorithms.JetTaggingModule` returns its ``model_step`` dict
@@ -75,7 +77,9 @@ def _log_artifacts(trainer: Trainer, paths: list[Path]) -> None:
         if not isinstance(logger, MLFlowLogger):
             continue
         for path in paths:
-            logger.experiment.log_artifact(logger.run_id, str(path), artifact_path="plots")
+            logger.experiment.log_artifact(
+                logger.run_id, str(path), artifact_path="plots"
+            )
 
 
 class PlottingCallback(Callback):
@@ -96,7 +100,9 @@ class PlottingCallback(Callback):
         self._val = _Predictions()
         self._test = _Predictions()
 
-    def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+    def on_validation_epoch_start(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
         """Start the epoch empty: only the last epoch's predictions are ever plotted."""
         if not trainer.sanity_checking:
             self._val.clear()

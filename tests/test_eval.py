@@ -39,7 +39,9 @@ def test_the_folds_of_one_training_become_one_results_row(
 
     with open_dict(cfg_eval):
         cfg_eval.data.n_folds = 2
-        cfg_eval.checkpoint_manifest_path = str(tmp_path)  # a run dir: main merged with fold_*/
+        cfg_eval.checkpoint_manifest_path = str(
+            tmp_path
+        )  # a run dir: main merged with fold_*/
     HydraConfig().set_config(cfg_eval)
     metric_dict, _ = evaluate(cfg_eval)
 
@@ -54,7 +56,10 @@ def test_the_folds_of_one_training_become_one_results_row(
 @pytest.mark.slow
 @needs_record
 def test_each_evaluation_nests_under_the_training_run_of_its_checkpoint(
-    cfg_train: DictConfig, cfg_eval: DictConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    cfg_train: DictConfig,
+    cfg_eval: DictConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
     with open_dict(cfg_train):
@@ -67,7 +72,9 @@ def test_each_evaluation_nests_under_the_training_run_of_its_checkpoint(
         cfg_fold.fold = 1
     HydraConfig().set_config(cfg_fold)
     train(cfg_fold)
-    trained = {run.fold_label: run.mlflow_run_id for run in merge_manifests(tmp_path).runs}
+    trained = {
+        run.fold_label: run.mlflow_run_id for run in merge_manifests(tmp_path).runs
+    }
 
     with open_dict(cfg_eval):
         cfg_eval.data.n_folds = 2
@@ -79,7 +86,9 @@ def test_each_evaluation_nests_under_the_training_run_of_its_checkpoint(
     client = MlflowClient(f"file:{tmp_path}/mlruns")
     experiment = client.get_experiment_by_name("test")
     evals = client.search_runs([experiment.experiment_id], "params.run_stage = 'eval'")
-    parents = {r.data.params["fold_idx"]: r.data.tags.get("mlflow.parentRunId") for r in evals}
+    parents = {
+        r.data.params["fold_idx"]: r.data.tags.get("mlflow.parentRunId") for r in evals
+    }
     assert set(trained) == {"main", "fold_1"} and all(trained.values())
     assert parents == trained
 

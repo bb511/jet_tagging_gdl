@@ -34,7 +34,9 @@ class LorentzNet(JetTaggingModule):
 
     def _on_features_resolved(self) -> None:
         """Cache the factors returning [px, py, pz, e] to GeV, in that column order."""
-        scales = [get_norm_scale(self.norm_scales, name) for name in self.required_features]
+        scales = [
+            get_norm_scale(self.norm_scales, name) for name in self.required_features
+        ]
         self.denorm_scales.copy_(torch.tensor(scales))
 
     def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:

@@ -79,7 +79,9 @@ def _require_metric(metric_dict: dict[str, Any], metric_name: str) -> None:
     )
 
 
-def get_metric_value(metric_dict: dict[str, Any], metric_name: str | None) -> float | None:
+def get_metric_value(
+    metric_dict: dict[str, Any], metric_name: str | None
+) -> float | None:
     """Read one scalar metric out of a finished run's metrics.
 
     :param metric_name: the metric to read, ``None`` outside a hyperparameter search.

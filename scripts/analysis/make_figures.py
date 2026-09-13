@@ -9,7 +9,8 @@ constituent count, so positive is better in every row::
     accuracy (transformed)  pp, its accuracy_transformed rows
     <invariance metric>     its wasserstein rows, the distance between the clean and the
                             transformed logits
-    self-consistency        stable fraction 1 - FR, the recover rate overlaid as a band
+    self-consistency        pp, its flip rows, the unconditional flip rate, positive being
+                            fewer flips; the recover rate overlaid as a band
     FLOPs                   a text footer, one regime-independent number per (model, N)
 
 Bars cover SO(2), SO(3) and Lorentz; the unaugmented run is the zero line by construction.
@@ -102,12 +103,16 @@ OFFSET = {"SO(2)": -WIDTH, "SO(3)": 0.0, "Lorentz": WIDTH}
 # The FLOPs footer carries one line of text and no bars. At the height of a bar row it would sit
 # almost empty and push the legend far below the panels.
 FLOPS_RATIO = 0.16
-BOX = dict(boxstyle="round,pad=0.25", facecolor="#f0f0f0", edgecolor="#bbbbbb", linewidth=0.6)
+BOX = dict(
+    boxstyle="round,pad=0.25", facecolor="#f0f0f0", edgecolor="#bbbbbb", linewidth=0.6
+)
 
 # The style of the error whiskers, and of the recover-rate band. The recover rate is
-# P(correct after | wrong before), a different conditional from the stable fraction the bar
-# carries, so it is drawn as a band across the bar rather than as a tick on it.
-WHISKER = dict(fmt="none", ecolor="#333", elinewidth=0.9, capsize=2.2, capthick=0.9, zorder=3)
+# P(correct after | wrong before), a different conditional from the unconditional flip rate the
+# bar carries, so it is drawn as a band across the bar rather than as a tick on it.
+WHISKER = dict(
+    fmt="none", ecolor="#333", elinewidth=0.9, capsize=2.2, capthick=0.9, zorder=3
+)
 BAND = dict(colors=RECOVER_COLOR, linewidth=6.0, capstyle="butt", zorder=4, alpha=0.9)
 
 # Preferred column order; a model present in the data but not listed here is appended
@@ -162,8 +167,8 @@ def _extract_entry(row: dict[str, str], deltas: dict, inv_metric: str) -> Entry:
 
     Every lookup is keyed on the row's own method, model, constituent count and group, so an
     unaugmented row finds nothing: it is the zero line the others are drawn against. The two
-    accuracies are scaled to percentage points, the units the results tables write them in being
-    proportions.
+    accuracies, the flip rate and the recover rate are scaled to percentage points, the
+    units the results tables write them in being proportions.
     """
     group = _scheme_of(row)
     return {
@@ -171,22 +176,28 @@ def _extract_entry(row: dict[str, str], deltas: dict, inv_metric: str) -> Entry:
         "acc": _delta(deltas, delta_key(row, "", "test_acc"), 100.0),
         "acc_t": _delta(deltas, delta_key(row, group, "accuracy_transformed"), 100.0),
         "inv": _delta(deltas, delta_key(row, group, inv_metric)),
-        "stable": _delta(deltas, delta_key(row, group, "flip_stable")),
-        "recover": _delta(deltas, delta_key(row, group, "flip_recover")),
+        "flip": _delta(deltas, delta_key(row, group, "flip"), 100.0),
+        "recover": _delta(deltas, delta_key(row, group, "flip_recover"), 100.0),
     }
 
 
-def _baseline_rows(results_dir: Path, features: str, regime_rows: dict) -> list[dict[str, str]]:
+def _baseline_rows(
+    results_dir: Path, features: str, regime_rows: dict
+) -> list[dict[str, str]]:
     """The unaugmented rows, from their own table or from the regime tables.
 
     A regime catalogue evaluated on its own writes its ``none`` row into that regime's table, so
     the rows can be present while results_table_baseline.csv is not.
     """
     rows = _discover_rows(results_dir, "baseline", features)
-    return rows or [r for found in regime_rows.values() for r in found if _scheme_of(r) == "none"]
+    return rows or [
+        r for found in regime_rows.values() for r in found if _scheme_of(r) == "none"
+    ]
 
 
-def _index_rows(regime_rows: dict, baselines: list[dict], deltas: dict, metric: str) -> dict:
+def _index_rows(
+    regime_rows: dict, baselines: list[dict], deltas: dict, metric: str
+) -> dict:
     """(regime, model, N, group) -> entry, over the regimes that have a table.
 
     The unaugmented rows are indexed again under every regime: each regime's bars are deltas
@@ -200,7 +211,9 @@ def _index_rows(regime_rows: dict, baselines: list[dict], deltas: dict, metric: 
             continue
         drawn = [r for r in rows if _scheme_of(r) in GROUPS.values()]
         for row in zero + drawn:
-            model, n = model_display(row.get("model", "")), int(row.get("nconstituents", 0))
+            model, n = model_display(row.get("model", "")), int(
+                row.get("nconstituents", 0)
+            )
             group = AUG_DISPLAY[_scheme_of(row)]
             index[(regime, model, n, group)] = _extract_entry(row, deltas, metric)
     return index
@@ -277,12 +290,16 @@ def _draw_group(ax, xs, ys, es, colour, bands=()):
     ax.errorbar(xs, ys, yerr=es, **WHISKER)
     for x, y in bands:
         band = ax.hlines(y, x - WIDTH * 0.42, x + WIDTH * 0.42, **BAND)
-        band.set_path_effects([patheffects.withStroke(linewidth=8.0, foreground="white")])
+        band.set_path_effects(
+            [patheffects.withStroke(linewidth=8.0, foreground="white")]
+        )
     whiskers = [y + e for y, e in zip(ys, es)] + [y - e for y, e in zip(ys, es)]
     return whiskers + [y for _, y in bands]
 
 
-def _finish_row(axes_row, ylabel: str, extent: list[float], ns, last: bool, headroom=0.0) -> None:
+def _finish_row(
+    axes_row, ylabel: str, extent: list[float], ns, last: bool, headroom=0.0
+) -> None:
     """Label and scale one row of panels; sharey='row' spreads the limits across it.
 
     The limits fit everything drawn and keep zero in view, the rows diverging about it.
@@ -315,7 +332,16 @@ def _flops_footer(axes_row, flops_rows: list[list[float | None]], ns) -> None:
     for ax, flops in zip(axes_row, flops_rows):
         for k, value in enumerate(flops):
             text, where = _fmt_flops(value), ax.get_xaxis_transform()
-            ax.text(k, 0.5, text, transform=where, ha="center", va="center", fontsize=10, bbox=BOX)
+            ax.text(
+                k,
+                0.5,
+                text,
+                transform=where,
+                ha="center",
+                va="center",
+                fontsize=10,
+                bbox=BOX,
+            )
         ax.set_ylim(0, 1)
         ax.set_yticks([])
         ax.set_xticks([])
@@ -348,7 +374,9 @@ def _save(fig, out_dir: Path, name: str, missing: list[tuple]) -> None:
     plt.close(fig)
     if not missing:
         return
-    print(f"[warn] {name}: {len(missing)} combos absent from the results tables, left blank:")
+    print(
+        f"[warn] {name}: {len(missing)} combos absent from the results tables, left blank:"
+    )
     for key in missing:
         print(f"        {key}")
 
@@ -360,7 +388,7 @@ def _row_specs(inv_metric: str) -> list[tuple[str, str, str]]:
         ("acc", "Accuracy (clean)", "$\\Delta$ accuracy, clean (pp)"),
         ("acc_t", "Accuracy (transformed)", "$\\Delta$ accuracy, transformed (pp)"),
         ("inv", name, f"$\\Delta$ {name}"),
-        ("stable", "Self-consistency", "$\\Delta$ stable fraction $1-\\mathrm{FR}$"),
+        ("flip", "Self-consistency", "$\\Delta$ flip rate (pp), $+$ = fewer flips"),
     ]
 
 
@@ -369,7 +397,7 @@ def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
 
     Every (regime, model, N, group) with no row, or no value under the key, is appended to
     ``missing`` and left out of the panel. The recover rate is a different conditional from the
-    stable fraction, so only that row is banded with it.
+    flip rate, so only that row is banded with it.
     """
     found = []
     for k, n in enumerate(ns):
@@ -380,7 +408,9 @@ def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
         recover = entry.get("recover")
         found.append((k + OFFSET[group], *entry[key], recover[0] if recover else None))
     xs, ys, es, recs = zip(*found) if found else ((), (), (), ())
-    bands = [(x, r) for x, r in zip(xs, recs) if r is not None] if key == "stable" else []
+    bands = (
+        [(x, r) for x, r in zip(xs, recs) if r is not None] if key == "flip" else []
+    )
     return xs, ys, es, bands
 
 
@@ -391,7 +421,9 @@ def _draw_rows(axes, specs, index, regime: str, models, ns) -> list[tuple]:
         extent: list[float] = []
         for ax, model in zip(axes[i], models):
             for group in GROUPS:
-                xs, ys, es, bands = _series(index, regime, model, ns, group, key, missing)
+                xs, ys, es, bands = _series(
+                    index, regime, model, ns, group, key, missing
+                )
                 extent += _draw_group(ax, xs, ys, es, COL[group], bands)
         _finish_row(axes[i], ylabel, extent, ns, last=i == len(specs) - 1)
     return missing
@@ -461,7 +493,9 @@ def _require_rows(regimes: list[str], models: list[str], ns: list[int], args) ->
             f"{args.features}/. Run the evaluation catalogues first."
         )
     if not models or not ns:
-        sys.exit("No usable rows found (empty model or nconstituents set). Check the tables.")
+        sys.exit(
+            "No usable rows found (empty model or nconstituents set). Check the tables."
+        )
 
 
 def main() -> None:
@@ -476,7 +510,9 @@ def main() -> None:
             "results/<features>/results_table_baseline.csv"
         )
     deltas = index_deltas(rows)
-    index, models, ns, regimes, inv_metric = build_dataset(args.results_dir, args.features, deltas)
+    index, models, ns, regimes, inv_metric = build_dataset(
+        args.results_dir, args.features, deltas
+    )
     _require_rows(regimes, models, ns, args)
     out_dir = args.out_dir or args.results_dir / args.features
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -36,7 +36,9 @@ class FakeRecord:
         # None until prepare() has run, as the record's own property is.
         if not self.prepared:
             return None
-        return {name: ("centered", 1.0 + idx) for idx, name in enumerate(RECORD_COLUMNS)}
+        return {
+            name: ("centered", 1.0 + idx) for idx, name in enumerate(RECORD_COLUMNS)
+        }
 
     def prepare(self) -> None:
         self.prepared = True
@@ -56,7 +58,9 @@ def record(monkeypatch, tmp_path: Path) -> FakeRecord:
         fake.overrides = list(overrides)
         return fake
 
-    monkeypatch.setattr(datamodule_module, "snapshot_download", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(
+        datamodule_module, "snapshot_download", lambda *a, **k: str(tmp_path)
+    )
     monkeypatch.setattr(
         datamodule_module,
         "compose_record_config",
@@ -89,7 +93,12 @@ def _datamodule(**overrides) -> HLS4MLDataModule:
     ],
 )
 def test_the_batch_widths_follow_the_method_and_the_test_flag(
-    record: FakeRecord, method: str, scheme: str, keep_full: bool, fit_width: int, test_width: int
+    record: FakeRecord,
+    method: str,
+    scheme: str,
+    keep_full: bool,
+    fit_width: int,
+    test_width: int,
 ) -> None:
     datamodule = _datamodule(
         method=method, augmentation_scheme=scheme, keep_full_features_at_test=keep_full
@@ -106,7 +115,9 @@ def test_the_batch_widths_follow_the_method_and_the_test_flag(
     assert y_train.shape == (x_train.shape[0], 5)
 
 
-def test_an_scl_run_keeps_its_group_and_fills_the_callback_surface(record: FakeRecord) -> None:
+def test_an_scl_run_keeps_its_group_and_fills_the_callback_surface(
+    record: FakeRecord,
+) -> None:
     datamodule = _datamodule(method="symm_loss", augmentation_scheme="lorentz")
     datamodule.setup(stage="fit")
 
@@ -175,15 +186,22 @@ def test_the_folds_pool_the_two_splits_and_a_fold_is_selected_within_range(
     assert single.fold_idx == 0
 
 
-def test_the_record_is_told_the_cache_and_the_constituent_count(record: FakeRecord) -> None:
+def test_the_record_is_told_the_cache_and_the_constituent_count(
+    record: FakeRecord,
+) -> None:
     datamodule = _datamodule(nconstituents=150, cache_dir="/scratch/hf")
     datamodule._ensure_record()
 
     assert record.overrides[0].startswith("paths.root_dir=")
-    assert record.overrides[1:] == ["data.nconstituents=150", "paths.base_data_dir=/scratch/hf"]
+    assert record.overrides[1:] == [
+        "data.nconstituents=150",
+        "paths.base_data_dir=/scratch/hf",
+    ]
     assert datamodule.feature_names == RECORD_COLUMNS
     # Spelled 0: a Hydra override cannot carry None through as an int.
-    assert "data.nconstituents=0" in _datamodule(nconstituents=0)._record_overrides("/root")
+    assert "data.nconstituents=0" in _datamodule(nconstituents=0)._record_overrides(
+        "/root"
+    )
 
 
 def test_composing_the_record_leaves_the_running_hydra_alone(tmp_path: Path) -> None:
@@ -223,4 +241,6 @@ def test_persistent_workers_reshuffle_every_epoch_and_cover_every_jet_once() -> 
     epochs = [[int(batch_x[0, 0, 0]) for batch_x, _ in loader] for _ in range(3)]
 
     assert len({tuple(epoch) for epoch in epochs}) == 3
-    assert sorted(int(v) for batch_x, _ in loader for v in batch_x[:, 0, 0]) == list(range(40))
+    assert sorted(int(v) for batch_x, _ in loader for v in batch_x[:, 0, 0]) == list(
+        range(40)
+    )

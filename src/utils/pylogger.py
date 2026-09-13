@@ -26,7 +26,9 @@ class RankedLogger(logging.LoggerAdapter):
             return current_rank == 0
         return rank is None or current_rank == rank
 
-    def log(self, level: int, msg: str, *args, rank: int | None = None, **kwargs) -> None:
+    def log(
+        self, level: int, msg: str, *args, rank: int | None = None, **kwargs
+    ) -> None:
         """Log *msg* at *level*, prefixed with the rank of the process it is logged from.
 
         :param rank: log on that process alone; ``None`` logs on every process, subject to
@@ -41,4 +43,6 @@ class RankedLogger(logging.LoggerAdapter):
         if current_rank is None:
             raise RuntimeError("The `rank_zero_only.rank` needs to be set before use")
         if self._emits(current_rank, rank):
-            self.logger.log(level, rank_prefixed_message(msg, current_rank), *args, **kwargs)
+            self.logger.log(
+                level, rank_prefixed_message(msg, current_rank), *args, **kwargs
+            )

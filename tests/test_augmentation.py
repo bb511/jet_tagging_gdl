@@ -66,10 +66,12 @@ def test_a_beam_boost_shifts_eta_rigidly_and_leaves_pt_and_phi_alone() -> None:
     )[:, real]
 
     assert torch.allclose(
-        compute_pt(boosted[..., 0], boosted[..., 1]), compute_pt(batch[..., 0], batch[..., 1])
+        compute_pt(boosted[..., 0], boosted[..., 1]),
+        compute_pt(batch[..., 0], batch[..., 1]),
     )
     assert torch.allclose(
-        compute_phi(boosted[..., 0], boosted[..., 1]), compute_phi(batch[..., 0], batch[..., 1])
+        compute_phi(boosted[..., 0], boosted[..., 1]),
+        compute_phi(batch[..., 0], batch[..., 1]),
     )
     assert torch.allclose(d_eta, -xi.unsqueeze(1).expand_as(d_eta), atol=1e-4)
     assert xi.abs().max() <= 1.0
@@ -78,11 +80,15 @@ def test_a_beam_boost_shifts_eta_rigidly_and_leaves_pt_and_phi_alone() -> None:
 
 
 @pytest.mark.parametrize("isotropic", [False, True])
-def test_a_lorentz_boost_leaves_the_masses_alone_and_the_padding_at_zero(isotropic: bool) -> None:
+def test_a_lorentz_boost_leaves_the_masses_alone_and_the_padding_at_zero(
+    isotropic: bool,
+) -> None:
     batch = jets(n_slots=8, n_real=5)
     boosted, _ = apply_random_lorentz(batch, FOUR_MOMENTUM, 2.0, None, isotropic)
 
-    assert torch.allclose(_mass_squared(boosted)[:, :5], _mass_squared(batch)[:, :5], rtol=1e-4)
+    assert torch.allclose(
+        _mass_squared(boosted)[:, :5], _mass_squared(batch)[:, :5], rtol=1e-4
+    )
     # A padded slot that acquired an energy would be read as a constituent downstream.
     assert torch.equal(boosted[:, 5:, :], torch.zeros_like(boosted[:, 5:, :]))
 

@@ -46,7 +46,9 @@ class StubDataModule:
     norm_scales = None
 
     def __init__(
-        self, features: list[str] = FOUR_MOMENTUM, keep_full_features_at_test: bool = False
+        self,
+        features: list[str] = FOUR_MOMENTUM,
+        keep_full_features_at_test: bool = False,
     ) -> None:
         self.features = list(features)
         self.keep_full_features_at_test = keep_full_features_at_test
@@ -80,7 +82,9 @@ def labels(n_jets: int, seed: int = 1) -> torch.Tensor:
 
 def compose_root(config_name: str, *overrides: str) -> DictConfig:
     with initialize(version_base="1.3", config_path="../configs"):
-        cfg = compose(config_name=config_name, return_hydra_config=True, overrides=list(overrides))
+        cfg = compose(
+            config_name=config_name, return_hydra_config=True, overrides=list(overrides)
+        )
     with open_dict(cfg):
         cfg.paths.root_dir = str(ROOT)
     return cfg
@@ -101,7 +105,8 @@ def point_into(cfg: DictConfig, tmp_path: Path) -> DictConfig:
 
 
 def mlflow_logger(tmp_path: Path) -> dict[str, Any]:
-    # A file store under the test's directory; MLflow 3 opens one only with MLFLOW_ALLOW_FILE_STORE.
+    # A file store under the test's directory; MLflow 3 opens one only with
+    # MLFLOW_ALLOW_FILE_STORE.
     return {
         "mlflow": {
             "_target_": "lightning.pytorch.loggers.mlflow.MLFlowLogger",

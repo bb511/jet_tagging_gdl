@@ -83,7 +83,9 @@ def blocks(script: str) -> dict[str, tuple[int, int, str]]:
         return {}
     out = {}
     text = Path(script).read_text()
-    for i, block in enumerate(re.split(r"^# python3 src/train\.py", text, flags=re.M)[1:], 1):
+    for i, block in enumerate(
+        re.split(r"^# python3 src/train\.py", text, flags=re.M)[1:], 1
+    ):
         b = block.replace("\\\n", " ").replace("#", " ")
         regime, n = _regime(b), re.search(r"hydra\.sweeper\.n_trials=(\d+)", b)
         if regime and n:
@@ -97,7 +99,11 @@ def _tail_of(log: str) -> str:
     The whole tail is scanned rather than the final line: a Hydra config error ends with 'Set the
     environment variable HYDRA_FULL_ERROR=1 ...', several lines below the exception.
     """
-    lines = [line for line in Path(log).read_text(errors="replace").splitlines() if line.strip()]
+    lines = [
+        line
+        for line in Path(log).read_text(errors="replace").splitlines()
+        if line.strip()
+    ]
     return "\n".join(lines[-TAIL:])
 
 
@@ -106,7 +112,9 @@ def classify(log: str) -> tuple[str, float | None]:
     if not os.path.exists(log):
         return "no-log", None
     tail = _tail_of(log)
-    age = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(log))).total_seconds() / 60
+    age = (
+        datetime.now() - datetime.fromtimestamp(os.path.getmtime(log))
+    ).total_seconds() / 60
     if ERR.search(tail):
         return "DEAD", age
     if FINISHED.search(tail):
@@ -127,7 +135,9 @@ def classify_workers(logs: list[Path]) -> tuple[str, float | None]:
     """(state, age) over a study's workers: alive if any is, else the most recently touched."""
     if not logs:
         return "no-log", None
-    return max((classify(str(log)) for log in logs), key=lambda sa: (sa[0] == "alive", -sa[1]))
+    return max(
+        (classify(str(log)) for log in logs), key=lambda sa: (sa[0] == "alive", -sa[1])
+    )
 
 
 def complete_of(db: str, study: str, writable: bool = False) -> int:
@@ -142,7 +152,9 @@ def complete_of(db: str, study: str, writable: bool = False) -> int:
     uri = f"file:{db}" if writable else f"file:{db}?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=60)) as con:
         con.execute("pragma busy_timeout=60000")
-        row = con.execute("select study_id from studies where study_name=?", (study,)).fetchone()
+        row = con.execute(
+            "select study_id from studies where study_name=?", (study,)
+        ).fetchone()
         if not row:
             return 0
         counted = "select count(*) from trials where study_id=? and state='COMPLETE'"
@@ -151,10 +163,13 @@ def complete_of(db: str, study: str, writable: bool = False) -> int:
 
 def launch_command(row: dict) -> str:
     """The submit_search.sh invocation that tops this study up to its target."""
-    return "bash scripts/cluster/submit_search.sh --only %s %s hydra.sweeper.n_trials=%d" % (
-        row["label"],
-        row["script"],
-        row["target"] - row["done"],
+    return (
+        "bash scripts/cluster/submit_search.sh --only %s %s hydra.sweeper.n_trials=%d"
+        % (
+            row["label"],
+            row["script"],
+            row["target"] - row["done"],
+        )
     )
 
 
@@ -169,7 +184,9 @@ def status_of(done: int, target: int, state: str) -> str:
     return "LAUNCH"  # never started, or crashed
 
 
-def _rows_of(path: Path, script: str, model: str, db_root: str, writable: bool) -> list[dict]:
+def _rows_of(
+    path: Path, script: str, model: str, db_root: str, writable: bool
+) -> list[dict]:
     """One row per study of a single catalogue: its trial count and its workers' state."""
     db = f"{db_root}/{model}.db"
     logdir = f"logs/searches/hls4ml_{path.stem}"
@@ -212,14 +229,28 @@ def collect(repo: Path, db_root: str, writable: bool) -> list[dict]:
 def _table_line(row: dict) -> str:
     """One study's line of the table."""
     todo = max(row["target"] - row["done"], 0)
-    driver = row["state"] if row["age"] is None else "%s (%dm)" % (row["state"], row["age"])
+    driver = (
+        row["state"] if row["age"] is None else "%s (%dm)" % (row["state"], row["age"])
+    )
     counts = (row["target"], row["done"], todo or "", row["workers"] or "")
     return HDR % (row["model"], row["study"], *counts, row["status"], driver)
 
 
 def print_table(rows: list[dict]) -> None:
     """Every study short of its target, one line each, then a tally by status."""
-    print(HDR % ("model", "study", "target", "complete", "todo", "workers", "status", "driver"))
+    print(
+        HDR
+        % (
+            "model",
+            "study",
+            "target",
+            "complete",
+            "todo",
+            "workers",
+            "status",
+            "driver",
+        )
+    )
     print("-" * 112)
     for row in rows:
         if row["status"] != "DONE":
@@ -245,7 +276,9 @@ def print_commands(rows: list[dict]) -> None:
 def _parse_args() -> argparse.Namespace:
     """Command line: what to print, and which copies of the databases to read."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--commands", action="store_true", help="print only the launch commands")
+    parser.add_argument(
+        "--commands", action="store_true", help="print only the launch commands"
+    )
     parser.add_argument(
         "--db-root",
         help="read DBs from here instead of logs/optuna/hls4ml (use "
@@ -261,7 +294,9 @@ def main() -> int:
     # table instead of an error.
     repo = find_repo_root(Path(__file__).resolve().parent)
     os.chdir(repo)
-    rows = collect(repo, args.db_root or "logs/optuna/hls4ml", writable=bool(args.db_root))
+    rows = collect(
+        repo, args.db_root or "logs/optuna/hls4ml", writable=bool(args.db_root)
+    )
     if not args.commands:
         print_table(rows)
     print_commands(rows)

@@ -23,7 +23,9 @@ def study_names(storage: str, wanted: str | None) -> list[str]:
     if wanted is None:
         return sorted(names)
     if wanted not in names:
-        sys.exit(f"no study '{wanted}' in the database (have: {', '.join(sorted(names))})")
+        sys.exit(
+            f"no study '{wanted}' in the database (have: {', '.join(sorted(names))})"
+        )
     return [wanted]
 
 
@@ -41,12 +43,16 @@ def as_yaml(params: dict[str, object]) -> str:
 def report(study: optuna.Study) -> None:
     """Print one study's best trial: value, hydra overrides, YAML block."""
     trial = study.best_trial
-    n_done = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    n_done = len(
+        [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    )
     print(
         f"# {study.study_name}: best of {n_done} complete trial(s) is trial {trial.number}, "
         f"val/acc_best={trial.value:.6f}"
     )
-    print("  " + " ".join(f"{k}={quote(str(v))}" for k, v in sorted(trial.params.items())))
+    print(
+        "  " + " ".join(f"{k}={quote(str(v))}" for k, v in sorted(trial.params.items()))
+    )
     print()
     for line in as_yaml(trial.params).splitlines():
         print(f"  {line}")
@@ -75,8 +81,12 @@ def _parse_args() -> argparse.Namespace:
     """Command line: the database, the studies to report and the shape of the report."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--db", required=True, help="Path to the study database.")
-    parser.add_argument("--study", help="Study name; omit together with --all for a listing.")
-    parser.add_argument("--all", action="store_true", help="Report every study in the database.")
+    parser.add_argument(
+        "--study", help="Study name; omit together with --all for a listing."
+    )
+    parser.add_argument(
+        "--all", action="store_true", help="Report every study in the database."
+    )
     parser.add_argument(
         "--csv",
         action="store_true",

@@ -16,7 +16,9 @@ def short_hash(value: str, length: int = 12) -> str:
     """
     # str(): under --cfg job ${hydra:runtime.output_dir} is None, which would crash the dump.
     # usedforsecurity=False: this names runs, it does not authenticate anything.
-    return hashlib.sha1(str(value).encode("utf-8"), usedforsecurity=False).hexdigest()[:length]
+    return hashlib.sha1(str(value).encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :length
+    ]
 
 
 def fold_label(fold: int | None, default: str) -> str:

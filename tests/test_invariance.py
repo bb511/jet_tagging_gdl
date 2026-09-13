@@ -31,7 +31,9 @@ def _logits(predicted: list[int]) -> torch.Tensor:
     return torch.eye(3)[torch.tensor(predicted)]
 
 
-def _probed(callback: InvarianceMetricCallback, module: _StubModule) -> dict[str, float]:
+def _probed(
+    callback: InvarianceMetricCallback, module: _StubModule
+) -> dict[str, float]:
     trainer = SimpleNamespace(datamodule=StubDataModule(features=RECORD_COLUMNS))
     callback.on_test_start(trainer, module)
     batch = (jets(32, 6, 6, n_columns=len(RECORD_COLUMNS)), labels(32))
@@ -40,21 +42,25 @@ def _probed(callback: InvarianceMetricCallback, module: _StubModule) -> dict[str
     return module.logged
 
 
-def test_the_flip_breakdown_splits_the_transitions_by_group_and_by_what_they_did() -> None:
+def test_the_flip_breakdown_splits_the_transitions_by_group_and_by_what_they_did() -> (
+    None
+):
     probe = FlipProbe()
     probe.counts |= {
         "so2": FlipCounts(wrong_before=10, recovered=4, correct_before=90, stable=81),
-        "lorentz": FlipCounts(wrong_before=0, recovered=0, correct_before=50, stable=50),
-        "lorentz_iso": FlipCounts(wrong_before=20, recovered=5, correct_before=80, stable=60),
+        "lorentz": FlipCounts(
+            wrong_before=0, recovered=0, correct_before=50, stable=50
+        ),
+        "lorentz_iso": FlipCounts(
+            wrong_before=20, recovered=5, correct_before=80, stable=60
+        ),
     }
 
     metrics = probe.metrics()
 
     assert GROUPS == ("so2", "so3", "lorentz", "lorentz_iso")
-    assert metrics["invariance/lorentz_iso_flip_degrade"] == pytest.approx(0.25)
     assert metrics["invariance/so2_flip_recover"] == pytest.approx(0.4)
     assert metrics["invariance/so2_flip_stable"] == pytest.approx(0.9)
-    assert metrics["invariance/so2_flip_degrade"] == pytest.approx(0.1)
     # Nothing wrong to recover is not a recovery rate of zero.
     assert math.isnan(metrics["invariance/lorentz_flip_recover"])
     assert metrics["invariance/lorentz_flip_stable"] == pytest.approx(1.0)
@@ -62,7 +68,9 @@ def test_the_flip_breakdown_splits_the_transitions_by_group_and_by_what_they_did
 
 def test_the_accuracy_after_the_transform_is_read_off_the_transition_counts() -> None:
     probe = FlipProbe()
-    probe.counts["so3"] = FlipCounts(wrong_before=10, recovered=5, correct_before=90, stable=81)
+    probe.counts["so3"] = FlipCounts(
+        wrong_before=10, recovered=5, correct_before=90, stable=81
+    )
 
     metrics = probe.metrics()
 
@@ -84,7 +92,9 @@ def test_the_flip_rate_is_a_ratio_of_jets_not_a_mean_of_per_batch_means() -> Non
     assert flip == pytest.approx(0.2)
 
 
-def test_a_constant_shift_is_measured_at_its_own_size_and_a_reshuffling_is_not_seen() -> None:
+def test_a_constant_shift_is_measured_at_its_own_size_and_a_reshuffling_is_not_seen() -> (
+    None
+):
     torch.manual_seed(0)
     probe = WassersteinProbe()
     batches = [torch.randn(2000, 5) for _ in range(3)]
@@ -111,9 +121,10 @@ def test_the_probe_logs_one_key_per_group_and_family_and_nothing_besides() -> No
         "flip",
         "flip_recover",
         "flip_stable",
-        "flip_degrade",
         "accuracy_transformed",
         "wasserstein",
     )
-    assert set(logged) == {key(group, family) for group in GROUPS for family in FAMILIES}
-    assert len(logged) == 24
+    assert set(logged) == {
+        key(group, family) for group in GROUPS for family in FAMILIES
+    }
+    assert len(logged) == 20

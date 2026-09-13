@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
 """Generate the run<model>_train.sh and run<model>_eval.sh catalogues.
 
-DeepSets, MLP and JetFormer are trained on a 3 x 7 grid: three constituent counts (16, 50, 150)
-crossed with seven regimes (the unaugmented baseline, SO(2), SO(3) and Lorentz augmentation, and
-the same three groups as a symmetry-consistency loss). LorentzNet embeds the symmetry instead of
-acquiring it, so it is trained at baseline only, three runs in all. Hyperparameters come from the
-studies under ``logs/optuna/hls4ml/``, one per cell, named ``<model>_nconst<N>_<method>_<scheme>``;
-a block whose study is missing or empty carries no ``algorithm.*`` overrides and trains the
-experiment config's own values, which is the transferred-hyperparameter ablation. ``--transferred``
-forces that for every block, into ``run<model>_{train,eval}_transferred.sh``, so the ablation runs
-alongside the tuned catalogues rather than over them.
+DeepSets, MLP and JetFormer are trained on a 3 x 7 grid:
+* three constituent counts (16, 50, 150)
+* seven regimes:
+    - the unaugmented baseline
+    - SO(2), SO(3) and Lorentz augmentation
+    - SO(2), SO(3) and Lorentz symmetry loss
 
-The generated text is the record of what was run, so regenerate rather than edit by hand. Paths
-are anchored to the repository root, so this runs from anywhere::
-
-    python3 scripts/optuna/make_train_catalogues.py
-    python3 scripts/optuna/make_train_catalogues.py --dry-run      # what would change
-    python3 scripts/optuna/make_train_catalogues.py --transferred
+Symmetry-embedded architectures are trained on the baseline only.
+The hyperparameter optimisation is located at ``logs/optuna/hls4ml``.
 """
 
 from __future__ import annotations
@@ -44,7 +37,9 @@ VARIANTS = [
 
 # LorentzNet embeds the symmetry rather than acquiring it, so it is the one architecture trained
 # at baseline alone, never under augmentation or the SCL.
-VARIANTS_OF = {model: VARIANTS[:1] if model == "lorentznet" else VARIANTS for model in MODELS}
+VARIANTS_OF = {
+    model: VARIANTS[:1] if model == "lorentznet" else VARIANTS for model in MODELS
+}
 
 # The searches use one fold; five is what the results table callback needs to put a confidence
 # interval on a run's numbers.
@@ -92,7 +87,11 @@ def best_trial(db: Path, study: str) -> Trial | None:
         trial = loaded.best_trial
     except (KeyError, ValueError):  # no such study, or no completed trial in it
         return None
-    return trial.number, float(trial.value), {k: str(v) for k, v in trial.params.items()}
+    return (
+        trial.number,
+        float(trial.value),
+        {k: str(v) for k, v in trial.params.items()},
+    )
 
 
 def overrides_of(params: dict[str, str]) -> list[str]:
@@ -123,7 +122,9 @@ def _provenance(trial: Trial | None, study: str) -> str:
     return f"# best trial {trial[0]} of {study}, val/acc_best={trial[1]:.6f}"
 
 
-def _header(model: str, nconst: int, variant: Variant, trial: Trial | None) -> list[str]:
+def _header(
+    model: str, nconst: int, variant: Variant, trial: Trial | None
+) -> list[str]:
     """The two comment lines above a block: its grid cell, and its hyperparameters' provenance."""
     label, method, scheme = variant
     return [
@@ -132,7 +133,9 @@ def _header(model: str, nconst: int, variant: Variant, trial: Trial | None) -> l
     ]
 
 
-def _common_body(model: str, nconst: int, variant: Variant, trial: Trial | None) -> list[str]:
+def _common_body(
+    model: str, nconst: int, variant: Variant, trial: Trial | None
+) -> list[str]:
     """The overrides a train and an eval block open with, in that shared order.
 
     An eval block repeats the training block's ``algorithm.*`` overrides because the model is
@@ -165,7 +168,9 @@ def eval_block(
 ) -> list[str]:
     """One evaluation command, reading the manifest its training block wrote."""
     label = variant[0]
-    manifest = f"{run_dir('train', model, nconst, label, suffix)}/checkpoint_manifest.json"
+    manifest = (
+        f"{run_dir('train', model, nconst, label, suffix)}/checkpoint_manifest.json"
+    )
     body = _common_body(model, nconst, variant, trial) + [
         f"checkpoint_manifest_path={manifest}",
         "results_table.invariance_metric=wasserstein",
@@ -236,12 +241,17 @@ def count_commands(lib: Path, text: str) -> int:
         fh.flush()
         script = f'. "{lib}"; extract_cmds "$1"'
         found = subprocess.run(
-            ["bash", "-c", script, "_", fh.name], capture_output=True, text=True, check=True
+            ["bash", "-c", script, "_", fh.name],
+            capture_output=True,
+            text=True,
+            check=True,
         )
     return len([line for line in found.stdout.splitlines() if line.strip()])
 
 
-def _catalogue(model: str, task: str, dbs: Path, transferred: bool, lib: Path) -> tuple[str, int]:
+def _catalogue(
+    model: str, task: str, dbs: Path, transferred: bool, lib: Path
+) -> tuple[str, int]:
     """One catalogue's text, and the number of commands lib.sh's parser finds in it.
 
     :raises SystemExit: when the parser does not find the model's whole grid, which means the
@@ -251,7 +261,9 @@ def _catalogue(model: str, task: str, dbs: Path, transferred: bool, lib: Path) -
     found = count_commands(lib, text)
     expected = len(NCONSTITUENTS) * len(VARIANTS_OF[model])
     if found != expected:
-        sys.exit(f"error: {model} {task}: lib.sh parsed {found} commands, expected {expected}")
+        sys.exit(
+            f"error: {model} {task}: lib.sh parsed {found} commands, expected {expected}"
+        )
     return text, found
 
 
@@ -271,7 +283,9 @@ def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
         print(f"wrote {_show(path, repo)}: {found} commands")
         return 0
     same = path.exists() and path.read_text() == text
-    print(f"{_show(path, repo)}: {found} commands, {'unchanged' if same else 'WOULD CHANGE'}")
+    print(
+        f"{_show(path, repo)}: {found} commands, {'unchanged' if same else 'WOULD CHANGE'}"
+    )
     return 0 if same else 1
 
 
@@ -297,7 +311,9 @@ def _parse_args() -> argparse.Namespace:
         help="Study databases directory (default <repo>/logs/optuna/hls4ml).",
     )
     parser.add_argument(
-        "--out", default=None, help="Where the catalogues go (default <repo>/scripts/hls4ml)."
+        "--out",
+        default=None,
+        help="Where the catalogues go (default <repo>/scripts/hls4ml).",
     )
     parser.add_argument(
         "--transferred",
@@ -305,7 +321,9 @@ def _parse_args() -> argparse.Namespace:
         help="Ignore the studies and write the *_transferred.sh ablation.",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Report which files would change; write nothing."
+        "--dry-run",
+        action="store_true",
+        help="Report which files would change; write nothing.",
     )
     return parser.parse_args()
 
@@ -314,7 +332,9 @@ def main() -> int:
     """Generate every catalogue, or report which of them a regeneration would change."""
     args = _parse_args()
     repo = find_repo_root(Path(__file__).resolve().parent)
-    dbs = Path(args.dbs).expanduser() if args.dbs else repo / "logs" / "optuna" / "hls4ml"
+    dbs = (
+        Path(args.dbs).expanduser() if args.dbs else repo / "logs" / "optuna" / "hls4ml"
+    )
     out = Path(args.out).expanduser() if args.out else repo / "scripts" / "hls4ml"
     stale = _generate(dbs, out, repo, args)
     if stale:

@@ -116,7 +116,9 @@ def _fold_manifests(base_dir: Path) -> list[Manifest]:
             f"{len(folds)} fold manifest(s) under {base_dir}, but the folds were trained as "
             f"{folds[0].n_folds}: one is still running, or died."
         )
-    log.info(f"Merging the main manifest in {base_dir} with {[str(path) for path in paths]}")
+    log.info(
+        f"Merging the main manifest in {base_dir} with {[str(path) for path in paths]}"
+    )
     return folds
 
 

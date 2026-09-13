@@ -12,7 +12,6 @@ from src.data.components.augmentation import make_transform
 from src.symmetry import (
     ACCURACY_TRANSFORMED,
     FLIP,
-    FLIP_DEGRADE,
     FLIP_RECOVER,
     FLIP_STABLE,
     GROUPS,
@@ -53,7 +52,11 @@ class FlipProbe:
         return counts.correct_before + counts.wrong_before
 
     def update(
-        self, group: str, logits: torch.Tensor, logits_sym: torch.Tensor, targets: torch.Tensor
+        self,
+        group: str,
+        logits: torch.Tensor,
+        logits_sym: torch.Tensor,
+        targets: torch.Tensor,
     ) -> None:
         """Add one batch's transitions under *group* to that group's counters."""
         predicted, predicted_sym = logits.argmax(dim=1), logits_sym.argmax(dim=1)
@@ -148,7 +151,9 @@ class InvarianceMetricCallback(Callback):
         A test batch has either all 16 columns (under ``keep_full_features_at_test``,
         or always under the SCL) or the reduced set that the network consumes.
         """
-        if self._full_feature_names is not None and width == len(self._full_feature_names):
+        if self._full_feature_names is not None and width == len(
+            self._full_feature_names
+        ):
             return self._full_feature_names
         return self._model_feature_names
 
@@ -184,7 +189,10 @@ class InvarianceMetricCallback(Callback):
     ) -> None:
         """One draw per jet under *group*, compared with the same untranformed jets."""
         transform = make_transform(
-            group, self._names_for(x.shape[-1]), self._norm_scales, **self.transform_kwargs
+            group,
+            self._names_for(x.shape[-1]),
+            self._norm_scales,
+            **self.transform_kwargs,
         )
         logits_sym = pl_module(transform(x))
         self._flip.update(group, clean, logits_sym, targets)
@@ -208,7 +216,6 @@ def _rates(counts: FlipCounts) -> dict[str, float]:
     return {
         FLIP_RECOVER: recovered / wrong if wrong else nan,
         FLIP_STABLE: stable / correct if correct else nan,
-        FLIP_DEGRADE: (correct - stable) / correct if correct else nan,
         ACCURACY_TRANSFORMED: (stable + recovered) / seen if seen else nan,
     }
 
@@ -219,7 +226,11 @@ def _mean_channel_distance(clean: np.ndarray, transformed: np.ndarray) -> float:
     The comparison is unpaired.
     """
     channels = range(clean.shape[1])
-    return float(np.mean([wasserstein_distance(clean[:, c], transformed[:, c]) for c in channels]))
+    return float(
+        np.mean(
+            [wasserstein_distance(clean[:, c], transformed[:, c]) for c in channels]
+        )
+    )
 
 
 def _model_names(datamodule: Any) -> list[str]:

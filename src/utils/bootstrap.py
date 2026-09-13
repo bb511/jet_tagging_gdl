@@ -32,11 +32,15 @@ def bootstrap_ci(
     if sample.size < 2:
         return float("nan"), float("nan")
     alpha = (1.0 - ci) / 2.0
-    lower, upper = np.quantile(_resample_means(sample, n_boot, seed), [alpha, 1.0 - alpha])
+    lower, upper = np.quantile(
+        _resample_means(sample, n_boot, seed), [alpha, 1.0 - alpha]
+    )
     return float(lower), float(upper)
 
 
-def bootstrap_pvalue(deltas: Sequence[float], n_boot: int = 10_000, seed: int = 0) -> float:
+def bootstrap_pvalue(
+    deltas: Sequence[float], n_boot: int = 10_000, seed: int = 0
+) -> float:
     """Two-sided paired bootstrap p-value on a series of per-fold differences.
 
     Each element of *deltas* is one fold's value for a run minus the same fold's value

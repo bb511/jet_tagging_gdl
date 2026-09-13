@@ -43,10 +43,14 @@ def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
     """
     path = cfg.get("checkpoint_manifest_path")
     if path:
-        return (merge_manifests(path) if Path(path).is_dir() else read_manifest(path)).runs
+        return (
+            merge_manifests(path) if Path(path).is_dir() else read_manifest(path)
+        ).runs
     if cfg.get("ckpt_path"):
         return [ManifestRun("main", None, str(cfg.ckpt_path))]
-    raise ValueError("Nothing to evaluate: set checkpoint_manifest_path=... or ckpt_path=...")
+    raise ValueError(
+        "Nothing to evaluate: set checkpoint_manifest_path=... or ckpt_path=..."
+    )
 
 
 def _aggregated_labels(runs: list[ManifestRun]) -> set[str]:
@@ -94,7 +98,9 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         callbacks = _callbacks(cfg, run.fold_label)
         logger = instantiate_loggers(cfg.get("logger"))
         nest_under(logger, run.mlflow_run_id)
-        trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
+        trainer: Trainer = hydra.utils.instantiate(
+            cfg.trainer, callbacks=callbacks, logger=logger
+        )
         if logger:
             objects = {"cfg": cfg, "algorithm": algorithm, "trainer": trainer}
             log_hyperparameters({**objects, "fold_idx": run.fold_label})
@@ -108,7 +114,9 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
             weights_only=False,
         )
         metrics = trainer.callback_metrics
-        metric_dict.update({f"{run.fold_label}/{key}": value for key, value in metrics.items()})
+        metric_dict.update(
+            {f"{run.fold_label}/{key}": value for key, value in metrics.items()}
+        )
         if run.fold_label in aggregated:
             # flops_total is an attribute of the module rather than a logged metric, and the row
             # reads every number of a fold from one dict.

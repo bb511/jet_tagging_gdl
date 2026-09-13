@@ -43,7 +43,9 @@ class ThroughputCallback(Callback):
         self._data_times: list[float] = []
         self._epoch_samples: int = 0
 
-    def on_train_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+    def on_train_epoch_start(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
         """Reset the epoch's accumulators; the clock runs from here."""
         self._step_times = []
         self._data_times = []
@@ -62,7 +64,12 @@ class ThroughputCallback(Callback):
         self._step_start = now
 
     def on_train_batch_end(
-        self, trainer: Trainer, pl_module: LightningModule, outputs, batch, batch_idx: int
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        outputs,
+        batch,
+        batch_idx: int,
     ) -> None:
         """Charge the time since the batch started to the step itself."""
         now = time.perf_counter()
@@ -78,7 +85,8 @@ class ThroughputCallback(Callback):
         for name, value in metrics.items():
             pl_module.log(name, value, on_step=False, on_epoch=True, sync_dist=False)
         summary = "  ".join(
-            f"{name.removeprefix('perf/')}: {value:.2f}" for name, value in metrics.items()
+            f"{name.removeprefix('perf/')}: {value:.2f}"
+            for name, value in metrics.items()
         )
         log.info(f"[epoch {trainer.current_epoch:>3d}] {summary}")
 
@@ -118,4 +126,8 @@ def _allocated_gb() -> float:
 
 def _peak_gb() -> float:
     """Largest GPU memory held by tensors at any moment so far, in GB."""
-    return torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
+    return (
+        torch.cuda.max_memory_allocated() / 1024**3
+        if torch.cuda.is_available()
+        else 0.0
+    )

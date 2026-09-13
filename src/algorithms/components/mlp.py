@@ -50,7 +50,9 @@ class MLP(nn.Module):
 
         for hidden_dim in self.hidden_dims:
             layers.append(nn.Linear(current_dim, hidden_dim))
-            layers.append(nn.BatchNorm1d(hidden_dim) if self.batchnorm else nn.Identity())
+            layers.append(
+                nn.BatchNorm1d(hidden_dim) if self.batchnorm else nn.Identity()
+            )
             layers.append(self.activation)
             current_dim = hidden_dim
 

@@ -21,9 +21,13 @@ def _target_entries(cfg: DictConfig | None, kind: str) -> list[DictConfig]:
         log.warning(f"No {kind} configs found! Skipping...")
         return []
     if not isinstance(cfg, DictConfig):
-        raise TypeError(f"The {kind} config must be a DictConfig, not a {type(cfg).__name__}!")
+        raise TypeError(
+            f"The {kind} config must be a DictConfig, not a {type(cfg).__name__}!"
+        )
     return [
-        entry for entry in cfg.values() if isinstance(entry, DictConfig) and "_target_" in entry
+        entry
+        for entry in cfg.values()
+        if isinstance(entry, DictConfig) and "_target_" in entry
     ]
 
 

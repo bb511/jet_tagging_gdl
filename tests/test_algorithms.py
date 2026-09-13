@@ -20,9 +20,22 @@ from tests.conftest import (
 # save_hyperparameters collects these through Lightning's frame walk; without them a checkpoint
 # cannot rebuild the network it holds.
 ARCHITECTURE_KEYS = {
-    "deepsets": {"phi_layers", "rho_layers", "activation", "aggregation", "dropout", "mask"},
+    "deepsets": {
+        "phi_layers",
+        "rho_layers",
+        "activation",
+        "aggregation",
+        "dropout",
+        "mask",
+    },
     "mlp": {"hidden_layers", "activation", "batchnorm"},
-    "jetformer": {"embed_dim", "num_heads", "num_transformers", "normalization", "dropout"},
+    "jetformer": {
+        "embed_dim",
+        "num_heads",
+        "num_transformers",
+        "normalization",
+        "dropout",
+    },
     "lorentznet": {"n_hidden", "n_layers", "c_weight", "dropout"},
 }
 
@@ -73,7 +86,9 @@ def test_every_algorithm_takes_one_step_under_either_method(
 
 
 @pytest.mark.parametrize("name", MODELS)
-def test_every_algorithm_records_hparams_and_reduces_a_full_width_batch(name: str) -> None:
+def test_every_algorithm_records_hparams_and_reduces_a_full_width_batch(
+    name: str,
+) -> None:
     module = _algorithm(name)
 
     assert module.hparams.name == name
@@ -88,7 +103,9 @@ def test_every_algorithm_records_hparams_and_reduces_a_full_width_batch(name: st
 
 def test_a_reordered_or_incomplete_feature_list_is_refused_by_name() -> None:
     # forward() reduces on a width mismatch alone, so a full-width reorder would go unnoticed.
-    reordered = StubDataModule(list(reversed(RECORD_COLUMNS)), keep_full_features_at_test=True)
+    reordered = StubDataModule(
+        list(reversed(RECORD_COLUMNS)), keep_full_features_at_test=True
+    )
     with pytest.raises(ValueError, match="different order"):
         _attach(_algorithm("deepsets"), reordered)
 
@@ -137,7 +154,9 @@ def test_lorentznet_ignores_padding_and_undoes_the_normalisation_of_its_batch() 
         padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
         narrow.norm_scales = scales
         narrow._on_features_resolved()
-        normalised = narrow(batch / torch.tensor([scales[name] for name in FOUR_MOMENTUM]))
+        normalised = narrow(
+            batch / torch.tensor([scales[name] for name in FOUR_MOMENTUM])
+        )
 
     assert torch.allclose(physical, padded, atol=1e-5)
     assert torch.allclose(physical, normalised, atol=1e-3)
@@ -157,13 +176,17 @@ def _with_large_coordinate_steps(module: JetTaggingModule) -> JetTaggingModule:
 
 
 @pytest.mark.parametrize("scheme", ["so2", "so3", "lorentz", "lorentz_iso"])
-def test_lorentznet_logits_survive_any_group_at_large_coordinate_steps(scheme: str) -> None:
+def test_lorentznet_logits_survive_any_group_at_large_coordinate_steps(
+    scheme: str,
+) -> None:
     # Invariance by construction is LorentzNet's whole claim, and the reference the augmented
     # models are read against. In eval mode: in train mode the node-level batch normalisation
     # sees the padded nodes. double() carries the graph into float64: forward() rounds the batch
     # to float32, but the de-normalisation against the float64 buffer promotes everything after.
     torch.manual_seed(0)
-    module = _with_large_coordinate_steps(_algorithm("lorentznet", nconstituents=16).eval())
+    module = _with_large_coordinate_steps(
+        _algorithm("lorentznet", nconstituents=16).eval()
+    )
     module = module.double()
     batch = jets(8, 16, 11).double() * 10.0
     transformed = make_transform(scheme, FOUR_MOMENTUM, None, 2.0)(batch)

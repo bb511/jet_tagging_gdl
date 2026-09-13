@@ -15,7 +15,9 @@ def test_the_partner_batch_keeps_the_constituent_grid() -> None:
         assert partner.dtype == batch.dtype
 
 
-def test_the_distance_vanishes_when_the_logits_agree_and_enters_the_total_weighted() -> None:
+def test_the_distance_vanishes_when_the_logits_agree_and_enters_the_total_weighted() -> (
+    None
+):
     torch.manual_seed(0)
     logits, other = torch.randn(32, 5), torch.randn(32, 5)
     for metric in SUPPORTED_METRICS:
@@ -30,7 +32,9 @@ def test_the_distance_vanishes_when_the_logits_agree_and_enters_the_total_weight
 
 def test_a_mismatched_shape_or_an_unknown_metric_is_refused() -> None:
     with pytest.raises(ValueError, match="identical shape"):
-        SymmetryConsistencyLoss("so2")(torch.tensor(0.0), torch.randn(8, 5), torch.randn(6, 5))
+        SymmetryConsistencyLoss("so2")(
+            torch.tensor(0.0), torch.randn(8, 5), torch.randn(6, 5)
+        )
     with pytest.raises(ValueError, match="metric must be one of"):
         SymmetryConsistencyLoss("so2", metric="euclidean")
 

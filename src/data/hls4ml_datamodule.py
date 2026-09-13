@@ -142,7 +142,11 @@ class HLS4MLDataModule(LightningDataModule):
     def norm_scales(self) -> dict[str, float] | None:
         """Per-feature factors that return the normalised values to GeV."""
         params = self.norm_params
-        return None if params is None else {name: scale for name, (_, scale) in params.items()}
+        return (
+            None
+            if params is None
+            else {name: scale for name, (_, scale) in params.items()}
+        )
 
     def feature_indices(self) -> list[int] | None:
         """Maps the list of features you give it to the indices in the actual data."""
@@ -154,7 +158,9 @@ class HLS4MLDataModule(LightningDataModule):
     def set_fold(self, fold_idx: int) -> None:
         """Set which fold will be served next."""
         if self.n_folds >= 2 and not 0 <= fold_idx < self.n_folds:
-            raise ValueError(f"fold_idx {fold_idx} is out of range for n_folds={self.n_folds}.")
+            raise ValueError(
+                f"fold_idx {fold_idx} is out of range for n_folds={self.n_folds}."
+            )
 
         self.fold_idx = fold_idx if self.n_folds >= 2 else 0
         self.data_train = None
@@ -210,7 +216,9 @@ class HLS4MLDataModule(LightningDataModule):
         if root not in sys.path:
             sys.path.insert(0, root)
 
-        self.record = instantiate(compose_record_config(root, self._record_overrides(root)).data)
+        self.record = instantiate(
+            compose_record_config(root, self._record_overrides(root)).data
+        )
         self.feature_names = list(self.record.feature_names)
         log.info(f"Record {REPO_ID} at {root}, cache {self.record.cache_folder}")
 
@@ -224,10 +232,14 @@ class HLS4MLDataModule(LightningDataModule):
         shuffler.manual_seed(torch.initial_seed())
 
         # Keep either the transformed set of features or the whole set of features.
-        x_train = _reduce(x_train, indices, self._keeps_full_width or transform is not None)
+        x_train = _reduce(
+            x_train, indices, self._keeps_full_width or transform is not None
+        )
         x_val = _reduce(x_val, indices, self._keeps_full_width)
 
-        self.data_train = self._dataset(x_train, y_train, shuffler=shuffler, transform=transform)
+        self.data_train = self._dataset(
+            x_train, y_train, shuffler=shuffler, transform=transform
+        )
         self.data_val = self._dataset(x_val, y_val)
         log.info(f"Fit: x_train {tuple(x_train.shape)}, x_val {tuple(x_val.shape)}")
 
@@ -262,7 +274,9 @@ class HLS4MLDataModule(LightningDataModule):
 
         return transform if indices is None else _reduce_after(transform, indices)
 
-    def _fit_arrays(self, record) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _fit_arrays(
+        self, record
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """The training and validation tensors for the current fold, with normalisation."""
         train, val = record.load("train"), record.load("validation")
         if self.n_folds <= 1:
@@ -313,7 +327,9 @@ def compose_record_config(root: str, overrides: list) -> DictConfig:
     outer = GlobalHydra.instance().hydra
     GlobalHydra.instance().clear()
     try:
-        with initialize_config_dir(config_dir=str(Path(root) / "configs"), version_base=None):
+        with initialize_config_dir(
+            config_dir=str(Path(root) / "configs"), version_base=None
+        ):
             return compose("config", overrides=overrides)
     finally:
         GlobalHydra.instance().clear()
@@ -352,10 +368,14 @@ def _validate_run(method: str, augmentation_scheme: str) -> None:
 def _column(feature: str, names: list[str]) -> int:
     idx = feature_index(names, feature)
     if idx is None:
-        raise ValueError(f"Feature {feature!r} is absent from the record columns {names}.")
+        raise ValueError(
+            f"Feature {feature!r} is absent from the record columns {names}."
+        )
 
     return idx
 
 
-def _reduce(x: torch.Tensor, indices: list[int] | None, keep_full: bool) -> torch.Tensor:
+def _reduce(
+    x: torch.Tensor, indices: list[int] | None, keep_full: bool
+) -> torch.Tensor:
     return x if keep_full or indices is None else x[:, :, indices]

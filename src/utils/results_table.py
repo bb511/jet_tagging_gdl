@@ -66,7 +66,9 @@ class ResultsTable:
         self.augmentation_scheme = str(augmentation_scheme).lower()
         self.nconstituents = int(nconstituents)
         self.invariance_metric = invariance_metric
-        self.judged_group = _judged_group(selected_metric_mode, self.augmentation_scheme)
+        self.judged_group = _judged_group(
+            selected_metric_mode, self.augmentation_scheme
+        )
         # A selected metric that is itself tabulated would fill two identical column families.
         self.suffixes = tuple(s for s in FLIP_FAMILIES if s != invariance_metric)
         self.display_method = _display_regime(method, self.augmentation_scheme)
@@ -106,7 +108,9 @@ class ResultsTable:
             columns |= _family(suffix, self._values(folds, suffix))
         for suffix in self.suffixes:
             for group in TABULATED_GROUPS:
-                columns |= _family(f"{group}_{suffix}", self._values(folds, suffix, group))
+                columns |= _family(
+                    f"{group}_{suffix}", self._values(folds, suffix, group)
+                )
         return columns
 
     def _row(self, folds: list[dict[str, object]]) -> dict[str, object]:
@@ -165,7 +169,9 @@ def write_results_row(cfg: DictConfig, folds: list[dict[str, object]]) -> None:
 
 def _judged_group(selected_metric_mode: str, augmentation_scheme: str) -> str | None:
     """The group the run is judged on, None when it belongs to none and the three are averaged."""
-    judged = selected_metric_mode == "scheme" and augmentation_scheme in TABULATED_GROUPS
+    judged = (
+        selected_metric_mode == "scheme" and augmentation_scheme in TABULATED_GROUPS
+    )
     return augmentation_scheme if judged else None
 
 
@@ -208,7 +214,11 @@ def _summary(prefix: str, values: Sequence[float]) -> dict[str, object]:
     finite = [value for value in values if not math.isnan(value)]
     mean = _mean(values)
     # One fold has no spread to report, which is not the same as no fold having reported.
-    std = statistics.stdev(finite) if len(finite) > 1 else (0.0 if finite else float("nan"))
+    std = (
+        statistics.stdev(finite)
+        if len(finite) > 1
+        else (0.0 if finite else float("nan"))
+    )
     return {
         f"{prefix}_mean": round(mean, 6),
         f"{prefix}_std": round(std, 6),
@@ -226,7 +236,10 @@ def _ci(prefix: str, values: Sequence[float]) -> dict[str, object]:
     finite = [value for value in values if not math.isnan(value)]
     nan = (float("nan"), float("nan"))
     lower, upper = bootstrap_ci(finite) if len(finite) > 1 else nan
-    return {f"{prefix}_ci_lower": round(lower, 6), f"{prefix}_ci_upper": round(upper, 6)}
+    return {
+        f"{prefix}_ci_lower": round(lower, 6),
+        f"{prefix}_ci_upper": round(upper, 6),
+    }
 
 
 def _check_header(path: Path, fieldnames: list[str]) -> None:

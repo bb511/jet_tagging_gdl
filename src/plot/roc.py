@@ -30,7 +30,13 @@ def plot(
     names = list(class_names)[:n_classes]
     one_vs_rest = label_binarize(labels, classes=list(range(n_classes)))
     fig, axes = plt.subplots(
-        1, n_classes, figsize=(5 * n_classes, 5), dpi=120, sharex=True, sharey=True, squeeze=False
+        1,
+        n_classes,
+        figsize=(5 * n_classes, 5),
+        dpi=120,
+        sharex=True,
+        sharey=True,
+        squeeze=False,
     )
     for column, name in enumerate(names):
         _draw(axes[0][column], one_vs_rest[:, column], probs[:, column], name)

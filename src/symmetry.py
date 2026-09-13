@@ -15,9 +15,8 @@ TABULATED_GROUPS = ("so2", "so3", "lorentz")
 FLIP = "flip"
 FLIP_RECOVER = "flip_recover"
 FLIP_STABLE = "flip_stable"
-FLIP_DEGRADE = "flip_degrade"
 ACCURACY_TRANSFORMED = "accuracy_transformed"
-FLIP_FAMILIES = (FLIP, FLIP_RECOVER, FLIP_STABLE, FLIP_DEGRADE, ACCURACY_TRANSFORMED)
+FLIP_FAMILIES = (FLIP, FLIP_RECOVER, FLIP_STABLE, ACCURACY_TRANSFORMED)
 
 # Measures of the whole logit distribution.
 WASSERSTEIN = "wasserstein"

@@ -74,14 +74,18 @@ def _table(path: Path, rows: list[dict[str, str]]) -> Path:
     return path
 
 
-def _compare(tmp_path: Path, run_rows: list[dict], baseline_rows: list[dict]) -> list[dict]:
+def _compare(
+    tmp_path: Path, run_rows: list[dict], baseline_rows: list[dict]
+) -> list[dict]:
     run = read_csv(_table(tmp_path / "run.csv", run_rows))
     baseline = read_csv(_table(tmp_path / "baseline.csv", baseline_rows))
     metrics = compare_to_baseline.metrics_covered(run + baseline)
     return compare_to_baseline.compare(run, baseline, metrics)
 
 
-def _cell(rows: list[dict], metric: str, group: str = "so2", model: str = "mlp") -> dict:
+def _cell(
+    rows: list[dict], metric: str, group: str = "so2", model: str = "mlp"
+) -> dict:
     wanted = (model, group, metric)
     return next(r for r in rows if (r["model"], r["group"], r["metric"]) == wanted)
 
@@ -119,7 +123,9 @@ def test_rows_are_paired_on_the_model_and_the_constituent_count(
 
     # And a pair is only a pair at the same constituent count.
     elsewhere = [
-        _row("mlp", acc=0.7, wasserstein=0.2, stable=0.8, nconstituents=50, scheme="none")
+        _row(
+            "mlp", acc=0.7, wasserstein=0.2, stable=0.8, nconstituents=50, scheme="none"
+        )
     ]
     assert _compare(tmp_path, [run_rows[0]], elsewhere) == []
 
@@ -127,7 +133,9 @@ def test_rows_are_paired_on_the_model_and_the_constituent_count(
 def test_positive_always_means_the_run_is_the_better_model(tmp_path: Path) -> None:
     # The run is better on the distance (smaller) and worse on the stable fraction (smaller).
     run_rows = [_row("mlp", acc=0.75, wasserstein=0.10, stable=0.70)]
-    baseline_rows = [_row("mlp", acc=0.70, wasserstein=0.20, stable=0.80, scheme="none")]
+    baseline_rows = [
+        _row("mlp", acc=0.70, wasserstein=0.20, stable=0.80, scheme="none")
+    ]
 
     rows = _compare(tmp_path, run_rows, baseline_rows)
 
@@ -138,7 +146,9 @@ def test_positive_always_means_the_run_is_the_better_model(tmp_path: Path) -> No
 
 def test_the_summary_columns_follow_the_per_fold_differences(tmp_path: Path) -> None:
     run_rows = [_row("mlp", acc=0.75, wasserstein=0.10, stable=0.90)]
-    baseline_rows = [_row("mlp", acc=0.70, wasserstein=0.20, stable=0.80, scheme="none")]
+    baseline_rows = [
+        _row("mlp", acc=0.70, wasserstein=0.20, stable=0.80, scheme="none")
+    ]
 
     row = _cell(_compare(tmp_path, run_rows, baseline_rows), "wasserstein")
 
@@ -163,11 +173,22 @@ def test_the_summary_columns_follow_the_per_fold_differences(tmp_path: Path) -> 
         _compare(
             tmp_path,
             [_row("mlp", acc=0.75, wasserstein=0.10, stable=0.90, folds=5)],
-            [_row("mlp", acc=0.70, wasserstein=0.2, stable=0.80, scheme="none", folds=3)],
+            [
+                _row(
+                    "mlp",
+                    acc=0.70,
+                    wasserstein=0.2,
+                    stable=0.80,
+                    scheme="none",
+                    folds=3,
+                )
+            ],
         )
 
 
-def test_the_default_output_is_named_after_both_tables(tmp_path: Path, monkeypatch) -> None:
+def test_the_default_output_is_named_after_both_tables(
+    tmp_path: Path, monkeypatch
+) -> None:
     run = _table(
         tmp_path / "results_table_augmentation.csv",
         [_row("mlp", acc=0.75, wasserstein=0.10, stable=0.90)],
@@ -176,7 +197,9 @@ def test_the_default_output_is_named_after_both_tables(tmp_path: Path, monkeypat
         tmp_path / "results_table_baseline.csv",
         [_row("mlp", acc=0.70, wasserstein=0.20, stable=0.80, scheme="none")],
     )
-    monkeypatch.setattr(sys, "argv", ["compare_to_baseline.py", str(run), str(baseline)])
+    monkeypatch.setattr(
+        sys, "argv", ["compare_to_baseline.py", str(run), str(baseline)]
+    )
 
     compare_to_baseline.main()
 

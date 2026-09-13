@@ -105,7 +105,9 @@ def _sample_boosts(
     boosts[:, 0, 0] = torch.cosh(xi)
     boosts[:, 0, 1:] = -torch.sinh(xi).unsqueeze(1) * axis
     boosts[:, 1:, 0] = -torch.sinh(xi).unsqueeze(1) * axis
-    boosts[:, 1:, 1:] += (torch.cosh(xi) - 1)[:, None, None] * axis[:, :, None] * axis[:, None, :]
+    boosts[:, 1:, 1:] += (
+        (torch.cosh(xi) - 1)[:, None, None] * axis[:, :, None] * axis[:, None, :]
+    )
 
     return boosts
 
@@ -119,8 +121,13 @@ def _read_four_momenta(
     """
     indices = {key: feature_index(names, key) for key in ("e", "px", "py", "pz")}
     if None in indices.values():
-        raise ValueError(f"A transform needs the columns {list(indices)}, got {list(names)}.")
-    p4 = [x[..., index] * get_norm_scale(norm_scales, key) for key, index in indices.items()]
+        raise ValueError(
+            f"A transform needs the columns {list(indices)}, got {list(names)}."
+        )
+    p4 = [
+        x[..., index] * get_norm_scale(norm_scales, key)
+        for key, index in indices.items()
+    ]
     return torch.stack(p4, dim=-1), compute_pt(p4[1], p4[2]) > 0
 
 
@@ -133,7 +140,9 @@ def _derived_columns(
     the constituent's share of the jet pt.
     """
     pt, eta, phi = compute_pt(px, py), compute_eta(px, py, pz), compute_phi(px, py)
-    jet_px, jet_py, jet_pz = ((p * active).sum(dim=1, keepdim=True) for p in (px, py, pz))
+    jet_px, jet_py, jet_pz = (
+        (p * active).sum(dim=1, keepdim=True) for p in (px, py, pz)
+    )
     etarel = eta - compute_eta(jet_px, jet_py, jet_pz)
     phirel = (phi - compute_phi(jet_px, jet_py) + math.pi) % (2 * math.pi) - math.pi
     # A jet of padded slots has no pt to share out; the clamp is in GeV.
@@ -177,7 +186,9 @@ def _apply(
         mats[:, 0, 0] = 1.0
     p4, active = _read_four_momenta(x, names, norm_scales)
     e, px, py, pz = torch.einsum("bij,bcj->bci", mats.to(p4.dtype), p4).unbind(dim=-1)
-    columns = {"e": e, "px": px, "py": py, "pz": pz} | _derived_columns(px, py, pz, active)
+    columns = {"e": e, "px": px, "py": py, "pz": pz} | _derived_columns(
+        px, py, pz, active
+    )
     return _write(x, names, norm_scales, columns, active & (e > 0)), columns, active
 
 
@@ -251,5 +262,9 @@ def make_transform(
     if scheme == "so3":
         return lambda x: apply_random_so3(x, names, norm_scales)[0]
     if scheme in ("lorentz", "lorentz_iso"):
-        return lambda x: apply_random_lorentz(x, names, lorentz_eta_max, norm_scales, isotropic)[0]
-    raise ValueError(f"Transformation scheme must be one of {list(GROUPS)}, got {scheme!r}...")
+        return lambda x: apply_random_lorentz(
+            x, names, lorentz_eta_max, norm_scales, isotropic
+        )[0]
+    raise ValueError(
+        f"Transformation scheme must be one of {list(GROUPS)}, got {scheme!r}..."
+    )

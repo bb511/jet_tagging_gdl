@@ -120,7 +120,9 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         callbacks = [cb for cb in callbacks if not isinstance(cb, LearningRateMonitor)]
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=logger
+    )
 
     object_dict = {
         "cfg": cfg,

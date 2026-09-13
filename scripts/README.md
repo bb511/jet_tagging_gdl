@@ -7,7 +7,7 @@ The available directories contain the following scripts:
 
 - `hls4ml/` has all the individual training and evaluation commands for the models trained on the `hls4ml` data set
 - `cluster/` contains the scripting that runs the code on the used cluster backends: slurm and NGT pods
-- `optuna/`  contains the scripts that are used to run the hyperparameter optimisations
+- `optuna/` contains the scripts that are used to run the hyperparameter optimisations
 - `analysis/` contains the scripts that produce the result latex tables and corresponding figures
 
 ## Command Catalogues
@@ -58,21 +58,23 @@ Have a go by running:
 ```bash
 bash scripts/cluster/submit_train.sh --dry-run --only baseline --gpu 0 scripts/hls4ml/rundeepsets_train.sh
 ```
+
 **The checkpoints trained with --cluster need to be evaluated with --cluster.**
 
 ## Script Manifest
 
-| File                               |                                                                                   |
-| ---------------------------------- | --------------------------------------------------------------------------------- |
-| `cluster/submit_search.sh`         | Optuna drivers of a search catalogue; `--tag`, `--cluster`.                       |
-| `cluster/submit_search_ngt.sh`     | Several workers of one study on a pod, through `submit_search.sh`.                |
-| `cluster/submit_train.sh`          | A train catalogue: nohup queue, `--folds` fan-out, or one submitit job per block. |
-| `cluster/submit_eval.sh`           | The same for an eval catalogue, with the manifest rewrite.                        |
-| `cluster/sweep_status.py`          | Trials per study against the target, live workers, the command to finish it.      |
-| `cluster/lib.sh`                   | Shared by the submitters: parser, `--only`, `.env`, GPU pinning, the rewrite.     |
-| `optuna/fetch_best_params.py`      | A study's best trial as hydra overrides and as YAML; `--all`, `--csv`.            |
-| `optuna/make_train_catalogues.py`  | Study databases to `run*_{train,eval}.sh`; `--dry-run`, `--transferred`.          |
-| `analysis/compare_to_baseline.py`  | Joins a run table with a baseline table into a deltas table; the reference is free.|
-| `analysis/make_figures.py`         | Deltas against a baseline, one figure per regime; `--features <dir> --deltas <p>`. |
-| `analysis/make_baseline_figure.py` | The absolute counterpart for baseline rows, e.g. `results/embedded/`.             |
-| `analysis/make_latex_table.py`     | Results tables to `.tex`, formatting only.                                        |
+| File                               |                                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| `cluster/submit_search.sh`         | Optuna drivers of a search catalogue; `--tag`, `--cluster`.                         |
+| `cluster/submit_search_ngt.sh`     | Several workers of one study on a pod, through `submit_search.sh`.                  |
+| `cluster/submit_train.sh`          | A train catalogue: nohup queue, `--folds` fan-out, or one submitit job per block.   |
+| `cluster/submit_eval.sh`           | The same for an eval catalogue, with the manifest rewrite.                          |
+| `cluster/sweep_status.py`          | Trials per study against the target, live workers, the command to finish it.        |
+| `cluster/lib.sh`                   | Shared by the submitters: parser, `--only`, `.env`, GPU pinning, the rewrite.       |
+| `optuna/fetch_best_params.py`      | A study's best trial as hydra overrides and as YAML; `--all`, `--csv`.              |
+| `optuna/make_train_catalogues.py`  | Study databases to `run*_{train,eval}.sh`; `--dry-run`, `--transferred`.            |
+| `analysis/common.py`               | Shared by the four: table reading, fold parsing, display names; not a script.       |
+| `analysis/compare_to_baseline.py`  | Joins a run table with a baseline table into a deltas table; the reference is free. |
+| `analysis/make_figures.py`         | Deltas against a baseline, one figure per regime; `--features <dir> --deltas <p>`.  |
+| `analysis/make_baseline_figure.py` | The absolute counterpart for baseline rows, e.g. `results/embedded/`.               |
+| `analysis/make_latex_table.py`     | Results tables to `.tex`, formatting only.                                          |

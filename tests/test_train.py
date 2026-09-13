@@ -21,7 +21,9 @@ def _manifest_run(run_dir: Path) -> dict[str, Any]:
     return manifest["runs"][0]
 
 
-def _fold_config(cfg_train: DictConfig, tmp_path: Path, fold: int, n_folds: int) -> DictConfig:
+def _fold_config(
+    cfg_train: DictConfig, tmp_path: Path, fold: int, n_folds: int
+) -> DictConfig:
     # A fold is its own process in its own run directory, as submit_train.sh --folds lays it out.
     cfg = point_into(cfg_train.copy(), tmp_path / f"fold_{fold}")
     with open_dict(cfg):
@@ -36,31 +38,48 @@ def test_the_main_run_keeps_the_record_split_and_leaves_a_manifest_of_itself(
 ) -> None:
     HydraConfig().set_config(cfg_train)
     with open_dict(cfg_train):
-        cfg_train.data.n_folds = 2  # as the experiments set it: the folds' business, not main's
+        cfg_train.data.n_folds = (
+            2  # as the experiments set it: the folds' business, not main's
+        )
 
     metric_dict, object_dict = train(cfg_train)
     manifest = json.loads((tmp_path / MANIFEST_FILENAME).read_text())
     run = manifest["runs"][0]
 
     assert manifest["n_folds"] == 0
-    assert [(r["fold_label"], r["fold_idx"]) for r in manifest["runs"]] == [("main", None)]
-    assert Path(run["checkpoint_path"]).is_absolute() and Path(run["checkpoint_path"]).exists()
+    assert [(r["fold_label"], r["fold_idx"]) for r in manifest["runs"]] == [
+        ("main", None)
+    ]
+    assert (
+        Path(run["checkpoint_path"]).is_absolute()
+        and Path(run["checkpoint_path"]).exists()
+    )
     assert Path(run["checkpoint_path"]).parent == tmp_path / "checkpoints"
     assert run["mlflow_run_id"] is None
-    assert (object_dict["datamodule"].n_folds, object_dict["datamodule"].fold_idx) == (1, 0)
+    assert (object_dict["datamodule"].n_folds, object_dict["datamodule"].fold_idx) == (
+        1,
+        0,
+    )
     # Optuna reads what train returns, the clean split's number.
     assert float(metric_dict["val/acc_best"]) == run["val_acc_best"]
 
 
-def test_one_fold_leaves_a_manifest_of_that_fold(cfg_train: DictConfig, tmp_path: Path) -> None:
+def test_one_fold_leaves_a_manifest_of_that_fold(
+    cfg_train: DictConfig, tmp_path: Path
+) -> None:
     cfg = _fold_config(cfg_train, tmp_path, fold=2, n_folds=2)
 
     metric_dict, object_dict = train(cfg)
     manifest = json.loads((tmp_path / "fold_2" / MANIFEST_FILENAME).read_text())
 
     assert manifest["n_folds"] == 2
-    assert [(r["fold_label"], r["fold_idx"]) for r in manifest["runs"]] == [("fold_2", 2)]
-    assert (object_dict["datamodule"].n_folds, object_dict["datamodule"].fold_idx) == (2, 1)
+    assert [(r["fold_label"], r["fold_idx"]) for r in manifest["runs"]] == [
+        ("fold_2", 2)
+    ]
+    assert (object_dict["datamodule"].n_folds, object_dict["datamodule"].fold_idx) == (
+        2,
+        1,
+    )
     assert float(metric_dict["val/acc_best"]) == manifest["runs"][0]["val_acc_best"]
 
 
@@ -76,7 +95,9 @@ def test_a_fold_nests_under_the_main_run_it_is_given(
 
     cfg = _fold_config(cfg_train, tmp_path, fold=2, n_folds=2)
     with open_dict(cfg):
-        cfg.parent_run_id = main["mlflow_run_id"]  # what submit_train.sh reads off the manifest
+        cfg.parent_run_id = main[
+            "mlflow_run_id"
+        ]  # what submit_train.sh reads off the manifest
     train(cfg)
     fold = _manifest_run(tmp_path / "fold_2")
 
@@ -102,7 +123,9 @@ def test_a_fold_without_folds_or_past_them_is_refused(
 
 
 @pytest.mark.slow
-def test_a_run_resumes_from_its_own_last_checkpoint(cfg_train: DictConfig, tmp_path: Path) -> None:
+def test_a_run_resumes_from_its_own_last_checkpoint(
+    cfg_train: DictConfig, tmp_path: Path
+) -> None:
     HydraConfig().set_config(cfg_train)
     train(cfg_train)
 

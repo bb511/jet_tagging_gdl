@@ -17,7 +17,9 @@ class SoftmaxDivergence(nn.Module):
     def __init__(self, metric: str = "js", eps: float = 1e-8) -> None:
         super().__init__()
         if metric not in self.METRICS:
-            raise ValueError(f"metric must be one of {list(self.METRICS)}, got {metric!r}.")
+            raise ValueError(
+                f"metric must be one of {list(self.METRICS)}, got {metric!r}."
+            )
         self.metric = metric
         self.eps = eps
 

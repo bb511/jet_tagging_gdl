@@ -21,7 +21,9 @@ def count_flops(model: torch.nn.Module, example_input: torch.Tensor) -> float:
         _restore_state(model, was_training, buffers)
 
 
-def count_flops_per_jet(model: torch.nn.Module, nconstituents: int, nbr_feats: int) -> float:
+def count_flops_per_jet(
+    model: torch.nn.Module, nconstituents: int, nbr_feats: int
+) -> float:
     """Forward FLOPs for a single jet of shape ``(nconstituents, nbr_feats)``."""
     example = torch.randn(2, nconstituents, nbr_feats)
     return count_flops(model, example) / 2.0

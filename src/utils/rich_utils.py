@@ -27,7 +27,9 @@ def _ordered_fields(cfg: DictConfig, print_order: Sequence[str]) -> list[str]:
         if field in cfg:
             ordered.append(field)
         else:
-            log.warning(f"Field '{field}' not found in config. Skipping '{field}' printing...")
+            log.warning(
+                f"Field '{field}' not found in config. Skipping '{field}' printing..."
+            )
     return ordered + [field for field in cfg if field not in ordered]
 
 

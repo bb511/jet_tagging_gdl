@@ -52,14 +52,18 @@ def _sort_key(row: dict) -> tuple[str, int, int]:
     return (row.get("model", ""), nconst, AUG_ORDER.get(_group_of(row), 99))
 
 
-def _percent_pair(row: dict, first_key: str, second_key: str) -> tuple[float, float] | None:
+def _percent_pair(
+    row: dict, first_key: str, second_key: str
+) -> tuple[float, float] | None:
     """Two accuracy columns as percentages, None when they do not read as numbers.
 
     An accuracy is written as a proportion by the callback and as a percentage by the MLflow
     export, so a first value below 2 is taken to be the former and both are scaled.
     """
     try:
-        first, second = float(row.get(first_key, "nan")), float(row.get(second_key, "nan"))
+        first, second = float(row.get(first_key, "nan")), float(
+            row.get(second_key, "nan")
+        )
     except (TypeError, ValueError):
         return None
     scale = 100.0 if not math.isnan(first) and first < 2.0 else 1.0
@@ -69,7 +73,9 @@ def _percent_pair(row: dict, first_key: str, second_key: str) -> tuple[float, fl
 def _acc_cell(row: dict) -> str:
     """The test accuracy as ``mean \\pm std`` in percent, whatever units the row used."""
     pair = _percent_pair(row, "test_acc_mean", "test_acc_std")
-    return "N/A" if pair is None else f"{safe_fmt(pair[0], 2)} \\pm {safe_fmt(pair[1], 2)}"
+    return (
+        "N/A" if pair is None else f"{safe_fmt(pair[0], 2)} \\pm {safe_fmt(pair[1], 2)}"
+    )
 
 
 def _ci_cell(row: dict) -> str:
@@ -129,10 +135,15 @@ def _multirow(span: int, body: str) -> str:
 
 def _blocks(rows: list[dict], column: str) -> list[list[dict]]:
     """Sorted rows cut into the runs of equal *column*, one run per spanning cell and per rule."""
-    return [list(block) for _, block in groupby(rows, key=lambda row: str(row.get(column, "")))]
+    return [
+        list(block)
+        for _, block in groupby(rows, key=lambda row: str(row.get(column, "")))
+    ]
 
 
-def _table_row(row: dict, cells: tuple[str, str, str], deltas: dict, metric: str) -> str:
+def _table_row(
+    row: dict, cells: tuple[str, str, str], deltas: dict, metric: str
+) -> str:
     """One tabular line: the spanning cells, this row's own numbers, then its two deltas."""
     model_cell, nconst_cell, flops_cell = cells
     inv_delta = deltas.get(delta_key(row, _group_of(row), metric))
@@ -142,12 +153,13 @@ def _table_row(row: dict, cells: tuple[str, str, str], deltas: dict, metric: str
         f"{AUG_DISPLAY.get(_group_of(row), _group_of(row))} & {flops_cell} & "
         f"{_acc_cell(row)} & {_ci_cell(row)} & {_delta_cell(inv_delta)} & "
         f"{_pm_cell(row, 'flip_recover')} & {_pm_cell(row, 'flip_stable')} & "
-        f"{_pm_cell(row, 'flip_degrade')} & "
         f"{_pval_cell(acc_delta.get('bootstrap_pvalue') if acc_delta else None)} \\\\"
     )
 
 
-def _count_lines(block: list[dict], model_cell: str, deltas: dict, metric: str) -> list[str]:
+def _count_lines(
+    block: list[dict], model_cell: str, deltas: dict, metric: str
+) -> list[str]:
     """One constituent count of one model: its first line opens the spans, the rest are blank."""
     opening = (
         model_cell,
@@ -173,8 +185,10 @@ def _body_lines(rows: list[dict], metric: str, deltas: dict) -> list[str]:
         label = f"\\textbf{{{model_display(str(model_rows[0].get('model', '')))}}}"
         model_cell = _multirow(len(model_rows), label)
         for index, block in enumerate(_blocks(model_rows, "nconstituents")):
-            lines += [r"    \cmidrule{2-10}"] if index else []
-            lines += _count_lines(block, model_cell if index == 0 else "", deltas, metric)
+            lines += [r"    \cmidrule{2-9}"] if index else []
+            lines += _count_lines(
+                block, model_cell if index == 0 else "", deltas, metric
+            )
     return lines
 
 
@@ -191,14 +205,14 @@ def _preamble(metric_label: str) -> list[str]:
         r"\begin{adjustbox}{max width=\textwidth}",
         (
             r"\begin{tabular}{ll l c S[table-format=2.2(2)] l l "
-            r"S[table-format=1.3(3)] S[table-format=1.3(3)] S[table-format=1.3(3)] r}"
+            r"S[table-format=1.3(3)] S[table-format=1.3(3)] r}"
         ),
         r"    \toprule",
         (
             r"    \textbf{Model} & \textbf{\# Const} & \textbf{Group} & \textbf{FLOPs} & "
             r"{\textbf{Acc. (\%)}} & {\textbf{95\% CI}} & "
             f"\\textbf{{$\\Delta$ {metric_label}}} & "
-            r"{\textbf{Flip recover}} & {\textbf{Flip stable}} & {\textbf{Flip degrade}} & "
+            r"{\textbf{Flip recover}} & {\textbf{Flip stable}} & "
             r"\textbf{$p$ (boot)} \\"
         ),
         r"    \midrule",
@@ -246,7 +260,9 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("csvs", nargs="+", type=Path, help="results table CSV(s) to render")
+    parser.add_argument(
+        "csvs", nargs="+", type=Path, help="results table CSV(s) to render"
+    )
     parser.add_argument(
         "--deltas",
         nargs="*",
@@ -269,7 +285,9 @@ def main() -> None:
     args = _parse_args()
     deltas = index_deltas(read_deltas(args.deltas))
     if not deltas:
-        print("[note] no deltas table given: the delta and p-value columns will print as dashes")
+        print(
+            "[note] no deltas table given: the delta and p-value columns will print as dashes"
+        )
     for csv_path in args.csvs:
         rows = read_csv(csv_path) if csv_path.exists() else []
         if not rows:

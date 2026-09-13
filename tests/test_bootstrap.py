@@ -13,7 +13,10 @@ def test_the_interval_brackets_the_mean_and_needs_two_folds_to_exist() -> None:
 
     assert lower < mean < upper
     assert lower == pytest.approx(mean, abs=0.02)
-    assert bootstrap_ci([0.5] * 5, n_boot=2000) == (pytest.approx(0.5), pytest.approx(0.5))
+    assert bootstrap_ci([0.5] * 5, n_boot=2000) == (
+        pytest.approx(0.5),
+        pytest.approx(0.5),
+    )
     assert all(math.isnan(end) for end in bootstrap_ci([0.9], n_boot=100))
     assert all(math.isnan(end) for end in bootstrap_ci([], n_boot=100))
 

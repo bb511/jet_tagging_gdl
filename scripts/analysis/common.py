@@ -28,8 +28,14 @@ from src.symmetry import FLIP_FAMILIES, TABULATED_GROUPS
 # presentation; which groups are drawn, and in what order, is TABULATED_GROUPS, so a group the
 # study adds raises here rather than going missing.
 GROUP_LABEL = {"so2": "SO(2)", "so3": "SO(3)", "lorentz": "Lorentz"}
-AUG_DISPLAY = {"none": "None", **{group: GROUP_LABEL[group] for group in TABULATED_GROUPS}}
-AUG_ORDER = {"none": 0, **{group: i + 1 for i, group in enumerate(("lorentz", "so2", "so3"))}}
+AUG_DISPLAY = {
+    "none": "None",
+    **{group: GROUP_LABEL[group] for group in TABULATED_GROUPS},
+}
+AUG_ORDER = {
+    "none": 0,
+    **{group: i + 1 for i, group in enumerate(("lorentz", "so2", "so3"))},
+}
 
 MODEL_DISPLAY = {
     "deepsets": "DeepSets",
@@ -78,12 +84,16 @@ def parse_folds(raw, keep_nan: bool = False) -> list[float] | None:
         return None
     if not values:
         return None
-    return values if keep_nan else (None if any(math.isnan(v) for v in values) else values)
+    return (
+        values if keep_nan else (None if any(math.isnan(v) for v in values) else values)
+    )
 
 
 def stats(values: list[float]) -> tuple[float, float]:
     """Mean and sample standard deviation; the deviation is zero for a single value."""
-    return sum(values) / len(values), (statistics.stdev(values) if len(values) > 1 else 0.0)
+    return sum(values) / len(values), (
+        statistics.stdev(values) if len(values) > 1 else 0.0
+    )
 
 
 def opt_float(row: dict[str, str], key: str) -> float | None:
@@ -115,13 +125,17 @@ def delta_key(row: dict, group: str, metric: str) -> tuple[str, str, str, str, s
     )
 
 
-def index_deltas(rows: list[dict[str, str]]) -> dict[tuple[str, str, str, str, str], dict]:
+def index_deltas(
+    rows: list[dict[str, str]],
+) -> dict[tuple[str, str, str, str, str], dict]:
     """Index the rows of the deltas tables ``compare_to_baseline.py`` writes.
 
     The key carries the method and the group, so the augmentation and the SCL tables, which cover
     the same models, counts and groups, can be named on one command line without colliding.
     """
-    return {delta_key(row, row.get("group", ""), row.get("metric", "")): row for row in rows}
+    return {
+        delta_key(row, row.get("group", ""), row.get("metric", "")): row for row in rows
+    }
 
 
 def read_deltas(paths: list[Path]) -> list[dict[str, str]]:

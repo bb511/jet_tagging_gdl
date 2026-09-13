@@ -51,10 +51,14 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
 
 
 @pytest.mark.parametrize("search", SEARCHES)
-def test_every_search_config_offers_a_non_empty_space(search: str, tmp_path: Path) -> None:
+def test_every_search_config_offers_a_non_empty_space(
+    search: str, tmp_path: Path
+) -> None:
     assert set(SEARCHES) == EXPECTED_SEARCHES
     model = search.split("_")[0]
-    cfg = _composed(tmp_path, f"experiment=hls4ml/{model}_16", f"hparams_search=hls4ml/{search}")
+    cfg = _composed(
+        tmp_path, f"experiment=hls4ml/{model}_16", f"hparams_search=hls4ml/{search}"
+    )
     params = cfg.hydra.sweeper.params
 
     assert params
@@ -71,6 +75,8 @@ def test_the_study_name_follows_the_regime(tmp_path: Path) -> None:
             f"data.method={method}",
             f"data.augmentation_scheme={scheme}",
         )
-        study_name = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)["study_name"]
+        study_name = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)[
+            "study_name"
+        ]
 
         assert study_name == f"deepsets_nconst16_{method}_{scheme}"

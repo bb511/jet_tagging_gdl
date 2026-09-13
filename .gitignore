@@ -112,6 +112,7 @@ configs/local/default.yaml
 /outputs/
 /checkpoints/
 /results/
+/results_archive/
 .env
 .env.*
 

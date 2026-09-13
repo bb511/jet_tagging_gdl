@@ -26,7 +26,9 @@ class SeqNorm(nn.Module):
     def __init__(self, dim: int, normalization: str = "batch") -> None:
         super().__init__()
         self.normalization = normalization
-        self.norm = nn.BatchNorm1d(dim) if normalization == "batch" else nn.LayerNorm(dim)
+        self.norm = (
+            nn.BatchNorm1d(dim) if normalization == "batch" else nn.LayerNorm(dim)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Normalise over the channel axis, transposing for BatchNorm1d."""
@@ -41,7 +43,9 @@ class JetFormerAttention(nn.Module):
     def __init__(self, dim: int, num_heads: int, normalization: str = "batch") -> None:
         super().__init__()
         if dim % num_heads != 0:
-            raise ValueError(f"dim ({dim}) must be divisible by num_heads ({num_heads})")
+            raise ValueError(
+                f"dim ({dim}) must be divisible by num_heads ({num_heads})"
+            )
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
@@ -120,9 +124,13 @@ class JetFormerNet(nn.Module):
         self.embedding = nn.Linear(in_dim, embed_dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
         block_args = (embed_dim, num_heads, dropout, activation, normalization)
-        self.blocks = nn.ModuleList([JetFormerBlock(*block_args) for _ in range(num_transformers)])
+        self.blocks = nn.ModuleList(
+            [JetFormerBlock(*block_args) for _ in range(num_transformers)]
+        )
         self.norm = (
-            nn.BatchNorm1d(embed_dim) if normalization == "batch" else nn.LayerNorm(embed_dim)
+            nn.BatchNorm1d(embed_dim)
+            if normalization == "batch"
+            else nn.LayerNorm(embed_dim)
         )
         self.classifier = nn.Linear(embed_dim, out_dim)
 

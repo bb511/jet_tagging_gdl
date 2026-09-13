@@ -19,13 +19,17 @@ log = RankedLogger(__name__, rank_zero_only=True)
 SUPPORTED_METHODS = ("augmentation", "symm_loss")
 
 
-def resolve_feature_indices(model_features: list[str], feature_names: list[str]) -> list[int]:
+def resolve_feature_indices(
+    model_features: list[str], feature_names: list[str]
+) -> list[int]:
     """Feature indices of *model_features* inside *feature_names*.
 
     Names match bare or with the record's ``j1_`` prefix, so ``px`` finds ``j1_px``.
     """
     index_of = {name: idx for idx, name in enumerate(feature_names)}
-    missing = [f for f in model_features if f not in index_of and f"j1_{f}" not in index_of]
+    missing = [
+        f for f in model_features if f not in index_of and f"j1_{f}" not in index_of
+    ]
     if missing:
         raise ValueError(
             f"Feature {missing[0]!r} is absent from the data columns {feature_names}. "
@@ -81,7 +85,9 @@ class JetTaggingModule(LightningModule):
         # Optimiser and scheduler partials out of hparams.
         self.save_hyperparameters(logger=False, ignore=["optimizer", "scheduler"])
         if method not in SUPPORTED_METHODS:
-            raise ValueError(f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}.")
+            raise ValueError(
+                f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}."
+            )
         self.transform_kwargs = dict(transform_kwargs or {})
 
         self._optimizer = optimizer
@@ -90,7 +96,9 @@ class JetTaggingModule(LightningModule):
         # The SCL term, which checks its group at construction; nothing penalises augmentation.
         self.symm_loss = None
         if method == "symm_loss":
-            self.symm_loss = SymmetryConsistencyLoss(group, symm_loss_weight, symm_loss_metric)
+            self.symm_loss = SymmetryConsistencyLoss(
+                group, symm_loss_weight, symm_loss_metric
+            )
         self._build_metrics(output_dim, method)
 
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
@@ -123,11 +131,16 @@ class JetTaggingModule(LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits for a batch of shape (jets, const, features)."""
         x = x.to(torch.float32)
-        if self.model_feature_indices is not None and x.shape[-1] != self.hparams.nbr_feats:
+        if (
+            self.model_feature_indices is not None
+            and x.shape[-1] != self.hparams.nbr_feats
+        ):
             x = x[:, :, self.model_feature_indices]
         return self.net(self._prepare_inputs(x))
 
-    def model_step(self, batch: tuple[torch.Tensor, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def model_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Run one forward pass and compute the loss.
 
         :param batch: the pair ``(x, y)``, of shapes (jets, constituents, features) and one-hot
@@ -152,7 +165,9 @@ class JetTaggingModule(LightningModule):
 
         if self.symm_loss is not None:
             partner_logits = self(self._partner_batch(x))
-            out["loss"], out["symm_loss"] = self.symm_loss(cls_loss, logits, partner_logits)
+            out["loss"], out["symm_loss"] = self.symm_loss(
+                cls_loss, logits, partner_logits
+            )
 
         return out
 
@@ -183,11 +198,17 @@ class JetTaggingModule(LightningModule):
         out = self.model_step(batch)
         self.train_loss(out["loss"])
         self.train_acc(out["preds"], out["targets"])
-        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(
+            "train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True
+        )
+        self.log(
+            "train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True
+        )
         if self.train_symm_loss is not None:
             self.train_symm_loss(out["symm_loss"])
-            self.log("train/symm_loss", self.train_symm_loss, on_step=False, on_epoch=True)
+            self.log(
+                "train/symm_loss", self.train_symm_loss, on_step=False, on_epoch=True
+            )
         return out["loss"]
 
     def validation_step(
@@ -211,7 +232,9 @@ class JetTaggingModule(LightningModule):
         out = self.model_step(batch)
         self.test_loss(out["loss"])
         self.test_acc(out["preds"], out["targets"])
-        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(
+            "test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True
+        )
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
         return out
 
@@ -263,11 +286,15 @@ class JetTaggingModule(LightningModule):
             else None
         )
 
-    def _resolve_full_width_features(self, model_features: list[str], datamodule) -> None:
+    def _resolve_full_width_features(
+        self, model_features: list[str], datamodule
+    ) -> None:
         """Check that the features of the data exist and are in the expected order."""
         self.feature_names = list(datamodule.feature_names)
         indices = resolve_feature_indices(model_features, self.feature_names)
-        if len(indices) == len(self.feature_names) and indices != list(range(len(indices))):
+        if len(indices) == len(self.feature_names) and indices != list(
+            range(len(indices))
+        ):
             raise ValueError(
                 "The algorithm consumes every data column but in a different order, which "
                 "forward() cannot detect: it reduces only on a width mismatch. Reorder "
@@ -288,7 +315,10 @@ class JetTaggingModule(LightningModule):
         optimizer = self._optimizer(params=self.parameters())
         if not self._scheduler:
             return {"optimizer": optimizer}
-        return {"optimizer": optimizer, "lr_scheduler": self._set_up_scheduler(optimizer)}
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": self._set_up_scheduler(optimizer),
+        }
 
     def _set_up_scheduler(self, optimizer: torch.optim.Optimizer) -> dict:
         """Instantiate the scheduler partial and return it inside its Lightning dict.

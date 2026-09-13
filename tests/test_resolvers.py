@@ -9,7 +9,10 @@ def test_the_resolvers_count_the_features_and_name_the_run() -> None:
     # conftest registered them once already; a multirun calls this a second time too.
     register_resolvers()
     cfg = OmegaConf.create(
-        {"data": {"features": ["px", "py", "pz", "e"]}, "nbr_feats": "${len:${data.features}}"}
+        {
+            "data": {"features": ["px", "py", "pz", "e"]},
+            "nbr_feats": "${len:${data.features}}",
+        }
     )
 
     assert cfg.nbr_feats == 4

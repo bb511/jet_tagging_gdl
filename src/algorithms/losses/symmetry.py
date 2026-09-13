@@ -34,14 +34,18 @@ class SymmetryConsistencyLoss(nn.Module):
     """
 
     def __init__(
-        self, group: str | None, weight: float = 0.1, metric: str = "l2", eps: float = 1e-8
+        self,
+        group: str | None,
+        weight: float = 0.1,
+        metric: str = "l2",
+        eps: float = 1e-8,
     ) -> None:
         super().__init__()
         if group is None or str(group).lower() not in GROUPS:
             raise ValueError(
                 f"method=symm_loss needs a group in {list(GROUPS)}, got {group!r}. The group "
-                "follows data.augmentation_scheme, so set that (e.g. data.augmentation_scheme=so3) "
-                "or override algorithm.group."
+                "follows data.augmentation_scheme, so set that (e.g. "
+                "data.augmentation_scheme=so3) or override algorithm.group."
             )
         self.group = str(group).lower()
         self.weight = float(weight)
@@ -51,7 +55,9 @@ class SymmetryConsistencyLoss(nn.Module):
         elif metric in LogitDistance.METRICS:
             self.distance = LogitDistance(metric)
         else:
-            raise ValueError(f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}.")
+            raise ValueError(
+                f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}."
+            )
 
     def transform(
         self,
@@ -68,7 +74,9 @@ class SymmetryConsistencyLoss(nn.Module):
         :param transform_kwargs: additional args for ``make_transform``.
         :return: the transformed batch, of the shape and normalisation of *x*.
         """
-        return make_transform(self.group, feature_names, norm_scales, **transform_kwargs)(x)
+        return make_transform(
+            self.group, feature_names, norm_scales, **transform_kwargs
+        )(x)
 
     def forward(
         self, cls_loss: torch.Tensor, logits: torch.Tensor, logits_sym: torch.Tensor

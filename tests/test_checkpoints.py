@@ -24,13 +24,20 @@ def test_the_main_run_comes_first_and_the_folds_follow_by_index(tmp_path: Path) 
 
     merged = merge_manifests(tmp_path)
 
-    assert [run.fold_label for run in merged.runs] == ["main", "fold_1", "fold_2", "fold_10"]
+    assert [run.fold_label for run in merged.runs] == [
+        "main",
+        "fold_1",
+        "fold_2",
+        "fold_10",
+    ]
     assert merged.n_folds == 3
     assert merged.hydra_output_dir == str(tmp_path)
     assert merged.experiment_name == "exp"
 
 
-def test_a_fold_still_missing_is_counted_out_with_a_warning(tmp_path: Path, caplog) -> None:
+def test_a_fold_still_missing_is_counted_out_with_a_warning(
+    tmp_path: Path, caplog
+) -> None:
     _write(tmp_path, 0, MAIN)
     _write(tmp_path / "fold_1", 2, _fold(1))
 

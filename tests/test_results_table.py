@@ -14,7 +14,7 @@ def _expected_header() -> list[str]:
     # Spelled out rather than read off the table or off src.symmetry: the tables on disk are
     # appended to, so the column order is part of the interface.
     groups = ("so2", "so3", "lorentz")
-    tabulated = ("flip", "flip_recover", "flip_stable", "flip_degrade", "accuracy_transformed")
+    tabulated = ("flip", "flip_recover", "flip_stable", "accuracy_transformed")
     return [
         "method",
         "model",
@@ -55,15 +55,21 @@ def _header(path: Path) -> list[str]:
         return next(csv.reader(table))
 
 
-def _wasserstein_fold(so2: float, so3: float, lorentz: float, **rest) -> dict[str, object]:
-    fold = {key(g, "wasserstein"): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))}
+def _wasserstein_fold(
+    so2: float, so3: float, lorentz: float, **rest
+) -> dict[str, object]:
+    fold = {
+        key(g, "wasserstein"): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))
+    }
     return fold | {"test/acc": 0.9, "flops_total": 1000.0} | rest
 
 
 def _fold(so2: float, so3: float, lorentz: float, **rest) -> dict[str, object]:
     fold = _wasserstein_fold(0.0, 0.0, 0.0)
     for suffix in FLIP_FAMILIES:
-        fold |= {key(g, suffix): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))}
+        fold |= {
+            key(g, suffix): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))
+        }
     return fold | rest
 
 
@@ -136,21 +142,31 @@ def test_every_tabulated_suffix_carries_a_family_per_group(tmp_path: Path) -> No
     assert _rows(flip_table.output_path)[0]["selected_inv_key"] == "invariance/so2_flip"
 
 
-def test_the_regime_and_the_feature_list_or_the_subdir_name_the_table(tmp_path: Path) -> None:
+def test_the_regime_and_the_feature_list_or_the_subdir_name_the_table(
+    tmp_path: Path,
+) -> None:
     features = ["px", "py", "pz", "e"]
     baseline = _table(tmp_path, augmentation_scheme="none", features=features)
-    scl = _table(tmp_path, method="symm_loss", augmentation_scheme="so3", features=features)
-    embedded = _table(tmp_path, augmentation_scheme="none", features=features, subdir="embedded")
+    scl = _table(
+        tmp_path, method="symm_loss", augmentation_scheme="so3", features=features
+    )
+    embedded = _table(
+        tmp_path, augmentation_scheme="none", features=features, subdir="embedded"
+    )
 
     assert baseline.display_method == "baseline"
-    assert baseline.output_path == tmp_path / "px_py_pz_e" / "results_table_baseline.csv"
+    assert (
+        baseline.output_path == tmp_path / "px_py_pz_e" / "results_table_baseline.csv"
+    )
     assert scl.output_path == tmp_path / "px_py_pz_e" / "results_table_symm_loss.csv"
     assert embedded.output_path == tmp_path / "embedded" / "results_table_baseline.csv"
     # Nothing is created before a row is written, so a search leaves results/ untouched.
     assert not (tmp_path / "px_py_pz_e").exists()
 
 
-def test_an_evaluation_of_no_fold_writes_nothing_and_a_second_run_appends(tmp_path: Path) -> None:
+def test_an_evaluation_of_no_fold_writes_nothing_and_a_second_run_appends(
+    tmp_path: Path,
+) -> None:
     table = _table(tmp_path)
     table.write([])
 
