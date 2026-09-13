@@ -1,8 +1,9 @@
 # Removed architectures
 
 This repository carried eight architecture modules before the refactor to the `adl1t` layout
-and carries four now: DeepSets, MLP, JetFormer and LorentzNet. PELICAN, a plain Transformer
-encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed; nano-PELICAN,
+and carries five now: DeepSets, MLP, JetFormer, LorentzNet and PELICAN, the last of them back
+since 2026-09-13 as a clean rewrite. PELICAN, a plain Transformer encoder, a
+Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the refactor; nano-PELICAN,
 which existed as configuration only, went with them, and so did the permutation check. This
 file records what each was, why it went, and what putting it back involves.
 
@@ -51,7 +52,7 @@ two hooks. The steps:
 - Add `configs/experiment/hls4ml/<name>_{16,50,150}.yaml`, the search configs
   `configs/hparams_search/hls4ml/<name>_optuna.yaml` and `<name>_scl_optuna.yaml`, and the
   three catalogues `scripts/hls4ml/run<name>_{search,train,eval}.sh`. An architecture with an
-  embedded symmetry follows LorentzNet instead: the baseline regime alone, so no
+  embedded symmetry follows LorentzNet and PELICAN instead: the baseline regime alone, so no
   `_scl_optuna` config and three blocks per catalogue rather than 21.
 - Extend `tests/test_algorithms.py`, which exercises every algorithm config under both
   methods.
@@ -63,6 +64,18 @@ without it. They also accept `method="equivariance"`, which no longer exists: th
 methods are `augmentation` and `symm_loss`.
 
 ## PELICAN
+
+**Back since 2026-09-13, as a clean rewrite**, not as the vendored copy below:
+`src/algorithms/components/pelican.py` and `src/algorithms/pelican.py`, with
+`configs/algorithm/pelican.yaml`, `configs/experiment/hls4ml/pelican_{16,50,150}.yaml` and
+`configs/hparams_search/hls4ml/pelican_optuna.yaml`. The rewrite carries the general classifier
+of arXiv:2307.16506 alone: the 15 aggregators of the rank-2 equivariant layer built from compact
+sources rather than the reference's `(B, C, 15, N, N)` stack, one masked BatchNorm per block, and
+none of the dict inputs, config strings, IRC weighting, factorisation or spurion machinery. Two
+beam four-vectors are appended inside the network, so the exact symmetry is SO(2) about the beam;
+the other groups are measured by the probe. It is the second symmetry-embedded architecture
+beside LorentzNet, run in the baseline regime alone. The rest of this section is the record of
+the vendored copy that was removed at the refactor, kept as history.
 
 Permutation-invariant, Lorentz-invariant aggregator network: pairwise Lorentz invariants of
 the constituent four-momenta are fed through equivariant rank-2 layers and aggregated to a
@@ -91,7 +104,9 @@ symmetry, through a set model, to a Lorentz-equivariant graph network), and PELI
 invariance is structural, so it answers a different question from "does augmentation or a
 consistency loss teach invariance better".
 
-Porting notes. `PELICANClassifier` consumes a dict (`Pmu`, `particle_mask`, `edge_mask`,
+Porting notes, superseded by the 2026-09-13 rewrite, which takes a `(B, N, F)` tensor and
+builds its own masks and beams; they describe what the vendored copy needed.
+`PELICANClassifier` consumes a dict (`Pmu`, `particle_mask`, `edge_mask`,
 `Nobj`, optional `scalars`), not a tensor, so `build_net` should return a wrapper that
 assembles that dict from `(B, N, F)`. The old wrapper rebuilt the energy from the momenta
 under a massless assumption; with the current default features the energy column is present,
@@ -111,7 +126,9 @@ study database hard-coded to another user's home directory.
 Files: `configs/model/nano_pelican.yaml`, `configs/hparams_search/nano_pelican_optuna.yaml`.
 
 Why removed: dead configuration. If the idea is wanted, it is a narrow instance of the
-PELICAN port above and should start there.
+PELICAN port above and should start there. It is one now: the corner `algorithm.n_blocks=1`,
+`algorithm.n_message=0` of the PELICAN search space, at the smallest width, rather than a model
+of its own.
 
 ## Transformer
 

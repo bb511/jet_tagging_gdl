@@ -6,8 +6,11 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from src.algorithms import JetTaggingModule
+from src.algorithms.components.pelican import LinEq2to2
 from src.data.components.augmentation import make_transform
+from src.symmetry import GROUPS
 from tests.conftest import (
+    EMBEDDED,
     FOUR_MOMENTUM,
     MODELS,
     RECORD_COLUMNS,
@@ -37,11 +40,16 @@ ARCHITECTURE_KEYS = {
         "dropout",
     },
     "lorentznet": {"n_hidden", "n_layers", "c_weight", "dropout"},
+    "pelican": {"n_hidden", "n_message", "n_blocks", "dropout", "nbar", "add_beams"},
 }
 
 
 def _algorithm(
-    name: str, nconstituents: int = 8, method: str = "augmentation", group: str = "none"
+    name: str,
+    nconstituents: int = 8,
+    method: str = "augmentation",
+    group: str = "none",
+    **overrides: object,
 ) -> JetTaggingModule:
     # The algorithm configs interpolate ${data.*}, so a data node of our own stands in.
     cfg = OmegaConf.create(
@@ -56,6 +64,7 @@ def _algorithm(
         }
     )
     cfg.algorithm = OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
+    cfg.algorithm.merge_with(overrides)
     return instantiate(cfg.algorithm)
 
 
@@ -66,11 +75,12 @@ def _attach(module: JetTaggingModule, datamodule: StubDataModule) -> JetTaggingM
     return module
 
 
-# LorentzNet is the symmetry-embedded class, so it is never trained under the SCL.
+# The embedded models carry their symmetry in the architecture, so neither is trained under
+# the SCL.
 @pytest.mark.parametrize(
     "name, method, group",
     [(name, "augmentation", "none") for name in MODELS]
-    + [(name, "symm_loss", "so2") for name in MODELS if name != "lorentznet"],
+    + [(name, "symm_loss", "so2") for name in MODELS if name not in EMBEDDED],
 )
 def test_every_algorithm_takes_one_step_under_either_method(
     name: str, method: str, group: str
@@ -198,3 +208,174 @@ def test_lorentznet_logits_survive_any_group_at_large_coordinate_steps(
     # floor is the float32 that forward() and the transform matrices round to, some 1e-7.
     shift = (logits - logits_transformed).abs().max().item() / logits.abs().max().item()
     assert shift < 1e-4
+
+
+def _pelican(add_beams: bool = True, nconstituents: int = 16) -> JetTaggingModule:
+    # float64 throughout: forward() rounds the batch to float32, but the de-normalisation
+    # against the float64 buffer promotes everything after it. Eval mode, so the masked batch
+    # normalisation reads its buffers rather than the batch.
+    torch.manual_seed(0)
+    module = _algorithm("pelican", nconstituents=nconstituents, add_beams=add_beams)
+    return module.eval().double()
+
+
+def _relative_shift(logits: torch.Tensor, transformed: torch.Tensor) -> float:
+    # Relative to the logit scale: an absolute 1e-3 on a near-zero network says nothing. The
+    # floor is the float32 that forward() and the transform matrices round to, some 1e-7.
+    return (logits - transformed).abs().max().item() / logits.abs().max().item()
+
+
+def _shift_under(module: JetTaggingModule, scheme: str) -> float:
+    batch = jets(8, 16, 11).double() * 10.0
+    transformed = make_transform(scheme, FOUR_MOMENTUM, None, 2.0)(batch)
+    with torch.no_grad():
+        return _relative_shift(module(batch), module(transformed))
+
+
+def test_pelican_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:
+    narrow = _algorithm("pelican", nconstituents=8).eval()
+    wide = _algorithm("pelican", nconstituents=9).eval()
+    wide.load_state_dict(narrow.state_dict(), strict=True)
+    batch = jets(4, 8, 6)
+    scales = {"px": 2.0, "py": 3.0, "pz": 4.0, "e": 5.0}
+
+    with torch.no_grad():
+        physical = narrow(batch)
+        padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
+        narrow.norm_scales = scales
+        narrow._on_features_resolved()
+        normalised = narrow(
+            batch / torch.tensor([scales[name] for name in FOUR_MOMENTUM])
+        )
+
+    assert torch.allclose(physical, padded, atol=1e-5)
+    assert torch.allclose(physical, normalised, atol=1e-3)
+
+
+@pytest.mark.parametrize(
+    "add_beams, scheme",
+    [(True, "so2")] + [(False, scheme) for scheme in GROUPS],
+)
+def test_pelican_is_invariant_under_the_group_the_beams_leave_alone(
+    add_beams: bool, scheme: str
+) -> None:
+    # The network reads Minkowski products alone, so without the beams it is invariant under
+    # the whole Lorentz group. The beams are two fixed null vectors, and the only transforms
+    # leaving the set of their products with the constituents alone are the rotations about
+    # the beam axis.
+    assert _shift_under(_pelican(add_beams=add_beams), scheme) < 1e-4
+
+
+@pytest.mark.parametrize("scheme", ["so3", "lorentz", "lorentz_iso"])
+def test_pelican_beams_break_every_group_that_moves_the_beam_axis(scheme: str) -> None:
+    # A rotation off the beam tilts the axis; a boost of rapidity y along it rescales the
+    # products E -/+ p_z by e^{-/+ y}, because a beam is a fixed vector and does not come
+    # along. Either way the beam channels of the pair tensor move, so PELICAN measures these
+    # three groups at test time as the augmented models do.
+    # Read against the SO(2) shift of the same network rather than an absolute bar: at
+    # initialisation the logits are nearly constant (0.2, varying by 2e-4 from jet to jet,
+    # the masked normalisation still holding its initial buffers), so the broken groups shift
+    # them by 1e-4 to 1e-3 where SO(2) and the beamless network sit at the 1e-8 float32 floor.
+    module = _pelican()
+    assert _shift_under(module, scheme) > 1000 * _shift_under(module, "so2")
+
+
+def test_pelican_is_blind_to_the_sign_of_the_beam_axis() -> None:
+    # p_z -> -p_z swaps the two beams, which carry one label between them, and leaves every
+    # other product untouched; the network is permutation invariant, so the logits stand.
+    module = _pelican()
+    batch = jets(8, 16, 11).double() * 10.0
+    flipped = batch * torch.tensor([1.0, 1.0, -1.0, 1.0]).double()
+
+    with torch.no_grad():
+        assert torch.allclose(module(batch), module(flipped), atol=1e-10)
+
+
+def _pair_tensor(
+    n_slots: int = 6, n_real: int = 4, channels: int = 3
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # A pair tensor as the network builds one: zero on every padded pair, with a multiplicity
+    # that counts the real slots rather than all of them.
+    torch.manual_seed(1)
+    real = torch.zeros(2, n_slots, dtype=torch.bool)
+    real[:, :n_real] = True
+    pair_mask = (real.unsqueeze(2) & real.unsqueeze(1)).unsqueeze(-1)
+    values = torch.randn(2, n_slots, n_slots, channels).double()
+    return torch.where(pair_mask, values, 0.0), pair_mask, real.sum(-1, True).double()
+
+
+def test_the_pair_layer_is_permutation_equivariant() -> None:
+    torch.manual_seed(0)
+    layer = LinEq2to2(3, 4, nbar=6.0).double()
+    x, pair_mask, nobj = _pair_tensor()
+    # Real slots onto real slots and padded onto padded, so the mask is its own image.
+    perm = torch.tensor([2, 0, 3, 1, 5, 4])
+
+    with torch.no_grad():
+        out = layer(x, pair_mask, nobj)
+        permuted = layer(x[:, perm][:, :, perm], pair_mask, nobj)
+
+    assert torch.allclose(out[:, perm][:, :, perm], permuted, atol=1e-10)
+
+
+def _down_columns(v: torch.Tensor, n_particles: int) -> torch.Tensor:
+    # (B, C, N) -> (B, C, N, N) whose entry (i, j) is v_j, constant down a column.
+    return v.unsqueeze(2).expand(-1, -1, n_particles, -1)
+
+
+def _along_rows(v: torch.Tensor, n_particles: int) -> torch.Tensor:
+    # (B, C, N) -> (B, C, N, N) whose entry (i, j) is v_i, constant along a row.
+    return v.unsqueeze(3).expand(-1, -1, -1, n_particles)
+
+
+def _stacked_basis(x: torch.Tensor, nobj: torch.Tensor) -> torch.Tensor:
+    # The reference's eops_2_to_2 (ops[1] to ops[15]), written out from its own formulas as
+    # the (B, C, 15, N, N) stack: the compact layer has to be checked against something
+    # other than its own algebra.
+    inputs = x.permute(0, 3, 1, 2)
+    n_particles = inputs.shape[-1]
+    n = nobj.view(-1, 1, 1)
+    diag = torch.diagonal(inputs, dim1=-2, dim2=-1)
+    sum_diag = diag.sum(2, keepdim=True) / n
+    sum_rows, sum_cols = inputs.sum(3) / n, inputs.sum(2) / n
+    sum_all = inputs.sum((2, 3)) / nobj.view(-1, 1) ** 2
+    ops = [
+        inputs,
+        inputs.transpose(2, 3),
+        torch.diag_embed(diag),
+        _down_columns(diag, n_particles),
+        _along_rows(diag, n_particles),
+        torch.diag_embed(sum_cols),
+        _down_columns(sum_cols, n_particles),
+        _along_rows(sum_cols, n_particles),
+        torch.diag_embed(sum_rows),
+        _down_columns(sum_rows, n_particles),
+        _along_rows(sum_rows, n_particles),
+        sum_diag.unsqueeze(3).expand(-1, -1, n_particles, n_particles),
+        torch.diag_embed(sum_diag.expand(-1, -1, n_particles)),
+        sum_all[..., None, None].expand(-1, -1, n_particles, n_particles),
+        torch.diag_embed(sum_all.unsqueeze(-1).expand(-1, -1, n_particles)),
+    ]
+    return torch.stack(ops, dim=2)
+
+
+def test_the_compact_pair_layer_matches_a_stacked_basis() -> None:
+    torch.manual_seed(0)
+    layer = LinEq2to2(3, 4, nbar=6.0).double()
+    x, pair_mask, nobj = _pair_tensor()
+    n_particles = x.shape[1]
+    eye = torch.eye(n_particles).double().view(1, n_particles, n_particles, 1)
+
+    with torch.no_grad():
+        # The reference scales the last ten basis elements alone: ops[1] to ops[5] read the
+        # array and its diagonal, whose values do not depend on the multiplicity.
+        alphas = torch.cat([torch.zeros(3, 5).double(), layer.alphas], dim=1)
+        scale = (nobj.view(-1, 1, 1, 1, 1) / 6.0) ** alphas.view(1, 3, 15, 1, 1)
+        ops = _stacked_basis(x, nobj) * scale
+        out = torch.einsum("cbs,ncbij->nijs", layer.weight, ops) + layer.bias
+        # Both biases go in before the activation, the diagonal one on the diagonal alone.
+        out = torch.nn.functional.leaky_relu(out + eye * layer.diag_bias, 0.01)
+
+        assert torch.allclose(
+            torch.where(pair_mask, out, 0.0), layer(x, pair_mask, nobj), atol=1e-10
+        )

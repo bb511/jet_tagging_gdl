@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-MODELS = ["deepsets", "mlp", "jetformer", "lorentznet"]
+MODELS = ["deepsets", "mlp", "jetformer", "lorentznet", "pelican"]
 NCONSTITUENTS = [16, 50, 150]
 
 # (label, data.method, data.augmentation_scheme), in the order every catalogue,
@@ -35,10 +35,12 @@ VARIANTS = [
     ("symm_lorentz", "symm_loss", "lorentz"),
 ]
 
-# LorentzNet embeds the symmetry rather than acquiring it, so it is the one architecture trained
-# at baseline alone, never under augmentation or the SCL.
+# LorentzNet and PELICAN embed the symmetry rather than acquiring it, so they are the
+# architectures trained at baseline alone, never under augmentation or the SCL.
+EMBEDDED = {"lorentznet", "pelican"}
+
 VARIANTS_OF = {
-    model: VARIANTS[:1] if model == "lorentznet" else VARIANTS for model in MODELS
+    model: VARIANTS[:1] if model in EMBEDDED else VARIANTS for model in MODELS
 }
 
 # The searches use one fold; five is what the results table callback needs to put a confidence

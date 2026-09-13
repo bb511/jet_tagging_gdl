@@ -42,6 +42,7 @@ MODEL_DISPLAY = {
     "mlp": "MLP",
     "jetformer": "JetFormer",
     "lorentznet": "LorentzNet",
+    "pelican": "PELICAN",
     "transformer": "JetFormer",
 }
 

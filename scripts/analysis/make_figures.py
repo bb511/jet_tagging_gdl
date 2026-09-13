@@ -117,7 +117,7 @@ BAND = dict(colors=RECOVER_COLOR, linewidth=6.0, capstyle="butt", zorder=4, alph
 
 # Preferred column order; a model present in the data but not listed here is appended
 # alphabetically, so a re-added architecture (see ARCHITECTURES.md) needs no edit here.
-MODEL_ORDER = ["DeepSets", "MLP", "JetFormer", "LorentzNet"]
+MODEL_ORDER = ["DeepSets", "MLP", "JetFormer", "LorentzNet", "PELICAN"]
 
 # Regime label -> results_table_<stem>.csv filename stem.
 REGIME_FILE_STEM = {"Augmentation": "augmentation", "SCL": "symm_loss"}

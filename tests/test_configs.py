@@ -5,15 +5,22 @@ import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
-from tests.conftest import MODELS, NCONSTITUENTS, ROOT, compose_root, point_into
+from tests.conftest import (
+    EMBEDDED,
+    MODELS,
+    NCONSTITUENTS,
+    ROOT,
+    compose_root,
+    point_into,
+)
 
 EXPECTED_EXPERIMENTS = {f"{model}_{n}" for model in MODELS for n in NCONSTITUENTS}
-# LorentzNet is trained in the baseline regime alone, so it has no SCL space.
+# The embedded architectures are trained in the baseline regime alone, so they have no SCL space.
 EXPECTED_SEARCHES = {
     f"{model}{variant}_optuna"
     for model in MODELS
     for variant in ("", "_scl")
-    if not (model == "lorentznet" and variant == "_scl")
+    if not (model in EMBEDDED and variant == "_scl")
 }
 
 
@@ -47,7 +54,7 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     assert module.hparams.name == model
     assert module.hparams.nconstituents == int(nconstituents)
     assert module.flops_total > 0
-    assert cfg.results_table.subdir == ("embedded" if model == "lorentznet" else None)
+    assert cfg.results_table.subdir == ("embedded" if model in EMBEDDED else None)
 
 
 @pytest.mark.parametrize("search", SEARCHES)
