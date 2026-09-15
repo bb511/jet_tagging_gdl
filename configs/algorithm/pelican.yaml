@@ -26,6 +26,14 @@ dropout: 0.025
 # so it is set per experiment rather than shared.
 nbar: 49.0
 add_beams: true # beams on: the exact symmetry is SO(2) about the beam; off: the full group
+# Speed knob, never searched: the batch is sorted by multiplicity and cut into this many
+# chunks, each trimmed to its own widest jet, which drops the padded pair slots of all but
+# the widest chunk. Exact up to the order of the summations, so the logits, the gradients
+# and the pooled normalisation statistics are those of the whole batch; the dropout masks
+# are drawn at other shapes, so two runs at one seed and different n_chunks are not
+# bit-reproducible against each other. Set per experiment, since the gain follows the
+# padding: at 16 constituents there is none.
+n_chunks: 1
 
 optimizer:
   _target_: torch.optim.AdamW

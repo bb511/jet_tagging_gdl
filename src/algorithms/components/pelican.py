@@ -1,24 +1,16 @@
 """PELICAN, the permutation-equivariant Lorentz aggregator of arXiv:2307.16506.
 
-A jet enters as the array of Minkowski products of every pair of its constituents, and
-the network is a stack of the 15 linear maps that take one such array to another
-equivariantly (Maron et al., arXiv:1812.09902), interleaved with channel mixes.
+A jet is converted to the Minkowski products of its constituents.
+The netowrk is a stack of 15 linear maps that take this set of products to another,
+interleaved with channel mixes, as described in (Maron et al., arXiv:1812.09902).
 
-Shape conventions. ``pmu (B, N, 4)`` holds :math:`[E, p_x, p_y, p_z]` in GeV with padded
-constituents as all-zero rows, and N counts the two beams once they are prepended;
-``real (B, N)`` is ``pmu[..., 0] != 0``; ``pair_mask (B, N, N, 1)`` is ``real_i &
-real_j``; ``nobj (B, 1)`` is the real count, beams included. The pair tensor ``x (B, N,
-N, C)`` is zero on every padded pair, which is what lets every reduction sum over all
-slots and divide by ``nobj``; each layer re-masks its output, since a bias would
-otherwise fill the padding. No dtype and no device is hard-coded, so the module runs in
-float64.
+Shape conventions. Every jet is specified by its constituents, and every constituent is
+specified by its momentum 4-vector in GeV. The number of constituents is padded to N for
+every jet. Two 4-vector describing the beam directions are appended to each jet.
 
 Symmetry. With the beams on, the exact invariance is SO(2) about the beam axis together
-with :math:`p_z \\to -p_z`, which merely swaps two beams carrying the same label. It is
-not the boosts along the beam: the beams are fixed null vectors, a boost of rapidity y
-along z rescales :math:`E \\mp p_z` by :math:`e^{\\mp y}`, so the beam-constituent
-products move and the logits with them. With the beams off, every product the network
-reads is a Lorentz scalar and the logits are invariant under the full group.
+with `p_z -> -p_z`, which merely swaps two beams with the same label. However, all the
+logits are Lorentz invariant, given only the constituents as input.
 
 Batches must be de-normalised before they reach this module.
 """
@@ -29,21 +21,12 @@ from torch import nn
 
 
 def pair_dots(p: torch.Tensor, metric: torch.Tensor) -> torch.Tensor:
-    """Minkowski products of every pair, ``(B, N, N, 1)``, metric (+, -, -, -).
-
-    One ``bmm``, so the FLOP counter sees it and no ``(B, N, N, 4)`` intermediate is
-    built.
-    """
+    """Minkowski products of every pair, ``(B, N, N, 1)``, metric (+, -, -, -)."""
     return torch.matmul(p, (p * metric).transpose(1, 2)).unsqueeze(-1)
 
 
 def pair_reductions(x: torch.Tensor, nobj: torch.Tensor) -> tuple[torch.Tensor, ...]:
-    """The compact sources of the basis: ``(diag, rows, cols, trace, total)``.
-
-    The diagonal and the row and column means are ``(B, N, C)``, the trace and the total
-    ``(B, 1, C)``. Padded pairs of *x* are zero, so a sum over every slot divided by
-    *nobj* is the mean over the real ones.
-    """
+    """The compact sources of the basis: ``(diag, rows, cols, trace, total)``."""
     n = nobj.unsqueeze(-1)
     diag = torch.diagonal(x, dim1=1, dim2=2).transpose(1, 2)
     rows, cols = x.sum(2) / n, x.sum(1) / n
@@ -53,13 +36,29 @@ def pair_reductions(x: torch.Tensor, nobj: torch.Tensor) -> tuple[torch.Tensor, 
 
 
 def scaled_mix(v: torch.Tensor, scale: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
-    """Mix the channels of a compact source, each rescaled by its own power of N.
-
-    The factor :math:`(N/\\bar N)^\\alpha` is one per input channel and the mix is a sum
-    over input channels, so rescaling here is the same as rescaling the basis element
-    the result is broadcast into.
-    """
+    """Mix the channels of a compact source, each rescaled by its own power of N."""
     return (v * scale) @ w
+
+
+def real_width(real: torch.Tensor) -> torch.Tensor:
+    """Slots up to and including the last real one of every jet, ``(B,)``."""
+    # From the mask, not the count: the record's loader leads with the real slots, but
+    # nothing here may rely on that ordering.
+    slots = torch.arange(1, real.shape[1] + 1, device=real.device)
+    return (real * slots).amax(dim=1)
+
+
+def chunk_widths(widths: torch.Tensor, pieces: list[torch.Tensor]) -> list[int]:
+    """Slots every chunk has to carry, at least one, as Python ints."""
+    # One host sync for all the chunks together, rather than one per chunk.
+    return torch.stack([widths[piece].amax() for piece in pieces]).clamp(min=1).tolist()
+
+
+def invert_permutation(order: torch.Tensor) -> torch.Tensor:
+    """Indices putting a batch sorted by *order* back into the order it arrived in."""
+    inverse = torch.empty_like(order)
+    inverse[order] = torch.arange(order.numel(), device=order.device)
+    return inverse
 
 
 class InputEmbedding(nn.Module):
@@ -122,8 +121,10 @@ class LinEq2to2(nn.Module):
         scale = (nobj / self.nbar).view(-1, 1, 1, 1) ** self.alphas
         diag, rows, cols, trace, total = pair_reductions(x, nobj)
         by_row, by_col = self._broadcast_terms(diag, rows, cols, scale)
-        out = self._array_terms(x) + self._scalar_terms(trace, total, scale) + self.bias
-        out += by_row.unsqueeze(2)
+        # The bias and the two scalar terms are constant along a row as well, so folding
+        # them here costs two broadcast passes over the whole array instead of four.
+        by_row = by_row + self._scalar_terms(trace, total, scale) + self.bias
+        out = self._array_terms(x) + by_row.unsqueeze(2)
         out += by_col.unsqueeze(1)
         # In place on the diagonal of a fresh sum: legal for autograd, whose backward
         # through those adds and matmuls reads none of their outputs. Nothing may come
@@ -140,10 +141,9 @@ class LinEq2to2(nn.Module):
     def _scalar_terms(
         self, trace: torch.Tensor, total: torch.Tensor, scale: torch.Tensor
     ) -> torch.Tensor:
-        """Elements 11 and 13, one value per jet spread over the whole array."""
+        """Elements 11 and 13, one value per jet, ``(B, 1, out_dim)``."""
         mixed = scaled_mix(trace, scale[..., 6], self.weight[:, 11])
-        mixed = mixed + scaled_mix(total, scale[..., 8], self.weight[:, 13])
-        return mixed.unsqueeze(1)
+        return mixed + scaled_mix(total, scale[..., 8], self.weight[:, 13])
 
     def _broadcast_terms(
         self,
@@ -211,6 +211,10 @@ class MaskedBatchNorm(nn.Module):
     towards zero. The padded pairs must be zero on entry, which every layer here
     guarantees. The running estimates are registered buffers, since the FLOP-counting
     pass snapshots and restores buffers alone.
+
+    A batch arrives as the list of its chunks, and the statistics run over all of them
+    together, so splitting a batch changes the order the sums are taken in and nothing
+    else.
     """
 
     def __init__(
@@ -224,23 +228,28 @@ class MaskedBatchNorm(nn.Module):
         self.register_buffer("running_var", torch.ones(num_features))
         self.register_buffer("num_batches_tracked", torch.zeros((), dtype=torch.long))
 
-    def forward(self, x: torch.Tensor, pair_mask: torch.Tensor) -> torch.Tensor:
-        """Normalise *x* channel by channel, then re-mask it."""
+    def forward(
+        self, xs: list[torch.Tensor], masks: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
+        """Normalise every chunk channel by channel, then re-mask it."""
         if self.training:
-            mean, var = self._batch_statistics(x, pair_mask)
+            mean, var = self._batch_statistics(xs, masks)
         else:
             mean, var = self.running_mean, self.running_var
         scale = self.weight * torch.rsqrt(var + self.eps)
-        return torch.where(pair_mask, x * scale + (self.bias - mean * scale), 0.0)
+        shift = self.bias - mean * scale
+        return [torch.where(m, x * scale + shift, 0.0) for x, m in zip(xs, masks)]
 
     def _batch_statistics(
-        self, x: torch.Tensor, pair_mask: torch.Tensor
+        self, xs: list[torch.Tensor], masks: list[torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Mean and biased variance of the real pairs, folded into the running
         estimates."""
-        n = pair_mask.sum()
-        mean = x.sum((0, 1, 2)) / n
-        var = x.pow(2).sum((0, 1, 2)) / n - mean.pow(2)
+        n = sum(mask.sum() for mask in masks)
+        mean = sum(x.sum((0, 1, 2)) for x in xs) / n
+        var = sum(x.pow(2).sum((0, 1, 2)) for x in xs) / n - mean.pow(2)
+        # Once per forward, whatever the chunk count, or the running estimates would
+        # decay n_chunks times faster than the training-mode statistics.
         self._track(mean.detach(), var.detach() * n / (n - 1).clamp(min=1))
         return mean, var
 
@@ -260,10 +269,12 @@ class MessageNet(nn.Module):
         self.linear = nn.Linear(in_dim, out_dim)
         self.norm = MaskedBatchNorm(out_dim)
 
-    def forward(self, x: torch.Tensor, pair_mask: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, xs: list[torch.Tensor], masks: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
         """Mix the channels of every pair, independently of the particle indices."""
-        x = F.leaky_relu(self.linear(x), 0.01, inplace=True)
-        return self.norm(torch.where(pair_mask, x, 0.0), pair_mask)
+        xs = [F.leaky_relu(self.linear(x), 0.01, inplace=True) for x in xs]
+        return self.norm([torch.where(m, x, 0.0) for x, m in zip(xs, masks)], masks)
 
 
 class Eq2to2Block(nn.Module):
@@ -284,14 +295,18 @@ class Eq2to2Block(nn.Module):
         self.aggregate = LinEq2to2(n_message or n_hidden, n_hidden, nbar)
 
     def forward(
-        self, x: torch.Tensor, pair_mask: torch.Tensor, nobj: torch.Tensor
-    ) -> torch.Tensor:
-        """Take the pair tensor through the block, at unchanged width."""
+        self,
+        xs: list[torch.Tensor],
+        masks: list[torch.Tensor],
+        nobjs: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Take every chunk of the pair tensor through the block, at unchanged width."""
         if self.message is not None:
-            x = self.message(x, pair_mask)
+            xs = self.message(xs, masks)
         else:
-            x = self.norm(x, pair_mask)
-        return self.aggregate(self.dropout(x), pair_mask, nobj)
+            xs = self.norm(xs, masks)
+        pairs = zip(xs, masks, nobjs)
+        return [self.aggregate(self.dropout(x), m, n) for x, m, n in pairs]
 
 
 class PELICANClassifier(nn.Module):
@@ -307,6 +322,8 @@ class PELICANClassifier(nn.Module):
     :param n_message: channels of the messaging MLP inside a block, 0 to drop it.
     :param nbar: mean multiplicity, the beams included, that the aggregators scale by.
     :param add_beams: prepend the two beam four-vectors and their label.
+    :param n_chunks: multiplicity-sorted chunks the batch is cut into, each trimmed to
+        its own widest jet; a speed knob, exact up to the order of the summations.
     """
 
     def __init__(
@@ -318,9 +335,13 @@ class PELICANClassifier(nn.Module):
         nbar: float = 49.0,
         add_beams: bool = True,
         n_class: int = 5,
+        n_chunks: int = 1,
     ) -> None:
         super().__init__()
+        if n_chunks < 1:
+            raise ValueError(f"n_chunks must be at least 1, got {n_chunks}")
         self.add_beams = add_beams
+        self.n_chunks = n_chunks
         metric = torch.tensor([1.0, -1.0, -1.0, -1.0])
         beams = torch.tensor([[1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, -1.0]])
         self.register_buffer("metric", metric, persistent=False)
@@ -341,16 +362,44 @@ class PELICANClassifier(nn.Module):
             padded constituents as all-zero rows.
         :return: (jets, n_class) logits, unchanged by how many slots the padding fills.
         """
+        order, chunks = self._split(pmu)
+        chunk_inputs = (self._chunk_inputs(chunk) for chunk in chunks)
+        xs, masks, nobjs = map(list, zip(*chunk_inputs))
+        for block in self.blocks:
+            xs = block(xs, masks, nobjs)
+        if self.message is not None:
+            xs = self.message(xs, masks)
+        pooled = torch.cat([self.aggregate(x, n) for x, n in zip(xs, nobjs)])
+        # The labels of a step are never permuted, so the sort has to be undone here.
+        return self.decoder(pooled[invert_permutation(order)])
+
+    def _split(self, pmu: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Sort the jets by multiplicity and cut them into chunks.
+
+        Every chunk is trimmed to the last real slot of its own widest jet, which is
+        where the padded pair slots are saved.
+
+        :return: the sorting permutation and the chunks, in its order.
+        """
+        real = pmu[..., 0] != 0.0
+        order = torch.arange(pmu.shape[0], device=pmu.device)
+        if self.n_chunks > 1:
+            order = real.sum(-1).argsort()
+        # A batch shorter than the chunk count leaves empty pieces behind.
+        split = torch.tensor_split(order, self.n_chunks)
+        pieces = [piece for piece in split if piece.numel()]
+        widths = chunk_widths(real_width(real), pieces)
+        return order, [pmu[p][:, :width] for p, width in zip(pieces, widths)]
+
+    def _chunk_inputs(
+        self, pmu: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """The pair tensor, the pair mask and the real count of one chunk."""
         pmu, is_beam = self._with_beams(pmu)
         real = pmu[..., 0] != 0.0
         pair_mask = (real.unsqueeze(2) & real.unsqueeze(1)).unsqueeze(-1)
         nobj = real.sum(-1, keepdim=True).clamp(min=1).to(pmu.dtype)
-        x = self._pair_inputs(pmu, is_beam, real)
-        for block in self.blocks:
-            x = block(x, pair_mask, nobj)
-        if self.message is not None:
-            x = self.message(x, pair_mask)
-        return self.decoder(self.aggregate(x, nobj))
+        return self._pair_inputs(pmu, is_beam, real), pair_mask, nobj
 
     def _with_beams(
         self, pmu: torch.Tensor

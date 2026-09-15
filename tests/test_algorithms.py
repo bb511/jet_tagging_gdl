@@ -40,7 +40,15 @@ ARCHITECTURE_KEYS = {
         "dropout",
     },
     "lorentznet": {"n_hidden", "n_layers", "c_weight", "dropout"},
-    "pelican": {"n_hidden", "n_message", "n_blocks", "dropout", "nbar", "add_beams"},
+    "pelican": {
+        "n_hidden",
+        "n_message",
+        "n_blocks",
+        "dropout",
+        "nbar",
+        "add_beams",
+        "n_chunks",
+    },
 }
 
 
@@ -289,6 +297,67 @@ def test_pelican_is_blind_to_the_sign_of_the_beam_axis() -> None:
 
     with torch.no_grad():
         assert torch.allclose(module(batch), module(flipped), atol=1e-10)
+
+
+def _ragged(multiplicities: list[int], n_slots: int = 16) -> torch.Tensor:
+    batch = jets(len(multiplicities), n_slots, n_slots)
+    for row, multiplicity in enumerate(multiplicities):
+        batch[row, multiplicity:] = 0.0
+    # A hole inside the leading slots of row 0: a chunk width read off the real count rather
+    # than off the mask would cut that row short of its last real constituent.
+    batch[0, 3] = 0.0
+    return batch
+
+
+def _chunked_pair(**overrides: object) -> tuple[JetTaggingModule, JetTaggingModule]:
+    # float64 throughout, as in _pelican: the two must agree to the summation order alone.
+    dense = _algorithm("pelican", nconstituents=16, n_chunks=1, **overrides).double()
+    chunked = _algorithm("pelican", nconstituents=16, n_chunks=4, **overrides).double()
+    chunked.load_state_dict(dense.state_dict(), strict=True)
+    return dense, chunked
+
+
+@pytest.mark.parametrize("training", [False, True])
+def test_pelican_chunks_reproduce_the_unchunked_logits(training: bool) -> None:
+    # Dropout off: its masks are drawn at the chunk shapes, so only the rest is comparable.
+    dense, chunked = _chunked_pair(dropout=0.0)
+    dense.train(training)
+    chunked.train(training)
+    batch = _ragged([16, 1, 9, 3, 14, 5, 12, 2]).double()
+
+    with torch.no_grad():
+        assert torch.allclose(dense(batch), chunked(batch), atol=1e-8)
+
+
+def test_pelican_chunks_pool_one_set_of_batch_normalisation_statistics() -> None:
+    # What catches a _track called once per chunk: the running estimates would then decay
+    # four times faster than the statistics the training mode normalises by.
+    dense, chunked = _chunked_pair(dropout=0.0)
+    dense.train()
+    chunked.train()
+    batch = _ragged([16, 1, 9, 3, 14, 5, 12, 2]).double()
+
+    with torch.no_grad():
+        dense(batch)
+        chunked(batch)
+
+    reference = dict(dense.named_buffers())
+    for name, value in chunked.named_buffers():
+        if "running_" in name:
+            assert torch.allclose(reference[name], value, atol=1e-8), name
+        if "num_batches_tracked" in name:
+            assert torch.equal(reference[name], value), name
+
+
+def test_pelican_chunking_handles_a_batch_shorter_than_its_chunk_count() -> None:
+    # tensor_split leaves empty pieces behind below the chunk count, which the FLOP-counting
+    # pass hits at every construction: it runs the network at B = 2, and count_flops swallows
+    # an exception into a NaN rather than raising.
+    module = _algorithm("pelican", nconstituents=16, n_chunks=4).eval()
+
+    assert module.flops_total > 0
+    with torch.no_grad():
+        assert module(jets(2, 16, 5)).shape == (2, 5)
 
 
 def _pair_tensor(

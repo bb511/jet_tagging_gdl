@@ -23,6 +23,7 @@ class PELICAN(JetTaggingModule):
         dropout: float = 0.025,
         nbar: float = 49.0,
         add_beams: bool = True,
+        n_chunks: int = 1,
     ) -> nn.Module:
         """Build the aggregator network; the arguments are in components/pelican.py."""
         self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
@@ -33,6 +34,7 @@ class PELICAN(JetTaggingModule):
             dropout=dropout,
             nbar=nbar,
             add_beams=add_beams,
+            n_chunks=n_chunks,
             n_class=self.hparams.output_dim,
         )
 

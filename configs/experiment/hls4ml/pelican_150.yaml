@@ -41,6 +41,16 @@ algorithm:
   # Mean real multiplicity of the training jets at this truncation (49.44, measured
   # 2026-09-13 on the record cache) plus the two beams.
   nbar: 51.4
+  # A speed knob (configs/algorithm/pelican.yaml): the pair tensor is dense over the 152 slots
+  # while the mean real multiplicity is 49.4, so 89 % of it is padding. Measured on one V100,
+  # batch 128, ms per step at the default 5 x 25/15 point | the largest 5 x 35/35 search point
+  # (2026-09-15): unchunked 192 | 346; one chunk, trimmed to the batch's widest jet, 123 | 223;
+  # two 83 | 142; four 127 | 155; eight 235 | 238. Past two chunks the kernel launches of the
+  # small chunks dominate a dedicated card, but three drivers time-sharing one card hide them
+  # (3 x four chunks aggregate 13.9 steps/s against 11.8 for 3 x two), so four is worth trying
+  # on a shared card, algorithm.n_chunks=4 on the command line. Peak memory 8.4 GB dense, 4.6 at
+  # two chunks, 2.8 at four (15.2 / 8.3 / 5.1 at the largest point), so a trial fits a 1g slice.
+  n_chunks: 2
 
 # Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
