@@ -49,8 +49,7 @@ def real_width(real: torch.Tensor) -> torch.Tensor:
 
 
 def chunk_widths(widths: torch.Tensor, pieces: list[torch.Tensor]) -> list[int]:
-    """Slots every chunk has to carry, at least one, as Python ints."""
-    # One host sync for all the chunks together, rather than one per chunk.
+    """The chunking partitioning, with global syncing."""
     return torch.stack([widths[piece].amax() for piece in pieces]).clamp(min=1).tolist()
 
 
@@ -64,13 +63,11 @@ def invert_permutation(order: torch.Tensor) -> torch.Tensor:
 class InputEmbedding(nn.Module):
     """Spread one Minkowski product over *n_embed* channels of compressed magnitude.
 
-    Channel c returns :math:`\\mathrm{sign}(y)((1+|y|)^a - 1)/a` of the scaled product y,
-    with exponents a spanning [0.0025, 0.25]: the products run over several orders of
-    magnitude in GeV squared and the powers pick out different decades. The signed form
-    is the reference's ``slog`` mode, and it is mandatory here: the plain
-    :math:`(1+y)^a` is NaN on a negative argument, which the random normals of the FLOP
-    counting pass produce. On data the products of future-directed momenta are
-    non-negative and the two agree.
+    This embedding is used as a form of normalisation: soft constituent 4-vector dot
+    products become of comparable magnitude as hard constituent dot products. This is
+    done by applying a Box-Cox transform with a trainable parameter. The network learns
+    the best embedding during its training. The different channels then separate the
+    different momentum scales in the data.
     """
 
     def __init__(self, n_embed: int) -> None:
@@ -81,7 +78,7 @@ class InputEmbedding(nn.Module):
     def forward(self, dots: torch.Tensor) -> torch.Tensor:
         """Embed ``(B, N, N, 1)`` products into ``(B, N, N, n_embed)``.
 
-        f(0) = 0, so the padded pairs stay zero and no mask is needed.
+        f(0) = 0, so the padded pairs stay zero without a mask.
         """
         a = 1e-6 + self.alphas**2
         y = dots * self.scale
@@ -91,16 +88,31 @@ class InputEmbedding(nn.Module):
 class LinEq2to2(nn.Module):
     """The equivariant linear map ``(B, N, N, in_dim) -> (B, N, N, out_dim)``.
 
-    The 15 basis elements are the reference's ``eops_2_to_2``, in its order: 0 x[i,j], 1
-    x[j,i], 2 delta_ij d_i, 3 d_j, 4 d_i, 5 delta_ij c_i, 6 c_j, 7 c_i, 8 delta_ij r_i,
-    9 r_j, 10 r_i, 11 t, 12 delta_ij t, 13 s, 14 delta_ij s, with d the diagonal, r and
-    c the row and column means, t the trace and s the total. Elements 5 to 14 are the
-    ones whose value depends on the multiplicity, and each carries a learnable exponent
-    on :math:`N/\\bar N`, which is what lets a network trained at one multiplicity read
-    another.
+    Maps one 4-vector matrix to another using a mix of the 15 operations that leave this
+    matrix permutation equivariant. The matrix is made of Lorentz invariants.
+    This module is a layer in the PELICAN network. Weight slot k holds basis element k;
+    elements 0 to 9 are averages over the multiplicity and each carries a learned
+    exponent, ``alphas[:, k]``, that rescales it by ``(N / nbar) ** alpha``:
 
-    Written on the compact sources rather than as the reference's ``(B, C, 15, N, N)``
-    stack, which holds 15 ``in_dim``-channel arrays per layer where this holds two.
+    ====  ==========  ==================
+    k     source      placed
+    ====  ==========  ==================
+    0     col means   on the diagonal
+    1     col means   down column j
+    2     col means   along row i
+    3     row means   on the diagonal
+    4     row means   down column j
+    5     row means   along row i
+    6     trace       everywhere
+    7     trace       on the diagonal
+    8     total       everywhere
+    9     total       on the diagonal
+    10    array       as is
+    11    array       transposed
+    12    diagonal    on the diagonal
+    13    diagonal    down column j
+    14    diagonal    along row i
+    ====  ==========  ==================
 
     :param nbar: the mean multiplicity the exponents are measured against.
     """
@@ -108,6 +120,8 @@ class LinEq2to2(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, nbar: float = 49.0) -> None:
         super().__init__()
         self.nbar = nbar
+        # Weight initialisation, He (Kaiming) style.
+        # This is done for stability reasons when stacking multiple layers.
         std = (2.0 / (15 * in_dim)) ** 0.5
         self.weight = nn.Parameter(torch.normal(0.0, std, (in_dim, 15, out_dim)))
         self.alphas = nn.Parameter(torch.rand(in_dim, 10))
@@ -117,33 +131,33 @@ class LinEq2to2(nn.Module):
     def forward(
         self, x: torch.Tensor, pair_mask: torch.Tensor, nobj: torch.Tensor
     ) -> torch.Tensor:
-        """Return the re-masked, LeakyReLU image of the pair tensor *x*."""
+        """Return the re-masked, LeakyReLU image of the pair tensor *x*.
+
+        The 10 aggregation operations are scaled by *scale*, which is a learned scale
+        through *alpha*. When *alpha=0*, the aggretagion operations are means, and
+        when *alpha=1* the aggregation operations are effectively sums.
+        """
         scale = (nobj / self.nbar).view(-1, 1, 1, 1) ** self.alphas
         diag, rows, cols, trace, total = pair_reductions(x, nobj)
         by_row, by_col = self._broadcast_terms(diag, rows, cols, scale)
-        # The bias and the two scalar terms are constant along a row as well, so folding
-        # them here costs two broadcast passes over the whole array instead of four.
         by_row = by_row + self._scalar_terms(trace, total, scale) + self.bias
+
         out = self._array_terms(x) + by_row.unsqueeze(2)
         out += by_col.unsqueeze(1)
-        # In place on the diagonal of a fresh sum: legal for autograd, whose backward
-        # through those adds and matmuls reads none of their outputs. Nothing may come
-        # between the terms and this add: an activation first would leave the diagonal
-        # with an incomplete basis.
         on_diagonal = self._diagonal_terms(diag, rows, cols, trace, total, scale)
         out.diagonal(dim1=1, dim2=2).add_(on_diagonal.transpose(1, 2))
         return torch.where(pair_mask, F.leaky_relu(out, 0.01), 0.0)
 
     def _array_terms(self, x: torch.Tensor) -> torch.Tensor:
-        """Elements 0 and 1, the two mixes of the full array."""
-        return x @ self.weight[:, 0] + (x @ self.weight[:, 1]).transpose(1, 2)
+        """Elements 10 and 11, the two mixes of the full array."""
+        return x @ self.weight[:, 10] + (x @ self.weight[:, 11]).transpose(1, 2)
 
     def _scalar_terms(
         self, trace: torch.Tensor, total: torch.Tensor, scale: torch.Tensor
     ) -> torch.Tensor:
-        """Elements 11 and 13, one value per jet, ``(B, 1, out_dim)``."""
-        mixed = scaled_mix(trace, scale[..., 6], self.weight[:, 11])
-        return mixed + scaled_mix(total, scale[..., 8], self.weight[:, 13])
+        """Elements 6 and 8, one value per jet, ``(B, 1, out_dim)``."""
+        mixed = scaled_mix(trace, scale[..., 6], self.weight[:, 6])
+        return mixed + scaled_mix(total, scale[..., 8], self.weight[:, 8])
 
     def _broadcast_terms(
         self,
@@ -152,13 +166,13 @@ class LinEq2to2(nn.Module):
         cols: torch.Tensor,
         scale: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Elements 4, 7, 10 (constant along a row) and 3, 6, 9 (down a column)."""
-        by_row = diag @ self.weight[:, 4]
-        by_row = by_row + scaled_mix(cols, scale[..., 2], self.weight[:, 7])
-        by_row = by_row + scaled_mix(rows, scale[..., 5], self.weight[:, 10])
-        by_col = diag @ self.weight[:, 3]
-        by_col = by_col + scaled_mix(cols, scale[..., 1], self.weight[:, 6])
-        by_col = by_col + scaled_mix(rows, scale[..., 4], self.weight[:, 9])
+        """Elements 14, 2, 5 (constant along a row) and 13, 1, 4 (down a column)."""
+        by_row = diag @ self.weight[:, 14]
+        by_row = by_row + scaled_mix(cols, scale[..., 2], self.weight[:, 2])
+        by_row = by_row + scaled_mix(rows, scale[..., 5], self.weight[:, 5])
+        by_col = diag @ self.weight[:, 13]
+        by_col = by_col + scaled_mix(cols, scale[..., 1], self.weight[:, 1])
+        by_col = by_col + scaled_mix(rows, scale[..., 4], self.weight[:, 4])
         return by_row, by_col
 
     def _diagonal_terms(
@@ -170,21 +184,21 @@ class LinEq2to2(nn.Module):
         total: torch.Tensor,
         scale: torch.Tensor,
     ) -> torch.Tensor:
-        """Elements 2, 5, 8, 12, 14, the ones living on the diagonal, and its bias."""
-        out = diag @ self.weight[:, 2]
-        out = out + scaled_mix(cols, scale[..., 0], self.weight[:, 5])
-        out = out + scaled_mix(rows, scale[..., 3], self.weight[:, 8])
-        out = out + scaled_mix(trace, scale[..., 7], self.weight[:, 12])
-        out = out + scaled_mix(total, scale[..., 9], self.weight[:, 14])
+        """Elements 12, 0, 3, 7, 9, the ones living on the diagonal, and its bias."""
+        out = diag @ self.weight[:, 12]
+        out = out + scaled_mix(cols, scale[..., 0], self.weight[:, 0])
+        out = out + scaled_mix(rows, scale[..., 3], self.weight[:, 3])
+        out = out + scaled_mix(trace, scale[..., 7], self.weight[:, 7])
+        out = out + scaled_mix(total, scale[..., 9], self.weight[:, 9])
         return out + self.diag_bias
 
 
 class LinEq2to0(nn.Module):
     """The invariant map ``(B, N, N, in_dim) -> (B, out_dim)``, two basis elements.
 
-    The total and the trace, each with its own learnable exponent on :math:`N/\\bar N`.
-    The activation sits on the aggregated values and not on the output, as in the
-    reference's ``activate_agg_out``.
+    The total and the trace, each with its own learnable exponent. These are the only
+    two operations which are permutation equivariant. After this aggregation,
+    permutation equivariance becomes permutation invariance.
     """
 
     def __init__(self, in_dim: int, out_dim: int, nbar: float = 49.0) -> None:
@@ -206,15 +220,7 @@ class LinEq2to0(nn.Module):
 class MaskedBatchNorm(nn.Module):
     """Batch normalisation of a ``(B, N, N, C)`` pair tensor over its real pairs.
 
-    The statistics run over the batch and both particle axes, and the count is the
-    number of real pairs rather than of slots, so a padded jet does not drag the mean
-    towards zero. The padded pairs must be zero on entry, which every layer here
-    guarantees. The running estimates are registered buffers, since the FLOP-counting
-    pass snapshots and restores buffers alone.
-
-    A batch arrives as the list of its chunks, and the statistics run over all of them
-    together, so splitting a batch changes the order the sums are taken in and nothing
-    else.
+    This is such that a padded jet does not artificially have almost 0 mean.
     """
 
     def __init__(
@@ -243,8 +249,7 @@ class MaskedBatchNorm(nn.Module):
     def _batch_statistics(
         self, xs: list[torch.Tensor], masks: list[torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Mean and biased variance of the real pairs, folded into the running
-        estimates."""
+        """Mean and biased variance of the real pairs, into the running estimates."""
         n = sum(mask.sum() for mask in masks)
         mean = sum(x.sum((0, 1, 2)) for x in xs) / n
         var = sum(x.pow(2).sum((0, 1, 2)) for x in xs) / n - mean.pow(2)
@@ -278,12 +283,7 @@ class MessageNet(nn.Module):
 
 
 class Eq2to2Block(nn.Module):
-    """One PELICAN block: a channel mix, dropout, then the equivariant aggregation.
-
-    With ``n_message`` channels the mix is an MLP whose batch normalisation ends it, as
-    in the paper. With ``n_message = 0`` the block keeps a bare normalisation of its
-    input, so that a deep stack without messaging is still normalised.
-    """
+    """One PELICAN block: a channel mix, dropout, then the equivariant aggregation."""
 
     def __init__(
         self, n_hidden: int, n_message: int, dropout: float, nbar: float
@@ -314,9 +314,7 @@ class PELICANClassifier(nn.Module):
 
     The logits are invariant under any permutation of the constituents and, with the
     beams off, under the full Lorentz group; with them on, under SO(2) about the beam
-    axis and the reflection of the beam axis (see the module docstring). The FLOP count
-    this network reports is for ``nconstituents + 2`` fully occupied particles, since
-    the beams are prepended inside ``forward``.
+    axis and the reflection of the beam axis.
 
     :param n_hidden: channels of the pair tensor between blocks.
     :param n_message: channels of the messaging MLP inside a block, 0 to drop it.
