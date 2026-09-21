@@ -32,6 +32,10 @@
 #
 # Extra hydra overrides after the file name are appended to every driver; hydra
 # takes the last of a duplicated override, so they win over the file's value.
+#
+# A block that selects a feature set with data.features must name its study
+# database with hydra.sweeper.storage too, or the whole file is refused before
+# anything is created or launched: see check_features_storage below.
 set -eu
 
 # shellcheck source=scripts/cluster/lib.sh
@@ -120,14 +124,23 @@ logdir="logs/searches/$stem"
 sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 [ "$dry" -eq 1 ] || mkdir -p "$logdir"
 
-# The storage URL is not on the CLI: it lives in the hparams_search config the
-# block selects, or in the base config that one inherits.
+# The storage URL of one config: the hparams_search config a block selects, or the
+# base config that one inherits.
 storage_in_file() {
     grep -oE "^[[:space:]]*storage:[[:space:]]*\S+" "$1" | head -1 | awk '{print $2}' || true
 }
 
+# A block that names its own storage wins over its config, as it does for every
+# duplicated hydra override: a feature-set catalogue names its database on the
+# command line, one study name serving every feature set.
 storage_of() {
     local hp f s d base
+    # Quoted twice in the catalogues: hydra's grammar wants the '=' of '?timeout=600'
+    # inside quotes of its own, and the driver is launched through bash -c, which
+    # strips the outer pair and hands the inner pair through.
+    s=$(field "$1" 'hydra\.sweeper\.storage')
+    s=${s#\"}; s=${s%\"}; s=${s#\'}; s=${s%\'}
+    if [ -n "$s" ]; then printf "%s" "$s"; return 0; fi
     hp=$(field "$1" 'hparams_search')
     f="configs/hparams_search/${hp}.yaml"
     if [ -z "$hp" ] || [ ! -f "$f" ]; then return 0; fi
@@ -145,6 +158,30 @@ EOF
     fi
     printf "%s" "$s"
 }
+
+# A block that chooses a feature set but leaves the storage to the config would
+# append its trials to the four-momentum study of the same name: the study name is
+# built from the regime alone and knows nothing of data.features.
+check_features_storage() {
+    if [ -z "$(field "$1" 'data\.features')" ]; then return 0; fi
+    if [ -n "$(field "$1" 'hydra\.sweeper\.storage')" ]; then return 0; fi
+    echo "error: $(block_label "$1") sets data.features but no hydra.sweeper.storage," >&2
+    echo "       so its trials would silently join the px_py_pz_e study of the same" >&2
+    echo "       name. Give the block (or the command line) a storage URL of its own," >&2
+    echo "       e.g. hydra.sweeper.storage='sqlite:///logs/optuna/hls4ml/<label>/<model>.db?timeout=600'." >&2
+    exit 2
+}
+
+# Checked over every selected block first, so an unpaired one refuses the file
+# rather than leaving half its drivers running against the wrong database.
+i=0
+while IFS= read -r cmd; do
+    i=$((i + 1))
+    selected "$i" "$(block_label "$cmd")" || continue
+    check_features_storage "$cmd${extra:+ $extra}"
+done <<EOF
+$cmds
+EOF
 
 # Create each sqlite study database serially before any driver starts: drivers
 # racing optuna's alembic bootstrap on a missing file die seconds in with

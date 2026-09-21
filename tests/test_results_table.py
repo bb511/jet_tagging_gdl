@@ -153,6 +153,9 @@ def test_the_regime_and_the_feature_list_or_the_subdir_name_the_table(
     embedded = _table(
         tmp_path, augmentation_scheme="none", features=features, subdir="embedded"
     )
+    ablation = _table(
+        tmp_path, augmentation_scheme="none", features=["pt", "eta", "phi"]
+    )
 
     assert baseline.display_method == "baseline"
     assert (
@@ -160,6 +163,10 @@ def test_the_regime_and_the_feature_list_or_the_subdir_name_the_table(
     )
     assert scl.output_path == tmp_path / "px_py_pz_e" / "results_table_symm_loss.csv"
     assert embedded.output_path == tmp_path / "embedded" / "results_table_baseline.csv"
+    # One directory per feature set, so an ablation never appends to the main tables.
+    assert (
+        ablation.output_path == tmp_path / "pt_eta_phi" / "results_table_baseline.csv"
+    )
     # Nothing is created before a row is written, so a search leaves results/ untouched.
     assert not (tmp_path / "px_py_pz_e").exists()
 

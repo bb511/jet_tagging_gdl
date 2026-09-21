@@ -20,7 +20,12 @@ from omegaconf import DictConfig
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 
-from src.data.components.augmentation import Transform, feature_index, make_transform
+from src.data.components.augmentation import (
+    Transform,
+    feature_index,
+    make_transform,
+    rebase_on_kept_axis,
+)
 from src.data.components.dataset import HLS4MLDataset
 from src.symmetry import SCHEMES
 from src.utils.pylogger import RankedLogger
@@ -38,6 +43,10 @@ SUPPORTED_METHODS = ("augmentation", "symm_loss")
 # carrying 32 persistent workers per run at 150 constituents, half of them validating.
 EVAL_WORKERS = 2
 
+# Jets per rebasing chunk. The rebase holds a handful of (jets, constituents) temporaries,
+# which would run to several GB at once for a whole split at 150 constituents.
+REBASE_CHUNK = 65536
+
 warnings.filterwarnings(
     "ignore",
     message=r"Your `IterableDataset` has `__len__` defined\..*",
@@ -47,6 +56,10 @@ warnings.filterwarnings(
 
 class HLS4MLDataModule(LightningDataModule):
     """Load the HF dataset, optionally augmented online and optionally k-folded.
+
+    Every split is rebased on the axis of the constituents kept as it is loaded, because
+    the record measures etarel, phirel, deltaR and ptrel from the untruncated jet's axis,
+    whereas every transform downstream measures them from the batch it is handed.
 
     :param revision: string with a HF repository commit pin; None goes to HEAD.
     :param cache_dir: the local cache path ``paths.base_data_dir``;
@@ -225,6 +238,16 @@ class HLS4MLDataModule(LightningDataModule):
 
         return self.record
 
+    def _load(self, record, split: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the jets and the labels of *split*, rebased on the kept axis."""
+        data = record.load(split)
+        # Cloned because the record's own tensor is not ours to write into, and rebased a
+        # chunk at a time so the temporaries stay off the peak at 150 constituents.
+        x, scales = data.x.clone(), self.norm_scales
+        for chunk in x.split(REBASE_CHUNK):
+            chunk.copy_(rebase_on_kept_axis(chunk, self.feature_names, scales))
+        return x, data.y
+
     def _setup_fit(self, record, indices: list[int] | None) -> None:
         """Build the training and validation datasets for the current fold."""
         x_train, y_train, x_val, y_val = self._fit_arrays(record)
@@ -245,16 +268,16 @@ class HLS4MLDataModule(LightningDataModule):
         log.info(f"Fit: x_train {tuple(x_train.shape)}, x_val {tuple(x_val.shape)}")
 
     def _setup_validate(self, record, indices: list[int] | None) -> None:
-        split = record.load("validation")
-        x_val = _reduce(split.x, indices, self._keeps_full_width)
-        self.data_val = self._dataset(x_val, split.y)
+        x_val, y_val = self._load(record, "validation")
+        x_val = _reduce(x_val, indices, self._keeps_full_width)
+        self.data_val = self._dataset(x_val, y_val)
 
     def _setup_test(self, record, indices: list[int] | None) -> None:
-        split = record.load("test")
+        x_test, y_test = self._load(record, "test")
         keep_full = self._keeps_full_width or self.keep_full_features_at_test
-        x_test = _reduce(split.x, indices, keep_full)
-        self.data_test = self._dataset(x_test, split.y)
-        log.info(f"Test: x_test {tuple(x_test.shape)}, y_test {tuple(split.y.shape)}")
+        x_test = _reduce(x_test, indices, keep_full)
+        self.data_test = self._dataset(x_test, y_test)
+        log.info(f"Test: x_test {tuple(x_test.shape)}, y_test {tuple(y_test.shape)}")
 
     @property
     def _keeps_full_width(self) -> bool:
@@ -280,11 +303,12 @@ class HLS4MLDataModule(LightningDataModule):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """The training and validation tensors for the current fold, with
         normalisation."""
-        train, val = record.load("train"), record.load("validation")
+        x_train, y_train = self._load(record, "train")
+        x_val, y_val = self._load(record, "validation")
         if self.n_folds <= 1:
-            return train.x, train.y, val.x, val.y
+            return x_train, y_train, x_val, y_val
 
-        x_all, y_all = torch.cat([train.x, val.x]), torch.cat([train.y, val.y])
+        x_all, y_all = torch.cat([x_train, x_val]), torch.cat([y_train, y_val])
         log.info(f"Pooled training and validation splits: {len(x_all)} jets")
 
         return self._kfold_split(x_all, y_all)

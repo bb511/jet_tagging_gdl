@@ -31,18 +31,18 @@ Do not edit these, always regenerate.
 Here is the whole results pipeline:
 
 ```
-run<model>_search.sh
+hls4ml[/<features>]/run<model>_search.sh
   |  cluster/submit_search.sh
   v
-logs/optuna/hls4ml/<model>.db              the sweeps' only durable record
-  |  optuna/fetch_best_params.py           -> configs/experiment/hls4ml/<model>_<N>.yaml
-  |  optuna/make_train_catalogues.py
+logs/optuna/hls4ml[/<features>]/<model>.db   the sweeps' only durable record
+  |  optuna/fetch_best_params.py             -> configs/experiment/hls4ml/<model>_<N>.yaml
+  |  optuna/make_train_catalogues.py [--features pt,eta,phi]
   v
-run<model>_train.sh
+hls4ml[/<features>]/run<model>_train.sh
   |  cluster/submit_train.sh
   v
-logs/train/hls4ml/<model>/nconst<N>/<variant>/checkpoint_manifest.json
-  |  cluster/submit_eval.sh  (run<model>_eval.sh)
+logs/train/hls4ml[/<features>]/<model>/nconst<N>/<variant>/checkpoint_manifest.json
+  |  cluster/submit_eval.sh  (hls4ml[/<features>]/run<model>_eval.sh)
   v
 results/<features>/results_table_{baseline,augmentation,symm_loss}.csv
   (LorentzNet and PELICAN: results/embedded/results_table_baseline.csv)
@@ -70,10 +70,10 @@ bash scripts/cluster/submit_train.sh --dry-run --only baseline --gpu 0 scripts/h
 | `cluster/submit_search_ngt.sh`     | Several workers of one study on a pod, through `submit_search.sh`.                  |
 | `cluster/submit_train.sh`          | A train catalogue: nohup queue, `--folds` fan-out, or one submitit job per block.   |
 | `cluster/submit_eval.sh`           | The same for an eval catalogue, with the manifest rewrite.                          |
-| `cluster/sweep_status.py`          | Trials per study against the target, live workers, the command to finish it.        |
+| `cluster/sweep_status.py`          | Trials against the target, live workers, the command to finish it; `--features`.    |
 | `cluster/lib.sh`                   | Shared by the submitters: parser, `--only`, `.env`, GPU pinning, the rewrite.       |
 | `optuna/fetch_best_params.py`      | A study's best trial as hydra overrides and as YAML; `--all`, `--csv`.              |
-| `optuna/make_train_catalogues.py`  | Study databases to `run*_{train,eval}.sh`; `--dry-run`, `--transferred`.            |
+| `optuna/make_train_catalogues.py`  | Studies to `run*_{train,eval}.sh`; `--features`, `--dry-run`, `--transferred`.      |
 | `analysis/common.py`               | Shared by the four: table reading, fold parsing, display names; not a script.       |
 | `analysis/compare_to_baseline.py`  | Joins a run table with a baseline table into a deltas table; the reference is free. |
 | `analysis/make_figures.py`         | Deltas against a baseline, one figure per regime; `--features <dir> --deltas <p>`.  |

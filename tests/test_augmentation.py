@@ -4,6 +4,8 @@ import pytest
 import torch
 
 from src.data.components.augmentation import (
+    AXIS_COLUMNS,
+    _apply,
     apply_random_lorentz,
     apply_random_so2,
     apply_random_so3,
@@ -13,15 +15,70 @@ from src.data.components.augmentation import (
     feature_index,
     get_norm_scale,
     make_transform,
+    rebase_on_kept_axis,
     sample_haar_so3_rot_matrices,
     sample_so2_rot_matrices,
 )
 from src.symmetry import GROUPS
-from tests.conftest import FOUR_MOMENTUM, RECORD_COLUMNS, jets
+from tests.conftest import FOUR_MOMENTUM, MASS, RECORD_COLUMNS, jets
+
+# jets() fills the leading slots of every jet and pads the rest.
+N_REAL = 5
+AXIS_INDICES = [feature_index(RECORD_COLUMNS, name) for name in AXIS_COLUMNS]
+UNTOUCHED = [i for i in range(len(RECORD_COLUMNS)) if i not in AXIS_INDICES]
 
 
 def _mass_squared(batch: torch.Tensor) -> torch.Tensor:
     return batch[..., 3] ** 2 - (batch[..., :3] ** 2).sum(-1)
+
+
+def _wrapped(delta: torch.Tensor) -> torch.Tensor:
+    return (delta + math.pi) % (2 * math.pi) - math.pi
+
+
+def _real(batch: torch.Tensor, name: str) -> torch.Tensor:
+    return batch[:, :N_REAL, feature_index(RECORD_COLUMNS, name)]
+
+
+def _axis_columns(
+    px: torch.Tensor,
+    py: torch.Tensor,
+    pz: torch.Tensor,
+    d_eta: float = 0.0,
+    d_phi: float = 0.0,
+    pt_factor: float = 1.0,
+) -> dict[int, torch.Tensor]:
+    # The four jet-relative columns in radians and GeV, from the axis of the real slots.
+    # The offsets displace that axis, standing in for the record's untruncated one.
+    jet = [p[:, :N_REAL].sum(dim=1, keepdim=True) for p in (px, py, pz)]
+    etarel = compute_eta(px, py, pz) - compute_eta(*jet) - d_eta
+    phirel = _wrapped(compute_phi(px, py) - compute_phi(*jet[:2]) - d_phi)
+    ptrel = compute_pt(px, py) / (pt_factor * compute_pt(*jet[:2]))
+    deltaR = torch.sqrt(etarel**2 + phirel**2)
+    return dict(zip(AXIS_INDICES, (etarel, phirel, deltaR, ptrel)))
+
+
+def _record_batch(
+    seed: int = 0, mass: float = MASS
+) -> tuple[torch.Tensor, dict[str, float]]:
+    # A batch in the record's layout: the cylindrical columns filled from the momenta, the
+    # jet-relative four from a displaced axis, and every column divided by a scale of its
+    # own, as the record stores them.
+    batch = jets(n_columns=len(RECORD_COLUMNS), mass=mass, seed=seed)
+    px, py, pz = batch[..., 0], batch[..., 1], batch[..., 2]
+    columns = {
+        feature_index(RECORD_COLUMNS, "pt"): compute_pt(px, py),
+        feature_index(RECORD_COLUMNS, "eta"): compute_eta(px, py, pz),
+        feature_index(RECORD_COLUMNS, "phi"): compute_phi(px, py),
+    }
+    columns |= _axis_columns(px, py, pz, d_eta=0.3, d_phi=0.2, pt_factor=1.1)
+    for index, values in columns.items():
+        batch[..., index] = values
+
+    scales = {name: 1.5 + 0.5 * i for i, name in enumerate(RECORD_COLUMNS)}
+    batch /= torch.tensor([scales[name] for name in RECORD_COLUMNS])
+    batch[:, N_REAL:] = 0.0
+    return batch, scales
 
 
 def test_an_so2_rotation_turns_the_jet_about_the_beam() -> None:
@@ -110,3 +167,58 @@ def test_the_factory_builds_one_transform_per_group_and_refuses_none() -> None:
     # 'none' is a legitimate value of data.augmentation_scheme, but not a transform.
     with pytest.raises(ValueError, match="lorentz_iso"):
         make_transform("none", FOUR_MOMENTUM)
+
+
+def test_the_rebase_moves_the_axis_columns_onto_the_kept_constituents() -> None:
+    batch, scales = _record_batch()
+    px, py, pz = (batch[..., i] * scales[RECORD_COLUMNS[i]] for i in (0, 1, 2))
+    expected = _axis_columns(px, py, pz)
+
+    rebased = rebase_on_kept_axis(batch, RECORD_COLUMNS, scales)
+
+    for index, values in expected.items():
+        scaled = values[:, :N_REAL] / scales[RECORD_COLUMNS[index]]
+        assert torch.allclose(rebased[:, :N_REAL, index], scaled, atol=1e-5)
+    assert torch.equal(rebased[..., UNTOUCHED], batch[..., UNTOUCHED])
+    assert torch.equal(rebased[:, N_REAL:], batch[:, N_REAL:])
+    # Idempotent: the second pass finds the axis the columns already refer to.
+    assert torch.equal(rebase_on_kept_axis(rebased, RECORD_COLUMNS, scales), rebased)
+
+
+def test_after_the_rebase_the_identity_reproduces_every_column_it_rewrites() -> None:
+    # Without it the two definitions of the jet axis disagree: by 0.3 in eta here, and on
+    # 70 to 85 % of the entries of the record at 16 constituents.
+    batch, scales = _record_batch()
+    rebased = rebase_on_kept_axis(batch, RECORD_COLUMNS, scales)
+    identity = torch.eye(4).expand(rebased.shape[0], 4, 4)
+
+    applied, _, _ = _apply(rebased, identity, RECORD_COLUMNS, scales)
+
+    assert torch.allclose(applied, rebased, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "scheme, mass, unchanged, moved",
+    [
+        ("so2", MASS, ("pt", "eta", "etarel", "phirel"), ("phi",)),
+        # A beam boost shifts the pseudorapidity rigidly only for a massless constituent,
+        # and the axis etarel is measured from is massive either way, so etarel moves too.
+        ("lorentz", 0.0, ("pt", "phi", "phirel"), ("eta",)),
+        ("so3", MASS, (), ("pt", "eta", "phi")),
+    ],
+)
+def test_the_rebased_columns_move_under_a_group_only_where_they_must(
+    scheme: str, mass: float, unchanged: tuple[str, ...], moved: tuple[str, ...]
+) -> None:
+    torch.manual_seed(0)
+    batch, scales = _record_batch(mass=mass)
+    rebased = rebase_on_kept_axis(batch, RECORD_COLUMNS, scales)
+
+    transformed = make_transform(scheme, RECORD_COLUMNS, scales)(rebased)
+
+    for name in unchanged:
+        before, after = _real(rebased, name), _real(transformed, name)
+        assert torch.allclose(before, after, atol=1e-4), name
+    for name in moved:
+        shift = (_real(transformed, name) - _real(rebased, name)).abs().max()
+        assert shift > 1e-3, name

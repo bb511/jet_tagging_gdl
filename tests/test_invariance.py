@@ -27,14 +27,25 @@ class _StubModule(torch.nn.Module):
         return x[:, :, :5].sum(dim=1)
 
 
+class _CylindricalModule(_StubModule):
+    # The network of a [pt, eta, phi] run: it reads those three of the record's columns off
+    # a full-width test batch, which is the layout the probe has to transform.
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x[:, :, [5, 7, 10]].sum(dim=1)
+
+
 def _logits(predicted: list[int]) -> torch.Tensor:
     return torch.eye(3)[torch.tensor(predicted)]
 
 
 def _probed(
-    callback: InvarianceMetricCallback, module: _StubModule
+    callback: InvarianceMetricCallback,
+    module: _StubModule,
+    datamodule: StubDataModule | None = None,
 ) -> dict[str, float]:
-    trainer = SimpleNamespace(datamodule=StubDataModule(features=RECORD_COLUMNS))
+    trainer = SimpleNamespace(
+        datamodule=datamodule or StubDataModule(features=RECORD_COLUMNS)
+    )
     callback.on_test_start(trainer, module)
     batch = (jets(32, 6, 6, n_columns=len(RECORD_COLUMNS)), labels(32))
     callback.on_test_batch_end(trainer, module, None, batch, 0)
@@ -128,3 +139,15 @@ def test_the_probe_logs_one_key_per_group_and_family_and_nothing_besides() -> No
         key(group, family) for group in GROUPS for family in FAMILIES
     }
     assert len(logged) == 20
+
+
+def test_the_probe_reads_three_columns_off_the_full_width_test_batches() -> None:
+    # keep_full_features_at_test is load-bearing under a reduced feature list: the probe
+    # needs the momenta to transform, and the model reads its own columns in forward().
+    datamodule = StubDataModule(["pt", "eta", "phi"], keep_full_features_at_test=True)
+
+    logged = _probed(InvarianceMetricCallback(), _CylindricalModule(), datamodule)
+
+    assert set(logged) == {
+        key(group, family) for group in GROUPS for family in FAMILIES
+    }

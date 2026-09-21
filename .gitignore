@@ -8,6 +8,7 @@ CLAUDE.md
 # Ignore sublime text editor configuration.
 .sublime/
 sftp-config.json
+remote-sync-config.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

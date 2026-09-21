@@ -73,6 +73,18 @@ def test_every_search_config_offers_a_non_empty_space(
     assert ("algorithm.symm_loss_weight" in params) == search.endswith("_scl_optuna")
 
 
+def test_a_feature_list_on_the_command_line_reaches_data_and_algorithm(
+    tmp_path: Path,
+) -> None:
+    # The feature-set ablations are one override: nbr_feats is ${len:${data.features}}, so
+    # the network's input width follows the list rather than a second knob of its own.
+    cfg = _composed(tmp_path, "experiment=hls4ml/mlp_16", "data.features=[pt,eta,phi]")
+
+    assert cfg.algorithm.nbr_feats == 3
+    assert hydra.utils.instantiate(cfg.data).features == ["pt", "eta", "phi"]
+    assert hydra.utils.instantiate(cfg.algorithm).hparams.nbr_feats == 3
+
+
 def test_the_study_name_follows_the_regime(tmp_path: Path) -> None:
     for method, scheme in (("augmentation", "none"), ("symm_loss", "so2")):
         cfg = _composed(

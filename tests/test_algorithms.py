@@ -57,6 +57,7 @@ def _algorithm(
     nconstituents: int = 8,
     method: str = "augmentation",
     group: str = "none",
+    features: list[str] = FOUR_MOMENTUM,
     **overrides: object,
 ) -> JetTaggingModule:
     # The algorithm configs interpolate ${data.*}, so a data node of our own stands in.
@@ -67,7 +68,7 @@ def _algorithm(
                 "method": method,
                 "augmentation_scheme": group,
                 "transform_kwargs": {"lorentz_eta_max": 2.0},
-                "features": FOUR_MOMENTUM,
+                "features": features,
             }
         }
     )
@@ -117,6 +118,32 @@ def test_every_algorithm_records_hparams_and_reduces_a_full_width_batch(
     # Under keep_full_features_at_test the probe's batches are 16 columns wide.
     _attach(module, StubDataModule(keep_full_features_at_test=True))
     assert module(jets(4, 8, 6, len(RECORD_COLUMNS))).shape == (4, 5)
+
+
+# The embedded models read the four-momenta and nothing else, so neither takes a feature
+# list of its own.
+@pytest.mark.parametrize("name", [name for name in MODELS if name not in EMBEDDED])
+def test_a_reduced_feature_list_is_read_at_either_batch_width(name: str) -> None:
+    features = ["pt", "eta", "phi"]
+    module = _algorithm(name, features=features)
+    datamodule = StubDataModule(features, keep_full_features_at_test=True)
+    # The momenta stand in for the three columns: the network sees a width, not a meaning.
+    narrow = jets(8, 8, 6)[..., :3]
+
+    assert module.hparams.nbr_feats == 3
+    _attach(module, datamodule)
+
+    # pt, eta and phi sit at 5, 7 and 10 of the record's 16 columns.
+    assert module.model_feature_indices == [5, 7, 10]
+    assert module.model_step((narrow, labels(8)))["logits"].shape == (8, 5)
+    assert module(jets(4, 8, 6, len(RECORD_COLUMNS))).shape == (4, 5)
+
+    # The SCL transforms the momenta of a full-width batch and reduces it in forward().
+    scl = _algorithm(name, method="symm_loss", group="so2", features=features)
+    wide = jets(8, 8, 6, len(RECORD_COLUMNS))
+    out = _attach(scl, datamodule).model_step((wide, labels(8)))
+
+    assert "symm_loss" in out
 
 
 def test_a_reordered_or_incomplete_feature_list_is_refused_by_name() -> None:

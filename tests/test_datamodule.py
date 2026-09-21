@@ -7,12 +7,16 @@ from hydra import initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 
 from src.data import hls4ml_datamodule as datamodule_module
+from src.data.components.augmentation import compute_eta
 from src.data.components.dataset import HLS4MLDataset
 from src.data.hls4ml_datamodule import HLS4MLDataModule, compose_record_config
 from tests.conftest import RECORD_COLUMNS, ROOT, labels
 
 SPLIT_SIZES = {"train": 40, "validation": 20, "test": 16}
 NCONSTITUENTS = 8
+ETAREL, PHIREL = RECORD_COLUMNS.index("j1_etarel"), RECORD_COLUMNS.index("j1_phirel")
+# px, py, pz, e, pt, eta and phi: what the rebase leaves as the record stored it.
+ABSOLUTE_COLUMNS = [0, 1, 2, 3, 5, 7, 10]
 
 
 class FakeRecord:
@@ -79,6 +83,48 @@ def _datamodule(**overrides) -> HLS4MLDataModule:
         "pin_memory": False,
     }
     return HLS4MLDataModule(**(defaults | overrides))
+
+
+def _blank_the_jet_relative_columns(record: FakeRecord) -> None:
+    # Zero on disk, so whatever the splits carry afterwards is the rebase's own work.
+    loaded = record.load
+
+    def load(split: str) -> SimpleNamespace:
+        data = loaded(split)
+        data.x[..., [ETAREL, PHIREL]] = 0.0
+        return data
+
+    record.load = load
+
+
+def _kept_axis_etarel(x: torch.Tensor, scales: dict[str, float]) -> torch.Tensor:
+    # In the record's own normalisation, and over every slot: the fake record pads none.
+    px, py, pz = (x[..., i] * scales[RECORD_COLUMNS[i]] for i in (0, 1, 2))
+    jet = [p.sum(dim=1, keepdim=True) for p in (px, py, pz)]
+    return (compute_eta(px, py, pz) - compute_eta(*jet)) / scales["j1_etarel"]
+
+
+def test_every_split_comes_out_of_setup_on_the_axis_of_the_constituents_kept(
+    record: FakeRecord,
+) -> None:
+    _blank_the_jet_relative_columns(record)
+    datamodule = _datamodule(features=RECORD_COLUMNS)
+    datamodule.prepare_data()
+    datamodule.setup()
+    splits = {
+        "train": datamodule.data_train,
+        "validation": datamodule.data_val,
+        "test": datamodule.data_test,
+    }
+
+    for split, dataset in splits.items():
+        stored = FakeRecord().load(split).x
+        expected = _kept_axis_etarel(stored, datamodule.norm_scales)
+        assert torch.allclose(dataset.X[..., ETAREL], expected, atol=1e-6), split
+        assert (dataset.X[..., PHIREL] != 0.0).all(), split
+        assert torch.equal(
+            dataset.X[..., ABSOLUTE_COLUMNS], stored[..., ABSOLUTE_COLUMNS]
+        ), split
 
 
 @pytest.mark.parametrize(

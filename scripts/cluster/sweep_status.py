@@ -6,6 +6,10 @@ whether a driver is still alive to produce the rest. Prints a table, then the la
 
     python3 scripts/cluster/sweep_status.py            # table + commands
     python3 scripts/cluster/sweep_status.py --commands # commands only
+    python3 scripts/cluster/sweep_status.py --features pt,eta,phi  # one feature set
+
+Each feature set other than the four-momentum keeps its catalogues, its study databases
+and its driver logs in a subdirectory of its own, named by the joined feature list.
 
 Liveness comes from the driver log, not from the trial counts, since a dead driver leaves its
 last batch marked RUNNING forever.
@@ -193,7 +197,9 @@ def _rows_of(
     """One row per study of a single catalogue: its trial count and its workers'
     state."""
     db = f"{db_root}/{model}.db"
-    logdir = f"logs/searches/hls4ml_{path.stem}"
+    # submit_search.sh names a driver log directory after the catalogue's parent
+    # directory and its stem, which is 'hls4ml_<stem>' for the four-momentum files.
+    logdir = f"logs/searches/{path.parent.name}_{path.stem}"
     rows = []
     for study, (idx, target, label) in blocks(script).items():
         done = complete_of(db, study, writable=writable)
@@ -217,10 +223,23 @@ def _rows_of(
     return rows
 
 
-def collect(repo: Path, db_root: str, writable: bool) -> list[dict]:
-    """One row per search block found under scripts/hls4ml/."""
+def features_label(spec: str | None) -> str | None:
+    """The directory one feature set owns, joined as the results table joins it."""
+    return "_".join(name.strip() for name in spec.split(",")) if spec else None
+
+
+def db_root_of(label: str | None) -> str:
+    """Where that feature set's study databases are; the default tree has no label."""
+    return f"logs/optuna/hls4ml/{label}" if label else "logs/optuna/hls4ml"
+
+
+def collect(
+    repo: Path, db_root: str, writable: bool, label: str | None = None
+) -> list[dict]:
+    """One row per search block found under scripts/hls4ml/[<feature label>/]."""
     rows: list[dict] = []
-    for path in sorted(repo.glob("scripts/hls4ml/run*_search.sh")):
+    under = f"{label}/" if label else ""
+    for path in sorted(repo.glob(f"scripts/hls4ml/{under}run*_search.sh")):
         match = STEM_RE.match(path.stem)
         if not match:
             print(f"skipping unrecognised file name: {path.name}", file=sys.stderr)
@@ -288,6 +307,11 @@ def _parse_args() -> argparse.Namespace:
         help="read DBs from here instead of logs/optuna/hls4ml (use "
         "copies when a crashed driver left a hot -journal)",
     )
+    parser.add_argument(
+        "--features",
+        help="report the studies of this comma-separated feature set, e.g. "
+        "'pt,eta,phi', instead of the four-momentum ones",
+    )
     return parser.parse_args()
 
 
@@ -298,9 +322,9 @@ def main() -> int:
     # table instead of an error.
     repo = find_repo_root(Path(__file__).resolve().parent)
     os.chdir(repo)
-    rows = collect(
-        repo, args.db_root or "logs/optuna/hls4ml", writable=bool(args.db_root)
-    )
+    label = features_label(args.features)
+    db_root = args.db_root or db_root_of(label)
+    rows = collect(repo, db_root, writable=bool(args.db_root), label=label)
     if not args.commands:
         print_table(rows)
     print_commands(rows)

@@ -10,6 +10,11 @@ Whichever of pt, eta, phi, etarel, phirel, deltaR and ptrel it carries are rewri
 and erel, etarot, phirot, costheta and costhetarel are left as found. Therefore, a
 feature list holding those would have stale values. Padded constituents are all-zero
 rows: the transform does not apply to these.
+
+Of the rewritten columns, etarel, phirel, deltaR and ptrel are measured from the jet
+axis, which a transform reads off the constituents it is handed, whereas the record
+reads it off the untruncated jet. :func:`rebase_on_kept_axis` puts a stored batch on the
+former once, at load time, so the two definitions cannot drift apart.
 """
 
 import math
@@ -20,6 +25,10 @@ import torch
 from src.symmetry import GROUPS
 
 Transform = Callable[[torch.Tensor], torch.Tensor]
+
+# The columns measured from the jet axis, and so the ones a truncation moves: keeping
+# the leading N constituents changes the axis every one of them refers to.
+AXIS_COLUMNS = ("etarel", "phirel", "deltaR", "ptrel")
 
 
 def compute_pt(px: torch.Tensor, py: torch.Tensor) -> torch.Tensor:
@@ -196,6 +205,25 @@ def _apply(
         px, py, pz, active
     )
     return _write(x, names, norm_scales, columns, active & (e > 0)), columns, active
+
+
+def rebase_on_kept_axis(
+    x: torch.Tensor,
+    feature_names: Sequence[str],
+    norm_scales: dict[str, float] | None = None,
+) -> torch.Tensor:
+    """Return *x* with `AXIS_COLUMNS` measured from the constituents present.
+
+    The record stores those four against the untruncated jet's axis, while a transform
+    recomputes them from what it is handed, so the stored and the transformed values
+    disagree after a truncation even under the identity. Everything else, the momenta
+    and the absolute pt, eta and phi among them, is returned untouched.
+    """
+    p4, active = _read_four_momenta(x, feature_names, norm_scales)
+    _, px, py, pz = p4.unbind(dim=-1)
+    columns = _derived_columns(px, py, pz, active)
+    kept = {name: columns[name] for name in AXIS_COLUMNS}
+    return _write(x, feature_names, norm_scales, kept, active)
 
 
 def apply_random_so2(
