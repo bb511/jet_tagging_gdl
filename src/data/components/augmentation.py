@@ -6,15 +6,13 @@ acted on by one matrix per jet, and written back. Four-vectors are ordered [E, p
 pz] and the beam is the z axis.
 
 A batch must contain px, py, pz and e, bare or with the record's ``j1_`` prefix.
-Whichever of pt, eta, phi, etarel, phirel, deltaR and ptrel it carries are rewritten,
+Whichever of pt, eta, phi, etarel, phirel, deltaR and ptrel it has are rewritten,
 and erel, etarot, phirot, costheta and costhetarel are left as found. Therefore, a
 feature list holding those would have stale values. Padded constituents are all-zero
 rows: the transform does not apply to these.
 
 Of the rewritten columns, etarel, phirel, deltaR and ptrel are measured from the jet
-axis, which a transform reads off the constituents it is handed, whereas the record
-reads it off the untruncated jet. :func:`rebase_on_kept_axis` puts a stored batch on the
-former once, at load time, so the two definitions cannot drift apart.
+axis. This is computed based on the constituent values present in the data.
 """
 
 import math
@@ -26,8 +24,7 @@ from src.symmetry import GROUPS
 
 Transform = Callable[[torch.Tensor], torch.Tensor]
 
-# The columns measured from the jet axis, and so the ones a truncation moves: keeping
-# the leading N constituents changes the axis every one of them refers to.
+# The columns measured from the jet axis.
 AXIS_COLUMNS = ("etarel", "phirel", "deltaR", "ptrel")
 
 
@@ -212,12 +209,12 @@ def rebase_on_kept_axis(
     feature_names: Sequence[str],
     norm_scales: dict[str, float] | None = None,
 ) -> torch.Tensor:
-    """Return *x* with `AXIS_COLUMNS` measured from the constituents present.
+    """Return *x* with `AXIS_COLUMNS` measured from the present constituents.
 
-    The record stores those four against the untruncated jet's axis, while a transform
-    recomputes them from what it is handed, so the stored and the transformed values
-    disagree after a truncation even under the identity. Everything else, the momenta
-    and the absolute pt, eta and phi among them, is returned untouched.
+    The record stores those four against the untruncated jet's axis.
+    A transform recomputes them from the present constituents.
+    Everything else, the momenta and the absolute pt, eta and phi among them,
+    is returned untouched.
     """
     p4, active = _read_four_momenta(x, feature_names, norm_scales)
     _, px, py, pz = p4.unbind(dim=-1)
@@ -244,10 +241,9 @@ def apply_random_so3(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Rotate every jet by its own Haar-random matrix.
 
-    The draw is not restricted to the detector: about 3.5 % of the rotated jets carry a
-    constituent beyond ``|eta| = 3``, accepted because SO(3) is the control for a group that is no
-    symmetry of the data, whose rotated jets are unphysical throughout, and because a restriction
-    would make the measure jet-dependent.
+    The draw is not restricted to the detector: about 3.5 % of the rotated jets have a
+    constituent beyond ``|eta| = 3``, accepted because SO(3) is the control for a group
+    that is not a symmetry of the data.
 
     :return: the rotated batch and the matrices it was rotated by, shape (jets, 3, 3).
     """

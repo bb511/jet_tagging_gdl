@@ -37,14 +37,10 @@ REPO_ID = "fastmachinelearning/hls4ml_lhc_jets_150p"
 # How a run acquires a symmetry. The schemes it can do so under are `src.symmetry.SCHEMES`.
 SUPPORTED_METHODS = ("augmentation", "symm_loss")
 
-# Loader processes for validation and test. They only gather, where the training loader may also
-# run the online transform, and every worker is a fork whose private memory grows to hundreds of
-# MB as Python's refcounting breaks copy-on-write. Four NGT pods were OOMKilled on 2026-09-09
-# carrying 32 persistent workers per run at 150 constituents, half of them validating.
+# Loader processes for validation and test.
 EVAL_WORKERS = 2
 
-# Jets per rebasing chunk. The rebase holds a handful of (jets, constituents) temporaries,
-# which would run to several GB at once for a whole split at 150 constituents.
+# Jets per rebasing chunk.
 REBASE_CHUNK = 65536
 
 warnings.filterwarnings(
@@ -241,8 +237,6 @@ class HLS4MLDataModule(LightningDataModule):
     def _load(self, record, split: str) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the jets and the labels of *split*, rebased on the kept axis."""
         data = record.load(split)
-        # Cloned because the record's own tensor is not ours to write into, and rebased a
-        # chunk at a time so the temporaries stay off the peak at 150 constituents.
         x, scales = data.x.clone(), self.norm_scales
         for chunk in x.split(REBASE_CHUNK):
             chunk.copy_(rebase_on_kept_axis(chunk, self.feature_names, scales))
