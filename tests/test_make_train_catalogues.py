@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,12 @@ def _render(task: str, dbs: Path, layout: Layout) -> str:
     return make_train_catalogues.render("mlp", task, dbs, layout)
 
 
+def _manifest_paths(catalogue: str) -> set[str]:
+    # Whole tokens: the run directory is a prefix of its manifest file's path, so a
+    # substring test would accept either form.
+    return set(re.findall(r"checkpoint_manifest_path=(\S+)", catalogue))
+
+
 def _empty_dbs(tmp_path: Path) -> Path:
     # No study database, so every block is transferred from its experiment config and
     # the render depends on nothing outside the repository.
@@ -49,11 +56,11 @@ def test_a_feature_set_puts_its_override_and_its_own_run_dirs_in_every_block(
 
     assert train.count(OVERRIDE) == len(GRID)
     assert evaluate.count(OVERRIDE) == len(GRID)
+    manifests = _manifest_paths(evaluate)
     for nconst, label in GRID:
         cell = f"mlp/nconst{nconst}/{label}"
         assert f"hydra.run.dir=logs/train/hls4ml/{LABEL}/{cell}" in train
-        manifest = f"logs/train/hls4ml/{LABEL}/{cell}/checkpoint_manifest.json"
-        assert f"checkpoint_manifest_path={manifest}" in evaluate
+        assert f"logs/train/hls4ml/{LABEL}/{cell}" in manifests
         assert f"hydra.run.dir=logs/eval/hls4ml/{LABEL}/{cell}" in evaluate
     # Through lib.sh's own parser: the submitters must still find the whole grid.
     assert make_train_catalogues.count_commands(LIB, train) == len(GRID)
@@ -100,6 +107,6 @@ def test_the_transferred_ablation_of_a_feature_set_carries_both_marks(
 
     run = f"logs/train/hls4ml/{LABEL}/mlp/nconst16/baseline_transferred"
     assert f"hydra.run.dir={run}" in train
-    assert f"checkpoint_manifest_path={run}/checkpoint_manifest.json" in evaluate
+    assert run in _manifest_paths(evaluate)
     assert train.count(OVERRIDE) == len(GRID)
     assert evaluate.count(OVERRIDE) == len(GRID)

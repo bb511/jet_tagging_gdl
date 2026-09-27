@@ -208,11 +208,16 @@ def train_block(
 def eval_block(
     model: str, nconst: int, variant: Variant, trial: Trial | None, layout: Layout
 ) -> list[str]:
-    """One evaluation command, reading the manifest its training block wrote."""
+    """One evaluation command, reading the manifests its training block wrote.
+
+    The path names the training's run directory, not its manifest file: src/eval.py
+    then merges the main run's manifest with every fold_<i>/ one, where the file would
+    test the main run alone.
+    """
     label = variant[0]
     train_dir = layout.run_dir("train", model, nconst, label)
     body = _common_body(model, nconst, variant, trial, layout) + [
-        f"checkpoint_manifest_path={train_dir}/checkpoint_manifest.json",
+        f"checkpoint_manifest_path={train_dir}",
         "results_table.invariance_metric=wasserstein",
         "trainer=gpu",
         "trainer.devices=[0]",

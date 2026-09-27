@@ -128,11 +128,13 @@ pin_gpu() {
 
 # Turn a single-run command into a multirun one. Hydra writes a multirun job to
 # <sweep.dir>/<job number>, so an eval block's manifest path has to gain the same
-# '/0/' that the train job's checkpoints did.
+# '/0' that the train job's run directory did, whether it names that directory or
+# the manifest file in it.
 to_sweep_dir() {
     printf "%s" "$1" |
         sed -E 's#hydra\.run\.dir=#hydra.sweep.dir=#' |
-        sed -E 's#checkpoint_manifest_path=([^ ]*)/checkpoint_manifest\.json#checkpoint_manifest_path=\1/0/checkpoint_manifest.json#'
+        sed -E -e 's#(checkpoint_manifest_path=[^ ]*)/checkpoint_manifest\.json#\1/0/checkpoint_manifest.json#' -e t \
+            -e 's#(checkpoint_manifest_path=[^ ]*[^/ ])/?#\1/0#'
 }
 
 # $1 = cluster, $2 = slurm time limit in minutes (the launcher's own default of

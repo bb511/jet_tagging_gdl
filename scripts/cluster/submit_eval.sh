@@ -1,10 +1,11 @@
 #!/bin/bash
 # Run the evaluation blocks of a run*_eval.sh catalogue.
 #
-# Each block tests every checkpoint its training run's manifest names and
-# appends one row to the results table. Local mode queues the selected blocks
-# behind a single nohup, one GPU at a time; cluster mode gives each its own
-# submitit driver.
+# Each block names its training's run directory, from which src/eval.py merges
+# the main run's manifest with every fold_<i>/ one; it tests every checkpoint
+# they name and appends one row to the results table. Local mode queues the
+# selected blocks behind a single nohup, one GPU at a time; cluster mode gives
+# each its own submitit driver.
 #
 # A cluster training ran as a multirun and wrote to <sweep.dir>/0, so --cluster
 # rewrites the manifest path to match: cluster-trained checkpoints have to be
@@ -56,6 +57,12 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# A block names either a run directory or one manifest file, which src/eval.py
+# then tests alone.
+has_manifest() {
+    [ -f "$1" ] || [ -f "$1/checkpoint_manifest.json" ]
+}
+
 usage="usage: submit_eval.sh [--list|--dry-run] [--only sel] [--gpu i] [--cluster c]"
 usage="$usage [--timeout-min n] [--hf-cache p] <run*_eval.sh> [overrides...]"
 file=${1:?$usage}
@@ -79,7 +86,7 @@ if [ "$list" -eq 1 ]; then
         i=$((i + 1))
         manifest=$(field "$cmd" 'checkpoint_manifest_path')
         printf "%-3s %-34s %-8s %s\n" "$i" "$(block_label "$cmd")" \
-            "$([ -f "$manifest" ] && echo yes || echo MISSING)" "$manifest"
+            "$(has_manifest "$manifest" && echo yes || echo MISSING)" "$manifest"
     done <<EOF
 $cmds
 EOF
@@ -136,7 +143,7 @@ while IFS= read -r cmd; do
     # A missing manifest means the training has not finished, the normal state
     # of most of a catalogue: report it and evaluate the ready blocks anyway.
     manifest=$(field "$cmd" 'checkpoint_manifest_path')
-    if [ "$dry" -eq 0 ] && [ ! -f "$manifest" ]; then
+    if [ "$dry" -eq 0 ] && ! has_manifest "$manifest"; then
         echo "warning: no manifest yet for $label ($manifest)" >&2
         n_missing=$((n_missing + 1))
     fi

@@ -25,7 +25,7 @@
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
-#     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst16/baseline/checkpoint_manifest.json \
+#     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst16/baseline \
 #     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
@@ -44,7 +44,7 @@
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
-#     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst50/baseline/checkpoint_manifest.json \
+#     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst50/baseline \
 #     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
@@ -63,7 +63,7 @@
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
-#     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst150/baseline/checkpoint_manifest.json \
+#     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst150/baseline \
 #     results_table.invariance_metric=wasserstein \
 #     trainer=gpu \
 #     trainer.devices=[0] \
