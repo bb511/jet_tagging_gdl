@@ -22,7 +22,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-MODELS = ["deepsets", "mlp", "jetformer", "lorentznet", "pelican"]
+MODELS = ["deepsets", "mlp", "jetformer", "lorentznet", "pelican", "pelican_lorentz"]
 NCONSTITUENTS = [16, 50, 150]
 
 # (label, data.method, data.augmentation_scheme), in the order every catalogue,
@@ -37,9 +37,9 @@ VARIANTS = [
     ("symm_lorentz", "symm_loss", "lorentz"),
 ]
 
-# LorentzNet and PELICAN embed the symmetry rather than acquiring it, so they are the
-# architectures trained at baseline alone, never under augmentation or the SCL.
-EMBEDDED = {"lorentznet", "pelican"}
+# LorentzNet and PELICAN (with and without the beams) embed the symmetry rather than acquiring
+# it, so they are the architectures trained at baseline alone, never under augmentation or the SCL.
+EMBEDDED = {"lorentznet", "pelican", "pelican_lorentz"}
 
 VARIANTS_OF = {
     model: VARIANTS[:1] if model in EMBEDDED else VARIANTS for model in MODELS
@@ -352,8 +352,8 @@ def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
 def models_of(layout: Layout) -> list[str]:
     """The architectures a layout has catalogues for.
 
-    LorentzNet and PELICAN read the four-momenta themselves, so no feature set other
-    than that one has anything to run for them.
+    The embedded architectures read the four-momenta themselves, so no feature set
+    other than that one has anything to run for them.
     """
     if layout.features is None:
         return MODELS

@@ -14,7 +14,9 @@ The available directories contain the following scripts:
 
 The `run<model>_{search,train,eval}.sh` in `hls4ml` are lists of commented-out `python3 src/train.py` and `src/eval.py` blocks.
 Running a file does nothing unless you uncomment the command that you want to be ran.
-DeepSets, MLP and JetFormer carry 21 blocks each, the three constituent counts over the seven regimes; LorentzNet and PELICAN embed the symmetry rather than acquiring it, so they are run at baseline only and carry three.
+DeepSets, MLP and JetFormer have 21 blocks each, the three constituent counts over the seven regimes.
+LorentzNet, PELICAN, LGATr, LLoCA, and vector neurons have embedded symmetries and are run with baseline only: three blocks each.
+`runpelican_lorentz_search.sh` carries two: the 150-constituent row is not searched and its experiment config holds the beams-on optimum instead.
 
 The submitters in `cluster/` parse these files.
 You can select entire categories of commands to run with `--only nconst150` or `--only symm_so2`.
@@ -45,7 +47,7 @@ logs/train/hls4ml[/<features>]/<model>/nconst<N>/<variant>/checkpoint_manifest.j
   |  cluster/submit_eval.sh  (hls4ml[/<features>]/run<model>_eval.sh)
   v
 results/<features>/results_table_{baseline,augmentation,symm_loss}.csv
-  (LorentzNet and PELICAN: results/embedded/results_table_baseline.csv)
+  (LorentzNet and the two PELICANs: results/embedded/results_table_baseline.csv)
   |  analysis/compare_to_baseline.py <run table> <baseline table>
   v
 results/<features>/deltas_<run>_vs_<baseline>.csv

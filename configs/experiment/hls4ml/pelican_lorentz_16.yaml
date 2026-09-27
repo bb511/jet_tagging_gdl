@@ -1,0 +1,41 @@
+# @package _global_
+# PELICAN without the beams at 16 constituents, at the algorithm defaults: a starting point, not
+# tuned values. The beams-on twin is pelican_16.yaml, whose measured memory and step times carry
+# over (the pair tensor is 16 x 16 here rather than 18 x 18). Symmetry-embedded, so it runs the
+# baseline regime only; data.method and data.augmentation_scheme still take CLI overrides, but
+# anything else is outside the study design.
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: pelican_lorentz
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "pelican_lorentz", "nconst-16"]
+
+experiment_name: hls4ml_pelican_lorentz_nconst16
+
+data:
+  nconstituents: 16
+  batch_size: 2048
+  n_folds: 5
+
+# fp32, not the trainer's 16-mixed: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6
+# GeV^2, above the fp16 maximum of 65 504, before the input embedding compresses them.
+trainer:
+  max_epochs: 200
+  precision: 32
+
+# TF32 matmuls on Ampere and later, as in pelican_16.yaml; a no-op on a V100.
+extras:
+  matmul_precision: high
+
+algorithm:
+  # Mean real multiplicity of the training jets at this truncation (15.98, measured
+  # 2026-09-13 on the record cache); no beams to add.
+  nbar: 16.0
+
+# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
+results_table:
+  subdir: embedded

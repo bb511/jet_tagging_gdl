@@ -50,6 +50,8 @@ ARCHITECTURE_KEYS = {
         "n_chunks",
     },
 }
+# The same network with the beams switched off, so the same keys.
+ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
 
 
 def _algorithm(
@@ -463,11 +465,12 @@ def test_the_compact_pair_layer_matches_a_stacked_basis() -> None:
     eye = torch.eye(n_particles).double().view(1, n_particles, n_particles, 1)
 
     with torch.no_grad():
-        # The reference scales the last ten basis elements alone: ops[1] to ops[5] read the
-        # array and its diagonal, whose values do not depend on the multiplicity.
-        alphas = torch.cat([torch.zeros(3, 5).double(), layer.alphas], dim=1)
+        # The layer keeps the ten multiplicity-scaled averages in weight slots 0 to 9 and the
+        # array and its diagonal, which carry no exponent, in 10 to 14: the reference's
+        # ops[6] to ops[15] and then ops[1] to ops[5], its stack rotated by five.
+        alphas = torch.cat([layer.alphas, torch.zeros(3, 5).double()], dim=1)
         scale = (nobj.view(-1, 1, 1, 1, 1) / 6.0) ** alphas.view(1, 3, 15, 1, 1)
-        ops = _stacked_basis(x, nobj) * scale
+        ops = _stacked_basis(x, nobj).roll(-5, dims=2) * scale
         out = torch.einsum("cbs,ncbij->nijs", layer.weight, ops) + layer.bias
         # Both biases go in before the activation, the diagonal one on the diagonal alone.
         out = torch.nn.functional.leaky_relu(out + eye * layer.diag_bias, 0.01)

@@ -62,7 +62,7 @@ def test_every_search_config_offers_a_non_empty_space(
     search: str, tmp_path: Path
 ) -> None:
     assert set(SEARCHES) == EXPECTED_SEARCHES
-    model = search.split("_")[0]
+    model = search.removesuffix("_optuna").removesuffix("_scl")
     cfg = _composed(
         tmp_path, f"experiment=hls4ml/{model}_16", f"hparams_search=hls4ml/{search}"
     )
@@ -99,3 +99,19 @@ def test_the_study_name_follows_the_regime(tmp_path: Path) -> None:
         ]
 
         assert study_name == f"deepsets_nconst16_{method}_{scheme}"
+
+
+def test_the_beamless_pelican_differs_from_the_beams_on_one_in_the_switch_alone() -> None:
+    # pelican_lorentz.yaml is a standalone copy of pelican.yaml, because the algorithm tests load
+    # these files with OmegaConf alone and a defaults list would not resolve there; this is what
+    # keeps the copy from drifting.
+    beams, lorentz = (
+        OmegaConf.to_container(OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml"))
+        for name in ("pelican", "pelican_lorentz")
+    )
+    assert (beams["add_beams"], lorentz["add_beams"]) == (True, False)
+    assert (beams["name"], lorentz["name"]) == ("pelican", "pelican_lorentz")
+    for cfg in (beams, lorentz):
+        for key in ("name", "add_beams", "nbar"):
+            cfg.pop(key)
+    assert beams == lorentz

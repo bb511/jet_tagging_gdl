@@ -27,9 +27,9 @@ needs_record = pytest.mark.skipif(
     reason="Export HF_HUB_CACHE to the record's hub snapshot to run the data tests.",
 )
 
-MODELS = ("deepsets", "mlp", "jetformer", "lorentznet", "pelican")
+MODELS = ("deepsets", "mlp", "jetformer", "lorentznet", "pelican", "pelican_lorentz")
 # The symmetry-embedded class, trained in the baseline regime alone and never under the SCL.
-EMBEDDED = ("lorentznet", "pelican")
+EMBEDDED = ("lorentznet", "pelican", "pelican_lorentz")
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.
 RECORD_COLUMNS = (

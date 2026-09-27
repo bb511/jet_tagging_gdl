@@ -74,7 +74,12 @@ sources rather than the reference's `(B, C, 15, N, N)` stack, one masked BatchNo
 none of the dict inputs, config strings, IRC weighting, factorisation or spurion machinery. Two
 beam four-vectors are appended inside the network, so the exact symmetry is SO(2) about the beam;
 the other groups are measured by the probe. It is the second symmetry-embedded architecture
-beside LorentzNet, run in the baseline regime alone. The rest of this section is the record of
+beside LorentzNet, run in the baseline regime alone. Since 2026-09-27 it is run twice, with the
+beams as `pelican` and without them as `pelican_lorentz`: the same module and network, switched by
+`configs/algorithm/pelican_lorentz.yaml` (a standalone copy of `pelican.yaml` with `add_beams:
+false`, kept in step by `tests/test_configs.py`), with its own experiment configs, search config
+and catalogues; the 150-constituent row is not searched and its experiment config carries the
+beams-on optimum. The rest of this section is the record of
 the vendored copy that was removed at the refactor, kept as history.
 
 Permutation-invariant, Lorentz-invariant aggregator network: pairwise Lorentz invariants of

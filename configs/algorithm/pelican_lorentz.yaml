@@ -1,0 +1,50 @@
+# PELICAN without the beams: configs/algorithm/pelican.yaml with add_beams false, everything else
+# identical (tests/test_configs.py keeps the two in step). Reading the constituents' Minkowski
+# products alone, the network is invariant under the full Lorentz group, where the beams leave
+# SO(2) about the beam axis, so the two rows differ in the embedded group and in nothing else.
+# Per-nconstituents values in configs/experiment/hls4ml/pelican_lorentz_<N>.yaml.
+_target_: src.algorithms.pelican.PELICAN
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: pelican_lorentz
+
+nconstituents: ${data.nconstituents}
+nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+output_dim: 5
+
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
+# Scripted in the baseline regime alone, so both resolve to augmentation/none.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+symm_loss_metric: l2
+transform_kwargs: ${data.transform_kwargs}
+
+n_hidden: 25
+n_message: 15
+n_blocks: 5
+dropout: 0.025
+# Normalises the (N/nbar)^alpha aggregator scaling: the mean multiplicity alone, since no beams
+# are counted, so it is set per experiment rather than shared.
+nbar: 47.0
+add_beams: false # the one switch: no beam four-vectors, so the full Lorentz group is exact
+n_chunks: 1 # speed knob, see pelican.yaml; set per experiment
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1.0e-3
+  weight_decay: 5.0e-3
+
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 1.0e-4
+  monitor: val/acc
+  interval: epoch
+  frequency: 1
+
+compile: false

@@ -43,6 +43,7 @@ MODEL_DISPLAY = {
     "jetformer": "JetFormer",
     "lorentznet": "LorentzNet",
     "pelican": "PELICAN",
+    "pelican_lorentz": "PELICAN (Lorentz)",
     "transformer": "JetFormer",
 }
 
