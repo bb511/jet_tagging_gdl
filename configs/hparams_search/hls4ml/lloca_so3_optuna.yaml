@@ -26,13 +26,15 @@ hydra:
       n_startup_trials: 20
 
     # The references' tagging default (8 blocks, 8 heads, 8x0n+2x1n per head, mlp_factor 2,
-    # frames-net hidden 32) lies inside the space. lr and weight_decay follow JetFormer's ranges,
-    # the transformer of this study.
+    # frames-net hidden 32) lies inside the space, whose corner (12 blocks at hidden 128, mlp_factor
+    # 4, 2.4 M parameters) fits a 1g MIG slice at N=16 by the V100 pre-flight of 2026-09-28; the
+    # wider heads first proposed (up to 16x0n+4x1n, 9.5 M) did not. lr and weight_decay follow
+    # JetFormer's ranges, the transformer of this study.
     params:
       algorithm.num_blocks: choice(2, 4, 6, 8, 12)
       algorithm.num_heads: choice(2, 4, 8)
-      algorithm.attn_scalars: choice(4, 8, 16)
-      algorithm.attn_vectors: choice(1, 2, 4)
+      algorithm.attn_scalars: choice(4, 8)
+      algorithm.attn_vectors: choice(1, 2)
       algorithm.mlp_factor: choice(2, 4)
       algorithm.dropout: choice(0.0, 0.1, 0.2)
       algorithm.framesnet_hidden: choice(16, 32, 64)

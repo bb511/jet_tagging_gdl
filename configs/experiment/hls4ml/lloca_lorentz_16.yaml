@@ -14,9 +14,9 @@ tags: ["hls4ml", "lloca_lorentz", "nconst-16"]
 
 experiment_name: hls4ml_lloca_lorentz_nconst16
 
-# Set by a V100 pre-flight at the largest search point (12 blocks, 8 heads, 16x0n+4x1n per head,
-# mlp_factor 4, frames-net hidden 64, 9.5M parameters; 2026-09-28): 8.9 GiB and 0.31 s/step at
-# 2048 jets, which fits a full card but not a 1g MIG slice.
+# Set by a V100 pre-flight at the largest search point (12 blocks, 8 heads, 8x0n+2x1n per head,
+# mlp_factor 4, frames-net hidden 64, 2.4M parameters; 2026-09-28, reserved memory): 5.5 GiB and
+# 0.15 s/step at 2048 jets, which fits a 1g MIG slice.
 data:
   nconstituents: 16
   batch_size: 2048
