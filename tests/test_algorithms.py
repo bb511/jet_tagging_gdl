@@ -60,11 +60,27 @@ ARCHITECTURE_KEYS = {
         "add_beams",
         "add_time",
     },
+    "lloca_lorentz": {
+        "frames",
+        "num_blocks",
+        "num_heads",
+        "attn_scalars",
+        "attn_vectors",
+        "mlp_factor",
+        "dropout",
+        "framesnet_hidden",
+        "mass_reg",
+        "units",
+    },
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
 # The same network with the spurion tokens switched off, so the same keys.
 ARCHITECTURE_KEYS["lgatr_slim_lorentz"] = ARCHITECTURE_KEYS["lgatr_slim"]
+# The same network with another frames class, so the same keys.
+ARCHITECTURE_KEYS["lloca_z"] = ARCHITECTURE_KEYS["lloca_lorentz"]
+ARCHITECTURE_KEYS["lloca_so2"] = ARCHITECTURE_KEYS["lloca_lorentz"]
+ARCHITECTURE_KEYS["lloca_so3"] = ARCHITECTURE_KEYS["lloca_lorentz"]
 
 
 def _algorithm(
@@ -422,6 +438,115 @@ def test_lgatr_slim_is_blind_to_the_sign_of_the_beam_axis() -> None:
 
     with torch.no_grad():
         assert torch.allclose(module(batch), module(flipped), atol=1e-10)
+
+
+def test_lloca_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:
+    # This is the check of the packed frames-net call and the key-padding mask
+    # together: the edge convolution of the frames-net has no mask of its own, so a
+    # padded slot that reached it would move the frame of every real constituent.
+    narrow = _algorithm("lloca_lorentz", nconstituents=8).eval()
+    wide = _algorithm("lloca_lorentz", nconstituents=9).eval()
+    wide.load_state_dict(narrow.state_dict(), strict=True)
+    batch = jets(4, 8, 6)
+    scales = {"px": 2.0, "py": 3.0, "pz": 4.0, "e": 5.0}
+
+    with torch.no_grad():
+        physical = narrow(batch)
+        padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
+        narrow.norm_scales = scales
+        narrow._on_features_resolved()
+        normalised = narrow(
+            batch / torch.tensor([scales[name] for name in FOUR_MOMENTUM])
+        )
+
+    assert torch.allclose(physical, padded, atol=1e-5)
+    assert torch.allclose(physical, normalised, atol=1e-3)
+
+
+def _lloca(frames: str, nconstituents: int = 16) -> JetTaggingModule:
+    # float64 throughout: forward() rounds the batch to float32, but the
+    # de-normalisation against the float64 buffer promotes everything after it.
+    torch.manual_seed(0)
+    module = _algorithm("lloca_lorentz", nconstituents=nconstituents, frames=frames)
+    return module.eval().double()
+
+
+# The probe groups each frames class makes exact. The polar-decomposition frames of the
+# lorentz row co-transform under the whole group. The z frames boost along the beam and
+# rotate about it, so they fix its axis, which a rotation off it or a boost across it
+# moves. The so2 frames fix the axis and the time direction, which any boost moves, and
+# the so3 frames the time direction alone.
+LLOCA_EXACT = {
+    "lorentz": GROUPS,
+    "z": ("so2", "lorentz"),
+    "so2": ("so2",),
+    "so3": ("so2", "so3"),
+}
+
+
+@pytest.mark.parametrize(
+    "frames, scheme",
+    [(frames, scheme) for frames, exact in LLOCA_EXACT.items() for scheme in exact],
+)
+def test_lloca_is_invariant_under_the_group_its_frames_respect(
+    frames: str, scheme: str
+) -> None:
+    # Each constituent is read in its own frame and the attention carries its messages
+    # from frame to frame as tensors, so the logits hold under whatever the frames
+    # co-transform with. Every test constituent carries 20 GeV of mass, far above the
+    # mass floor of the frames-net, so its lift, which does not commute with a boost,
+    # never fires here.
+    assert _shift_under(_lloca(frames), scheme) < 1e-4
+
+
+@pytest.mark.parametrize(
+    "frames, scheme",
+    [
+        (frames, scheme)
+        for frames, exact in LLOCA_EXACT.items()
+        for scheme in GROUPS
+        if scheme not in exact
+    ],
+)
+def test_lloca_frames_break_every_group_they_do_not_respect(
+    frames: str, scheme: str
+) -> None:
+    # The frames hold the beam axis or the time direction fixed, so a transform that
+    # moves it is not undone by them: the local momenta the backbone reads move, and
+    # LLoCa measures that group at test time as the augmented models do.
+    # Read against the SO(2) shift of the same network rather than an absolute bar, as
+    # for PELICAN and L-GATr-slim: at initialisation SO(2) sits at the float32 floor of
+    # the cast in forward(), about 1e-8, and the broken groups move the logits by 0.1 to
+    # 4 times the largest of them.
+    module = _lloca(frames)
+    assert _shift_under(module, scheme) > 1000 * _shift_under(module, "so2")
+
+
+def test_lloca_standardises_its_frames_net_on_the_first_training_batch() -> None:
+    # A training standardises the edge attributes of the frames-net on its first batch,
+    # and eval.py reads the statistics back from the checkpoint. Construction and the
+    # eval-mode forwards before the first training batch (the model summary, the sanity
+    # check) must leave them unset, and the checkpoint must carry them, or the evaluated
+    # network would read its edges on another scale than the trained one did.
+    module = _algorithm("lloca_lorentz")
+    block = module.net.framesnet.equivectors.block
+    # The FLOP count at construction runs in training mode, but restores the buffers.
+    assert not block.edge_inited
+
+    module.eval()
+    with torch.no_grad():
+        module(jets(4, 8, 6))
+    assert not block.edge_inited
+
+    module.train()
+    with torch.no_grad():
+        module(jets(4, 8, 6))
+    assert block.edge_inited
+    assert block.edge_std.item() != 1.0
+
+    state = module.state_dict()
+    for name in ("edge_inited", "edge_mean", "edge_std"):
+        assert f"net.framesnet.equivectors.block.{name}" in state
 
 
 def _ragged(multiplicities: list[int], n_slots: int = 16) -> torch.Tensor:

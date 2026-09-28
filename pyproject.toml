@@ -42,6 +42,10 @@ dependencies = [
     # The L-GATr-slim network itself (src/algorithms/components/lgatr_slim.py wraps it);
     # padding goes through a dense mask, so none of its attention extras is needed.
     "lgatr (>=2.0.0,<3)",
+    # The LLoCa frames-net, local frames and tensorial transformer
+    # (src/algorithms/components/lloca.py wraps them); its frames-net is built on
+    # torch-geometric, which comes along with it.
+    "lloca (>=2.0.0,<3)",
 ]
 
 [dependency-groups]

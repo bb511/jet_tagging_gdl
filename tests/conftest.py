@@ -36,6 +36,10 @@ MODELS = (
     "pelican_lorentz",
     "lgatr_slim",
     "lgatr_slim_lorentz",
+    "lloca_lorentz",
+    "lloca_z",
+    "lloca_so2",
+    "lloca_so3",
 )
 # The symmetry-embedded class, trained in the baseline regime alone and never under the SCL.
 EMBEDDED = (
@@ -44,6 +48,10 @@ EMBEDDED = (
     "pelican_lorentz",
     "lgatr_slim",
     "lgatr_slim_lorentz",
+    "lloca_lorentz",
+    "lloca_z",
+    "lloca_so2",
+    "lloca_so3",
 )
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.

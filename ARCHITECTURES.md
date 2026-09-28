@@ -1,12 +1,14 @@
 # Removed architectures
 
 This repository carried eight architecture modules before the refactor to the `adl1t` layout
-and carries six now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 2026-09-13 as a
-clean rewrite) and L-GATr-slim (added on 2026-09-28 and run in two rows, `lgatr_slim` with the
-spurion tokens and `lgatr_slim_lorentz` without). PELICAN, a plain Transformer encoder, a
-Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the refactor; nano-PELICAN,
-which existed as configuration only, went with them, and so did the permutation check. This
-file records what each was, why it went, and what putting it back involves.
+and carries seven now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 2026-09-13 as
+a clean rewrite), L-GATr-slim and LLoCa. The last two were added on 2026-09-28: L-GATr-slim
+runs in two rows, `lgatr_slim` with the spurion tokens and `lgatr_slim_lorentz` without, and
+LLoCa in four, one per frames class (`lloca_lorentz`, `lloca_z`, `lloca_so2` and `lloca_so3`).
+PELICAN, a plain Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were
+removed at the refactor; nano-PELICAN, which existed as configuration only, went with them, and
+so did the permutation check. This file records what each was, why it went, and what putting it
+back involves.
 
 The last commit that holds all of it is `a667b346`. Any file named below is recovered with
 `git show a667b346:<path>`.
@@ -150,6 +152,49 @@ The reflection p_z -> -p_z only swaps the two beam tokens, and attention does no
 order of its tokens, so the reflection is exact too. Both rows are one module and one network:
 `lgatr_slim_lorentz.yaml` is a standalone copy of `lgatr_slim.yaml` with the two switches off,
 kept in step by `tests/test_configs.py`, as for PELICAN.
+
+## LLoCa
+
+Added on 2026-09-28 as the fourth symmetry-embedded architecture, and the second whose network is
+not written here: LLoCa, Lorentz local canonicalisation (arXiv:2505.20280 for the method,
+arXiv:2508.14898 for its use in particle physics), comes from the pip package `lloca` 2.0.0, which
+supplies the frames-net, the frames and the LLoCa-Transformer. Our own code is the wrapper
+`src/algorithms/components/lloca.py` and the `JetTaggingModule` subclass
+`src/algorithms/lloca.py`, which reads `[px, py, pz, e]` and hands the network (E, px, py, pz) in
+GeV. The four rows are named `lloca_<row>`, with `<row>` one of `lorentz`, `z`, `so2` and `so3`.
+Around the code sit the four algorithm configs `configs/algorithm/lloca_<row>.yaml`, the twelve
+experiment configs `configs/experiment/hls4ml/lloca_<row>_{16,50,150}.yaml`, the four search
+configs `configs/hparams_search/hls4ml/lloca_<row>_optuna.yaml` and the twelve catalogues
+`scripts/hls4ml/runlloca_<row>_{search,train,eval}.sh`. The wrapper divides the constituents by
+`units` (20 GeV) and runs the frames-net over the real constituents alone, in the package's packed
+layout, because its edge convolution takes no padding mask. Each constituent's four-momentum is
+then canonicalised into its local frame and handed to the LLoCa-Transformer with a dense boolean
+key-padding mask and the jet momentum as the reference of `preserve_variance`; the logits are the
+mean of its outputs over the real constituents. A mass regulator lifts every constituent lighter
+than `mass_reg` (2.5e-4 in those units, the references' 5 MeV) to that mass inside the frames-net
+alone; the lift does not commute with a boost, so the boost-exact rows keep a residual of relative
+size m²/(2p²), below 1e-4 for every constituent above 0.35 GeV. The frames-net receives the packed
+constituents in float64, as the references feed it: in float32 the mass floor sits below the
+rounding of |p|^2 and the massless constituents' pair masses fall to zero, where the frames-net's
+sqrt has no finite gradient, which turned the first smoke run's logits to NaN. The backbone and
+the experiments run in fp32, as the references train without mixed precision.
+
+The frames class sets the exact group, and the switch `frames` picks the class, one per row.
+`LearnedPDFrames`, the class of the `lloca_lorentz` row, predicts a general Lorentz
+transformation for every constituent, so every probe group is exact for it. The other three
+classes restrict the frames to a subgroup, and the probe measures every group outside it.
+`LearnedZFrames` (`lloca_z`) allows a rotation about the beam composed with a boost along it,
+SO(2)×SO(1,1), so SO(3) and the isotropic boost are measured. `LearnedSO3Frames` (`lloca_so3`)
+allows rotations alone, so the boost along the beam and the isotropic boost are measured, and
+`LearnedSO2Frames` (`lloca_so2`) allows rotations about the beam alone, so SO(3) and both boosts
+are. The logits are the mean over the constituents, not the output of a global token as in
+L-GATr-slim: a token with a fixed identity frame does not transform with the jet, so the
+tensorial attention would treat it as a spurion and the row would lose its exact group. The four
+rows are one module and one network: `lloca_z.yaml`, `lloca_so2.yaml` and `lloca_so3.yaml` are
+standalone copies of `lloca_lorentz.yaml` that differ in `name` and `frames` alone, kept in step
+by `tests/test_configs.py`. A jet of one or two constituents gives the frames-net too few
+independent vectors, and the package regularises such frames with random noise, so these jets
+may leave a small floor on the flip rates even under an exact group.
 
 ## nano-PELICAN
 

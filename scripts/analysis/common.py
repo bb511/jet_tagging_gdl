@@ -46,6 +46,10 @@ MODEL_DISPLAY = {
     "pelican_lorentz": "PELICAN (Lorentz)",
     "lgatr_slim": "L-GATr-slim",
     "lgatr_slim_lorentz": "L-GATr-slim (Lorentz)",
+    "lloca_lorentz": "LLoCa (Lorentz)",
+    "lloca_z": "LLoCa (SO(2)xSO(1,1))",
+    "lloca_so2": "LLoCa (SO(2))",
+    "lloca_so3": "LLoCa (SO(3))",
     "transformer": "JetFormer",
 }
 

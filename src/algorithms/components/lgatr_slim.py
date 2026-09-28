@@ -1,15 +1,9 @@
 """L-GATr-slim (arXiv:2512.17011), the scalars-and-vectors variant of L-GATr.
 
-L-GATr itself is arXiv:2405.14806. The network is supplied by the ``lgatr`` package, and
+L-GATr is arXiv:2405.14806. The network is supplied by the ``lgatr`` package, and
 this module adds only the tagger wrapper around it.
 
-Token layout. Every jet becomes one token sequence: first a fixed global token (a zero
-four-vector with scalar flag 1), then the spurion tokens (fixed reference four-vectors
-at unit scale, scalar 0), then the constituents (four-momenta divided by ``units``,
-scalar 0). Every token carries one four-vector channel and one scalar channel.
-
 The metric is (+, -, -, -) and the momenta are in GeV.
-
 Batches must be de-normalised before they reach this module.
 
 Symmetry. With no spurions the logits are invariant under the full Lorentz group. The
@@ -25,10 +19,7 @@ from torch import nn
 
 
 def spurion_vectors(add_beams: bool, add_time: bool) -> torch.Tensor:
-    """Reference four-vectors [E, px, py, pz], ``(k, 4)`` with k in {0, 1, 2, 3}.
-
-    The time vector comes first when present, then the beams along +z and -z.
-    """
+    """Reference four-vectors [E, px, py, pz], ``(k, 4)`` with k in {0, 1, 2, 3}."""
     rows = [[1.0, 0.0, 0.0, 0.0]] if add_time else []
     if add_beams:
         rows += [[1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, -1.0]]

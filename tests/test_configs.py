@@ -134,3 +134,22 @@ def test_the_lorentz_lgatr_differs_from_the_spurion_one_in_the_switches_alone() 
         for key in ("name", "add_beams", "add_time"):
             cfg.pop(key)
     assert spurion == lorentz
+
+
+def test_the_lloca_rows_differ_in_name_and_frames_alone() -> None:
+    # lloca_z.yaml, lloca_so2.yaml and lloca_so3.yaml are standalone copies of
+    # lloca_lorentz.yaml, because the algorithm tests load these files with OmegaConf
+    # alone and a defaults list would not resolve there; this is what keeps the copies
+    # from drifting.
+    rows = {
+        row: OmegaConf.to_container(
+            OmegaConf.load(ROOT / "configs" / "algorithm" / f"lloca_{row}.yaml")
+        )
+        for row in ("lorentz", "z", "so2", "so3")
+    }
+    for row, cfg in rows.items():
+        assert (cfg["name"], cfg["frames"]) == (f"lloca_{row}", row)
+        for key in ("name", "frames"):
+            cfg.pop(key)
+    for cfg in rows.values():
+        assert cfg == rows["lorentz"]

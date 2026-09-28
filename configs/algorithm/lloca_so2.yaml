@@ -1,0 +1,52 @@
+# LLoCa with rotations about the beam for frames: configs/algorithm/lloca_lorentz.yaml with frames
+# so2, everything else identical (tests/test_configs.py keeps the four rows in step). SO(2) about
+# the beam is exact and every other probe group, the beam boost included, is measured.
+# Per-nconstituents values in configs/experiment/hls4ml/lloca_so2_<N>.yaml.
+_target_: src.algorithms.lloca.LLoCa
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: lloca_so2
+
+nconstituents: ${data.nconstituents}
+nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+output_dim: 5
+
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
+# Scripted in the baseline regime alone, so both resolve to augmentation/none.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+symm_loss_metric: l2
+transform_kwargs: ${data.transform_kwargs}
+
+# The frames class, which sets the exact group: lorentz (the full Lorentz group), z (SO(2) about
+# the beam times boosts along it), so2 (SO(2) about the beam) or so3 (SO(3)).
+frames: so2
+# The tagging-guide's size-0 LLoCa-Transformer: 8x0n+2x1n per head, so 128 channels.
+num_blocks: 8
+num_heads: 8
+attn_scalars: 8 # scalar channels of each attention head
+attn_vectors: 2 # four-vector channels of each attention head
+mlp_factor: 2
+dropout: 0.0
+framesnet_hidden: 32 # width of the two hidden layers of the frames-net's edge MLP
+mass_reg: 2.5e-4 # in units: the references' 5 MeV, the frames-net's mass floor; never searched
+units: 20.0 # GeV per unit, the L-GATr-slim row's scale; never searched
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 3.0e-4
+  weight_decay: 1.0e-2
+
+# One cycle over the whole run, hence stepped per batch. total_steps is injected by
+# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.OneCycleLR
+    _partial_: true
+    max_lr: ${algorithm.optimizer.lr}
+    pct_start: 0.2
+  interval: step
+  frequency: 1
+
+compile: false
