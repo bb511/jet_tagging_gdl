@@ -115,3 +115,22 @@ def test_the_beamless_pelican_differs_from_the_beams_on_one_in_the_switch_alone(
         for key in ("name", "add_beams", "nbar"):
             cfg.pop(key)
     assert beams == lorentz
+
+
+def test_the_lorentz_lgatr_differs_from_the_spurion_one_in_the_switches_alone() -> None:
+    # lgatr_slim_lorentz.yaml is a standalone copy of lgatr_slim.yaml, because the
+    # algorithm tests load these files with OmegaConf alone and a defaults list would
+    # not resolve there; this is what keeps the copy from drifting.
+    spurion, lorentz = (
+        OmegaConf.to_container(
+            OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
+        )
+        for name in ("lgatr_slim", "lgatr_slim_lorentz")
+    )
+    assert (spurion["add_beams"], spurion["add_time"]) == (True, True)
+    assert (lorentz["add_beams"], lorentz["add_time"]) == (False, False)
+    assert (spurion["name"], lorentz["name"]) == ("lgatr_slim", "lgatr_slim_lorentz")
+    for cfg in (spurion, lorentz):
+        for key in ("name", "add_beams", "add_time"):
+            cfg.pop(key)
+    assert spurion == lorentz

@@ -1,0 +1,50 @@
+# L-GATr-slim, the scalars-and-vectors Lorentz-equivariant transformer (arXiv:2512.17011), its
+# network supplied by the lgatr package. Defaults here, per-nconstituents values in
+# configs/experiment/hls4ml/lgatr_slim_<N>.yaml.
+_target_: src.algorithms.lgatr_slim.LGATrSlim
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: lgatr_slim
+
+nconstituents: ${data.nconstituents}
+nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+output_dim: 5
+
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
+# L-GATr-slim is scripted in the baseline regime alone, so both resolve to augmentation/none.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+symm_loss_metric: l2
+transform_kwargs: ${data.transform_kwargs}
+
+# The size of the published slim tagger, about 2.0M parameters.
+num_blocks: 12
+hidden_v_channels: 32 # four-vector channels of every token
+hidden_s_channels: 96 # scalar channels of every token
+num_heads: 8
+mlp_ratio: 4
+dropout: 0.0
+units: 20.0 # GeV per unit, the references' scale; never searched
+# The spurion switches: the time vector and the two lightlike beams as extra tokens, the
+# published tagging setting, which leaves SO(2) about the beam exact.
+add_beams: true
+add_time: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 3.0e-4
+  weight_decay: 1.0e-2
+
+# One cycle over the whole run, hence stepped per batch. total_steps is injected by
+# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.OneCycleLR
+    _partial_: true
+    max_lr: ${algorithm.optimizer.lr}
+    pct_start: 0.2
+  interval: step
+  frequency: 1
+
+compile: false

@@ -44,6 +44,8 @@ MODEL_DISPLAY = {
     "lorentznet": "LorentzNet",
     "pelican": "PELICAN",
     "pelican_lorentz": "PELICAN (Lorentz)",
+    "lgatr_slim": "L-GATr-slim",
+    "lgatr_slim_lorentz": "L-GATr-slim (Lorentz)",
     "transformer": "JetFormer",
 }
 

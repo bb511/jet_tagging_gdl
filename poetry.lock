@@ -1960,6 +1960,28 @@ files = [
 ]
 
 [[package]]
+name = "lgatr"
+version = "2.0.0"
+description = "Lorentz-Equivariant Geometric Algebra Transformer for High-Energy Physics"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "lgatr-2.0.0-py3-none-any.whl", hash = "sha256:94cb273942b69a72329a988eb504adb0d48d760ccf251c10e10dc2fd5d3338e4"},
+    {file = "lgatr-2.0.0.tar.gz", hash = "sha256:b0d0ebc3b5f48606f7c022e85dbfc24173fd9201000693d070ec4bc3971e4904"},
+]
+
+[package.dependencies]
+torch = ">=2.0"
+
+[package.extras]
+dev = ["clifford (>=1.5.0)", "numpy", "pre-commit", "pytest", "pytest-cov", "sphinx (<9.0)", "sphinx-autodoc-typehints", "sphinx-rtd-theme"]
+flash-attention = ["flash-attn", "torch (>=2.1)"]
+flex-attention = ["torch (>=2.7)"]
+varlen-attention = ["torch (>=2.10)"]
+xformers-attention = ["torch (>=2.4)", "xformers"]
+
+[[package]]
 name = "lightning"
 version = "2.6.5"
 description = "The Deep Learning framework to train, deploy, and ship AI products Lightning fast."
@@ -4957,4 +4979,4 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.13"
-content-hash = "e7587f1cd9d41127984488795806eeb51957d992ad2af366cbc13ba88251a83b"
+content-hash = "aa0b6f4d7333352bebde817e8652c56adddb5ef52f77de99993b773719c341b2"

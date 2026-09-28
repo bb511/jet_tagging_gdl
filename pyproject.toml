@@ -39,6 +39,9 @@ dependencies = [
     "pathvalidate (>=3.3,<4)",
     "mlflow (>=3.2,<4)",
     "huggingface-hub (>=1.0)",
+    # The L-GATr-slim network itself (src/algorithms/components/lgatr_slim.py wraps it);
+    # padding goes through a dense mask, so none of its attention extras is needed.
+    "lgatr (>=2.0.0,<3)",
 ]
 
 [dependency-groups]

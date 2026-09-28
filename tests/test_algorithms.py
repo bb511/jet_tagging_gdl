@@ -49,9 +49,22 @@ ARCHITECTURE_KEYS = {
         "add_beams",
         "n_chunks",
     },
+    "lgatr_slim": {
+        "num_blocks",
+        "hidden_v_channels",
+        "hidden_s_channels",
+        "num_heads",
+        "mlp_ratio",
+        "dropout",
+        "units",
+        "add_beams",
+        "add_time",
+    },
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
+# The same network with the spurion tokens switched off, so the same keys.
+ARCHITECTURE_KEYS["lgatr_slim_lorentz"] = ARCHITECTURE_KEYS["lgatr_slim"]
 
 
 def _algorithm(
@@ -321,6 +334,89 @@ def test_pelican_is_blind_to_the_sign_of_the_beam_axis() -> None:
     # p_z -> -p_z swaps the two beams, which carry one label between them, and leaves every
     # other product untouched; the network is permutation invariant, so the logits stand.
     module = _pelican()
+    batch = jets(8, 16, 11).double() * 10.0
+    flipped = batch * torch.tensor([1.0, 1.0, -1.0, 1.0]).double()
+
+    with torch.no_grad():
+        assert torch.allclose(module(batch), module(flipped), atol=1e-10)
+
+
+def test_lgatr_slim_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:
+    # This is the check of the dense key-padding mask.
+    narrow = _algorithm("lgatr_slim", nconstituents=8).eval()
+    wide = _algorithm("lgatr_slim", nconstituents=9).eval()
+    wide.load_state_dict(narrow.state_dict(), strict=True)
+    batch = jets(4, 8, 6)
+    scales = {"px": 2.0, "py": 3.0, "pz": 4.0, "e": 5.0}
+
+    with torch.no_grad():
+        physical = narrow(batch)
+        padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
+        narrow.norm_scales = scales
+        narrow._on_features_resolved()
+        normalised = narrow(
+            batch / torch.tensor([scales[name] for name in FOUR_MOMENTUM])
+        )
+
+    assert torch.allclose(physical, padded, atol=1e-5)
+    assert torch.allclose(physical, normalised, atol=1e-3)
+
+
+def _lgatr(
+    add_beams: bool, add_time: bool, nconstituents: int = 16
+) -> JetTaggingModule:
+    # float64 throughout: forward() rounds the batch to float32, but the
+    # de-normalisation against the float64 buffer promotes everything after it.
+    torch.manual_seed(0)
+    module = _algorithm(
+        "lgatr_slim",
+        nconstituents=nconstituents,
+        add_beams=add_beams,
+        add_time=add_time,
+    )
+    return module.eval().double()
+
+
+@pytest.mark.parametrize(
+    "add_beams, add_time, scheme",
+    [(False, False, scheme) for scheme in GROUPS]
+    + [
+        (True, True, "so2"),
+        (True, False, "so2"),
+        (False, True, "so2"),
+        (False, True, "so3"),
+    ],
+)
+def test_lgatr_slim_is_invariant_under_the_group_the_spurions_leave_alone(
+    add_beams: bool, add_time: bool, scheme: str
+) -> None:
+    # Every layer is Lorentz-equivariant and the logits are scalars, so without spurions
+    # the whole Lorentz group holds. The spurions are fixed four-vectors that the
+    # transforms leave untouched: the beams, two null vectors along the axis, keep only
+    # the rotations about it, and the time vector alone keeps every rotation.
+    assert _shift_under(_lgatr(add_beams, add_time), scheme) < 1e-4
+
+
+@pytest.mark.parametrize("scheme", ["so3", "lorentz", "lorentz_iso"])
+def test_lgatr_slim_spurions_break_every_group_that_moves_them(scheme: str) -> None:
+    # A rotation off the beam tilts the axis; a boost of rapidity y along it rescales
+    # the products E -/+ p_z of each constituent with the beams by e^{-/+ y} and moves
+    # its product E with the time vector. Either way the products of the constituents
+    # with the spurion tokens move, so L-GATr-slim measures these three groups at test
+    # time as the augmented models do.
+    # Read against the SO(2) shift of the same network rather than an absolute bar: at
+    # initialisation the broken groups shift the logits by only 1e-5 to 1e-3, some of it
+    # below the 1e-4 the exact groups are held to, while SO(2) sits at the float32 floor
+    # of the cast in forward(), about 1e-7.
+    module = _lgatr(True, True)
+    assert _shift_under(module, scheme) > 1000 * _shift_under(module, "so2")
+
+
+def test_lgatr_slim_is_blind_to_the_sign_of_the_beam_axis() -> None:
+    # p_z -> -p_z swaps the products with the two beam tokens, which carry the same
+    # scalar, and leaves every other Minkowski product untouched; attention is
+    # permutation invariant, so the logits stand.
+    module = _lgatr(True, True)
     batch = jets(8, 16, 11).double() * 10.0
     flipped = batch * torch.tensor([1.0, 1.0, -1.0, 1.0]).double()
 

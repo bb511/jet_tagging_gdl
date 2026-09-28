@@ -47,7 +47,7 @@ logs/train/hls4ml[/<features>]/<model>/nconst<N>/<variant>/checkpoint_manifest.j
   |  cluster/submit_eval.sh  (hls4ml[/<features>]/run<model>_eval.sh)
   v
 results/<features>/results_table_{baseline,augmentation,symm_loss}.csv
-  (LorentzNet and the two PELICANs: results/embedded/results_table_baseline.csv)
+  (LorentzNet, the two PELICANs and the two L-GATr-slims: results/embedded/results_table_baseline.csv)
   |  analysis/compare_to_baseline.py <run table> <baseline table>
   v
 results/<features>/deltas_<run>_vs_<baseline>.csv

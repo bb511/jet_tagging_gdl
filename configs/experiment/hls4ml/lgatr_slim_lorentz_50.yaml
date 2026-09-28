@@ -1,0 +1,38 @@
+# @package _global_
+# L-GATr-slim without the spurion tokens at 50 constituents, at the algorithm defaults: a
+# starting point, not tuned values. Symmetry-embedded, so it runs the baseline regime only;
+# the twin with the spurions is lgatr_slim_50.yaml.
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: lgatr_slim_lorentz
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "lgatr_slim_lorentz", "nconst-50"]
+
+experiment_name: hls4ml_lgatr_slim_lorentz_nconst50
+
+# Set by a V100 pre-flight at the largest search point (12 blocks, 32/96 channels, 8 heads,
+# mlp_ratio 4, 2.0M parameters; 2026-09-28, on a shared card): 18.1 GiB and 0.44 s/step at
+# 1024 jets.
+data:
+  nconstituents: 50
+  batch_size: 1024
+  n_folds: 5
+
+# fp32, not the trainer's 16-mixed: the lgatr documentation advises against mixed precision for
+# the slim network and reports lower accuracy under amp, although the package keeps the Minkowski
+# contractions in fp32 under autocast.
+trainer:
+  max_epochs: 200
+  precision: 32
+
+# TF32 matmuls on Ampere and later, as in the other embedded experiments; a no-op on a V100.
+extras:
+  matmul_precision: high
+
+# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
+results_table:
+  subdir: embedded

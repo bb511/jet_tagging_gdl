@@ -1,8 +1,9 @@
 # Removed architectures
 
 This repository carried eight architecture modules before the refactor to the `adl1t` layout
-and carries five now: DeepSets, MLP, JetFormer, LorentzNet and PELICAN, the last of them back
-since 2026-09-13 as a clean rewrite. PELICAN, a plain Transformer encoder, a
+and carries six now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 2026-09-13 as a
+clean rewrite) and L-GATr-slim (added on 2026-09-28 and run in two rows, `lgatr_slim` with the
+spurion tokens and `lgatr_slim_lorentz` without). PELICAN, a plain Transformer encoder, a
 Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the refactor; nano-PELICAN,
 which existed as configuration only, went with them, and so did the permutation check. This
 file records what each was, why it went, and what putting it back involves.
@@ -120,6 +121,35 @@ so a port should set `required_features = ["px", "py", "pz", "e"]` and reorder i
 `expand_var_list` rejects, hence `_convert_: all` in the algorithm config. The config's
 `spurion_method` key exists to avoid the clash with `method`, which in this repository means
 the symmetry-handling method throughout.
+
+## L-GATr-slim
+
+Added on 2026-09-28 as the third symmetry-embedded architecture, and the first whose network is
+not written here: L-GATr-slim (arXiv:2512.17011), the scalars-and-vectors variant of L-GATr
+(arXiv:2405.14806), comes as `lgatr.LGATrSlim` from the pip package `lgatr` 2.0.0. Our own code
+is the wrapper `src/algorithms/components/lgatr_slim.py` and the `JetTaggingModule` subclass
+`src/algorithms/lgatr_slim.py`, which reads `[px, py, pz, e]` and hands the network
+(E, px, py, pz) in GeV. Around them sit `configs/algorithm/lgatr_slim.yaml` and
+`lgatr_slim_lorentz.yaml`, the six experiment configs
+`configs/experiment/hls4ml/lgatr_slim{,_lorentz}_{16,50,150}.yaml`, the two search configs
+`configs/hparams_search/hls4ml/lgatr_slim{,_lorentz}_optuna.yaml` and the six catalogues
+`scripts/hls4ml/runlgatr_slim{,_lorentz}_{search,train,eval}.sh`. The wrapper divides the
+constituents by `units` (20 GeV), prepends a fixed global token (a zero four-vector carrying a
+single scalar flag) and the spurion tokens, passes a dense boolean key-padding mask, and reads
+the logits from the global token's scalar outputs. The constituents enter as the null vectors
+they are, with no mass regulator, and the experiments run in fp32, since the package's
+documentation advises against mixed precision for the slim network.
+
+The spurion tokens set the exact group, and the switches `add_beams` and `add_time` set the
+spurions. With neither, the logits are invariant under the full Lorentz group: this is the
+`lgatr_slim_lorentz` row. The time vector (1, 0, 0, 0) alone leaves SO(3), a setting the
+switches allow but no catalogue scripts. The `lgatr_slim` row, the published tagging setting,
+adds the two lightlike beams (1, 0, 0, ±1) to the time vector and leaves SO(2) about the beam,
+because a boost along the beam rescales the null beam vectors rather than fixing them.
+The reflection p_z -> -p_z only swaps the two beam tokens, and attention does not depend on the
+order of its tokens, so the reflection is exact too. Both rows are one module and one network:
+`lgatr_slim_lorentz.yaml` is a standalone copy of `lgatr_slim.yaml` with the two switches off,
+kept in step by `tests/test_configs.py`, as for PELICAN.
 
 ## nano-PELICAN
 

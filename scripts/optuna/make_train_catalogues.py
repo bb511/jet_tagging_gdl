@@ -22,7 +22,16 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-MODELS = ["deepsets", "mlp", "jetformer", "lorentznet", "pelican", "pelican_lorentz"]
+MODELS = [
+    "deepsets",
+    "mlp",
+    "jetformer",
+    "lorentznet",
+    "pelican",
+    "pelican_lorentz",
+    "lgatr_slim",
+    "lgatr_slim_lorentz",
+]
 NCONSTITUENTS = [16, 50, 150]
 
 # (label, data.method, data.augmentation_scheme), in the order every catalogue,
@@ -37,9 +46,16 @@ VARIANTS = [
     ("symm_lorentz", "symm_loss", "lorentz"),
 ]
 
-# LorentzNet and PELICAN (with and without the beams) embed the symmetry rather than acquiring
-# it, so they are the architectures trained at baseline alone, never under augmentation or the SCL.
-EMBEDDED = {"lorentznet", "pelican", "pelican_lorentz"}
+# LorentzNet, PELICAN (with and without the beams) and L-GATr-slim (with and without the spurion
+# tokens) embed the symmetry rather than acquiring it, so they are the architectures trained at
+# baseline alone, never under augmentation or the SCL.
+EMBEDDED = {
+    "lorentznet",
+    "pelican",
+    "pelican_lorentz",
+    "lgatr_slim",
+    "lgatr_slim_lorentz",
+}
 
 VARIANTS_OF = {
     model: VARIANTS[:1] if model in EMBEDDED else VARIANTS for model in MODELS
