@@ -189,10 +189,12 @@ class JetTaggingModule(LightningModule):
         )
 
     def on_train_start(self) -> None:
-        """Clean up the sanity check values."""
+        """Clean up the sanity check values, and compile the net if asked."""
         self.val_loss.reset()
         self.val_acc.reset()
         self.val_acc_best.reset()
+        if self.hparams.compile:
+            self._compile_net()
 
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -260,9 +262,7 @@ class JetTaggingModule(LightningModule):
         )
 
     def setup(self, stage: str) -> None:
-        """Resolve the feature layout from the datamodule, and compile the net."""
-        if self.hparams.compile and stage == "fit":
-            self._compile_net()
+        """Resolve the feature layout from the datamodule."""
         # _trainer rather than trainer: the public property raises when the module stands alone.
         datamodule = getattr(self._trainer, "datamodule", None)
         if datamodule is None:
@@ -272,11 +272,14 @@ class JetTaggingModule(LightningModule):
         self._on_features_resolved()
 
     def _compile_net(self) -> None:
-        """Compile the network in place, so that a checkpoint keeps the eager key names that
-        ``eval.py``, which never compiles, loads."""
-        # A search driver fits trial after trial in one process, and every new architecture adds
-        # graphs to the compiler's cache; past its recompile limit (8 entries, about four trials)
-        # every later trial runs eager. A reset before each fit keeps every trial compiled.
+        """Compile the network in place, so that a checkpoint keeps the eager key names
+        that ``eval.py``, which never compiles, loads."""
+        # At train start, not in setup(): Lightning's model summary runs one forward under
+        # FlopCounterMode at fit start, and a compiled call made under that mode leaves the module
+        # call marked to run eager for the rest of the process. A search driver also fits trial
+        # after trial in one process, and every new architecture adds graphs to the compiler's
+        # cache; past its recompile limit (8 entries, about four trials) every later trial runs
+        # eager. The reset clears both.
         torch.compiler.reset()
         self.net.compile()
 

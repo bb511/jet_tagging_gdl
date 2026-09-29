@@ -1,25 +1,18 @@
-"""LLoCa (arXiv:2505.20280), Lorentz local canonicalisation, as the jet tagger of
-arXiv:2508.14898.
+"""LLoCa (arXiv:2505.20280), Lorentz local canonicalisation.
 
 The frames-net, the local frames and the tensorial attention of the LLoCa-Transformer
-are supplied by the ``lloca`` package, and this module adds only the tagger wrapper
-around them: the packing of the real constituents for the frames-net, the division by
-``units``, the key-padding mask and the mean readout.
+are imported through the ``lloca`` package. This module only wraps that package into
+a jet tagger.
 
-The metric is (+, -, -, -), the energy first, and the momenta are in GeV. Batches must
-be de-normalised before they reach this module.
+The metric is (+, -, -, -), the energy first, and the momenta are in GeV.
+Batches must be de-normalised before they reach this module.
 
-Symmetry. Each constituent is read in a frame of its own, predicted equivariantly from
-the whole jet, and the attention carries its messages from frame to frame as tensors, so
-the logits are invariant under whichever group the frames co-transform with. That group
-is set by ``frames``: the full Lorentz group for ``lorentz`` (a learned boost and
-rotation), SO(2) about the beam times boosts along it for ``z`` (a boost along the beam
-and a rotation about it), SO(2) about the beam for ``so2`` (a rotation about it alone)
-and SO(3) for ``so3`` (a rotation alone). The readout is the mean over the real
-constituents rather than the global token of the reference wrappers: a token with a
-fixed identity frame does not co-transform in the tensorial attention, its vector
-channels staying put and ``preserve_variance`` dividing them by E_jet / m_jet, which a
-boost changes, so it would break every group the frames respect.
+Symmetry. Each constituent is read in a frame of its own. The frame is  predicted
+equivariantly from the whole jet. The logits are invariant under whichever group the
+frames co-transform with. That group is set by the ``frames`` attribute: the full
+Lorentz group for ``lorentz`` (a learned boost and rotation), SO(2) about the beam times
+boosts along it for ``z``, SO(2) about the beam for ``so2`` and SO(3) for ``so3``.
+The readout is the mean over the real constituents.
 """
 
 from functools import partial
@@ -44,8 +37,7 @@ FRAMES = {
     "so2": LearnedSO2Frames,
     "so3": LearnedSO3Frames,
 }
-# The tagging-guide settings: Gram-Schmidt in float64, with eps_norm raised to 1e-10 in
-# its SO(2) and SO(3) configs.
+# The tagging-guide settings: Gram-Schmidt in float64, with eps_norm raised to 1e-10.
 ORTHO_KWARGS = {
     key: {
         "use_float64": True,
@@ -69,17 +61,15 @@ class LLoCaClassifier(nn.Module):
     """LLoCa-Transformer over a fixed-width batch of jet four-momenta.
 
     The logits are invariant under any permutation of the constituents and under the
-    group of the frames class that ``frames`` names.
+    group of the frames class that ``frames`` specifies.
 
     :param frames: a key of ``FRAMES``: ``lorentz``, ``z``, ``so2`` or ``so3``.
     :param attn_scalars: scalar channels of each attention head.
     :param attn_vectors: four-vector channels of each attention head.
     :param framesnet_hidden: width of the two hidden layers of the frames-net MLP.
-    :param mass_reg: mass floor in ``units``, applied inside the frames-net alone: a
+    :param mass_reg: mass floor in ``units``, applied inside the frames-net: a
         lighter constituent is given this mass there, which keeps the pair sums the
-        frames-net normalises off the light cone. The lift does not commute with a
-        boost, so a boost-exact row keeps a residual of relative size m^2 / (2 p^2): at
-        the references' 5 MeV it stays below 1e-4 for every constituent above 0.35 GeV.
+        frames-net normalises off the light cone.
     :param units: GeV per unit of everything the package sees, 20 as in the L-GATr-slim
         row; the LLoCa references feed GeV.
     :param n_class: classes, read off the mean of the backbone outputs.

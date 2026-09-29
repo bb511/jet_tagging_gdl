@@ -446,6 +446,7 @@ def test_compiling_keeps_the_checkpoint_keys_of_the_eager_network() -> None:
     # built here.
     eager = _algorithm("lgatr_slim")
     compiled = _attach(_algorithm("lgatr_slim", compile=True), StubDataModule())
+    compiled.on_train_start()
 
     assert compiled.net._compiled_call_impl is not None
     assert list(compiled.state_dict()) == list(eager.state_dict())
