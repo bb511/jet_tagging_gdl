@@ -440,6 +440,17 @@ def test_lgatr_slim_is_blind_to_the_sign_of_the_beam_axis() -> None:
         assert torch.allclose(module(batch), module(flipped), atol=1e-10)
 
 
+def test_compiling_keeps_the_checkpoint_keys_of_the_eager_network() -> None:
+    # A torch.compile wrapper would prefix every key with _orig_mod., and eval.py, which never
+    # compiles, could not load what a compiled training saved. Compiling is lazy, so no graph is
+    # built here.
+    eager = _algorithm("lgatr_slim")
+    compiled = _attach(_algorithm("lgatr_slim", compile=True), StubDataModule())
+
+    assert compiled.net._compiled_call_impl is not None
+    assert list(compiled.state_dict()) == list(eager.state_dict())
+
+
 def test_lloca_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:
     # This is the check of the packed frames-net call and the key-padding mask
     # together: the edge convolution of the frames-net has no mask of its own, so a
