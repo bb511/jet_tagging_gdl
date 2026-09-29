@@ -6,11 +6,10 @@ this module adds only the tagger wrapper around it.
 The metric is (+, -, -, -) and the momenta are in GeV.
 Batches must be de-normalised before they reach this module.
 
-Symmetry. With no spurions the logits are invariant under the full Lorentz group. The
-time vector (1, 0, 0, 0) alone leaves SO(3). The two lightlike beams (1, 0, 0, +-1),
-with or without the time vector, leave SO(2) about the beam axis: a boost along the beam
-rescales null vectors, so beam boosts are broken, while ``p_z -> -p_z`` only swaps the
-two beam tokens and attention is permutation invariant, so the reflection is exact.
+Symmetry. With no spurions the logits are invariant under the full Lorentz group.
+The time vector (1, 0, 0, 0) make the architecture SO(3) invariant.
+The two lightlike beams (1, 0, 0, +-1), with or without the time vector, make it SO(2)
+invariant about the beam axis.
 """
 
 import lgatr
@@ -31,7 +30,7 @@ class LGATrSlimClassifier(nn.Module):
 
     The logits are invariant under any permutation of the constituents and under the
     group the spurions leave alone: the full Lorentz group without them, SO(3) with the
-    time vector alone, SO(2) about the beam axis whenever the beams are on.
+    time vector, SO(2) about the beam axis whenever the beams are on.
 
     :param units: GeV per unit of the constituent four-momenta, 20 as in the references;
         the spurions stay at unit scale.
@@ -57,7 +56,7 @@ class LGATrSlimClassifier(nn.Module):
         self.units = units
         spurions = spurion_vectors(add_beams, add_time)
         self.register_buffer("spurions", spurions, persistent=False)
-        # The logits are Lorentz scalars, so no vector channel leaves the network.
+        # The logits are Lorentz scalars.
         self.net = lgatr.LGATrSlim(
             num_blocks=num_blocks,
             in_v_channels=1,
@@ -80,11 +79,8 @@ class LGATrSlimClassifier(nn.Module):
         """
         real = pmu[..., 0] != 0.0
         vectors, scalars, attn_mask = self._tokens(pmu / self.units, real)
-        # Every query row keeps the global token and the spurions as keys, so no row is
-        # fully masked: the padded rows give finite values that nothing reads.
         _, out_s = self.net(vectors, scalars, attn_mask=attn_mask)
-        # Token 0 is the global token, whose scalar outputs are the logits, as the
-        # reference wrappers read them.
+        # Token 0 is the global token, whose scalar outputs are the logits.
         return out_s[:, 0]
 
     def _tokens(
@@ -98,9 +94,9 @@ class LGATrSlimClassifier(nn.Module):
             boolean key mask (jets, 1, 1, tokens), True on the keys attended to.
         """
         fixed = torch.cat([p.new_zeros(1, 4), self.spurions.to(p.dtype)])
-        n_jets, n_fixed = p.shape[0], fixed.shape[0]
-        vectors = torch.cat([fixed.expand(n_jets, n_fixed, 4), p], dim=1)
-        scalars = p.new_zeros(n_jets, vectors.shape[1], 1)
+        njets, nfixed = p.shape[0], fixed.shape[0]
+        vectors = torch.cat([fixed.expand(njets, nfixed, 4), p], dim=1)
+        scalars = p.new_zeros(njets, vectors.shape[1], 1)
         scalars[:, 0, 0] = 1.0
-        attn_mask = torch.cat([real.new_ones(n_jets, n_fixed), real], dim=1)
+        attn_mask = torch.cat([real.new_ones(njets, nfixed), real], dim=1)
         return vectors.unsqueeze(2), scalars, attn_mask[:, None, None, :]

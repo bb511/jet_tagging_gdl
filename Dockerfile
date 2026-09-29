@@ -56,9 +56,12 @@ ENV VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1
 
-# sqlite3 for reading the Optuna study databases in place.
+# sqlite3 for reading the Optuna study databases in place. gcc and libc6-dev for torch.compile:
+# Triton builds its GPU launcher with a C compiler at first use, and fails without one.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
+      gcc \
+      libc6-dev \
       bash \
       vim \
       less \

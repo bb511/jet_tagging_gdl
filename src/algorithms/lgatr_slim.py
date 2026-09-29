@@ -9,9 +9,12 @@ from src.data.components.augmentation import get_norm_scale
 
 
 class LGATrSlim(JetTaggingModule):
-    """Jet tagger built on L-GATr-slim, the scalars-and-vectors Lorentz-equivariant
-    transformer (arXiv:2512.17011)."""
+    """Jet tagger built on L-GATr-slim.
 
+    This is the scalars-and-vectors Lorentz-equivariant transformer detailed in the
+    following publication: arXiv:2512.17011.
+
+    """
     # The network needs only the full four-momentum.
     required_features = ["px", "py", "pz", "e"]
 
