@@ -153,3 +153,49 @@ def test_the_lloca_rows_differ_in_name_and_frames_alone() -> None:
             cfg.pop(key)
     for cfg in rows.values():
         assert cfg == rows["lorentz"]
+
+
+def test_the_vn_rows_differ_in_name_and_symmetry_alone() -> None:
+    # vn_so2.yaml is a standalone copy of vn_z.yaml, because the algorithm tests load
+    # these files with OmegaConf alone and a defaults list would not resolve there; this
+    # is what keeps the copy from drifting.
+    rows = {
+        row: OmegaConf.to_container(
+            OmegaConf.load(ROOT / "configs" / "algorithm" / f"vn_{row}.yaml")
+        )
+        for row in ("z", "so2")
+    }
+    for row, cfg in rows.items():
+        assert (cfg["name"], cfg["symmetry"]) == (f"vn_{row}", row)
+        for key in ("name", "symmetry"):
+            cfg.pop(key)
+    assert rows["so2"] == rows["z"]
+
+
+def test_the_vn_rows_share_one_search_space() -> None:
+    # The two rows are searched at equal effort, so that they differ in the embedded
+    # group alone; the storage and the study name are the row's own.
+    z, so2 = (
+        OmegaConf.to_container(
+            OmegaConf.load(
+                ROOT / "configs" / "hparams_search" / "hls4ml" / f"vn_{row}_optuna.yaml"
+            ).hydra.sweeper
+        )
+        for row in ("z", "so2")
+    )
+    for key in ("params", "n_trials", "direction", "sampler"):
+        assert z[key] == so2[key], key
+
+
+@pytest.mark.parametrize(
+    "experiment", [f"vn_{row}_{n}" for row in ("z", "so2") for n in NCONSTITUENTS]
+)
+def test_the_vn_experiments_keep_full_float32_matmuls(experiment: str) -> None:
+    # TF32 rounds the inputs of every float32 matmul to about 5e-4, and this network's
+    # linear layers act on the vector components themselves, so a transformed jet would
+    # be rounded differently and the embedded group would hold to that precision only.
+    cfg = OmegaConf.load(
+        ROOT / "configs" / "experiment" / "hls4ml" / f"{experiment}.yaml"
+    )
+    assert cfg.trainer.precision == 32
+    assert "matmul_precision" not in (cfg.get("extras") or {})

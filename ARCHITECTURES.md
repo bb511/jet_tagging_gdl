@@ -1,14 +1,15 @@
 # Removed architectures
 
 This repository carried eight architecture modules before the refactor to the `adl1t` layout
-and carries seven now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 2026-09-13 as
-a clean rewrite), L-GATr-slim and LLoCa. The last two were added on 2026-09-28: L-GATr-slim
-runs in two rows, `lgatr_slim` with the spurion tokens and `lgatr_slim_lorentz` without, and
-LLoCa in four, one per frames class (`lloca_lorentz`, `lloca_z`, `lloca_so2` and `lloca_so3`).
-PELICAN, a plain Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were
-removed at the refactor; nano-PELICAN, which existed as configuration only, went with them, and
-so did the permutation check. This file records what each was, why it went, and what putting it
-back involves.
+and carries eight now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 2026-09-13 as
+a clean rewrite), L-GATr-slim, LLoCa and the vector neurons. The last three were added on
+2026-09-28 and 2026-09-29: L-GATr-slim runs in two rows, `lgatr_slim` with the spurion tokens and
+`lgatr_slim_lorentz` without, LLoCa in four, one per frames class (`lloca_lorentz`, `lloca_z`,
+`lloca_so2` and `lloca_so3`), and the vector neurons in two, one per partition of the
+four-momentum (`vn_z` and `vn_so2`). PELICAN, a plain Transformer encoder, a
+Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the refactor; nano-PELICAN,
+which existed as configuration only, went with them, and so did the permutation check. This file
+records what each was, why it went, and what putting it back involves.
 
 The last commit that holds all of it is `a667b346`. Any file named below is recovered with
 `git show a667b346:<path>`.
@@ -195,6 +196,122 @@ standalone copies of `lloca_lorentz.yaml` that differ in `name` and `frames` alo
 by `tests/test_configs.py`. A jet of one or two constituents gives the frames-net too few
 independent vectors, and the package regularises such frames with random noise, so these jets
 may leave a small floor on the flip rates even under an exact group.
+
+## Vector neurons
+
+Added on 2026-09-29 as the fifth symmetry-embedded architecture. Unlike those of L-GATr-slim and
+LLoCa, its network is written here, so it adds no dependency. Vector neurons (arXiv:2104.12229)
+carry lists of vectors as hidden features and mix them with a bias-free linear layer that acts on
+the channel index alone, so that the layer commutes with the group; here the vectors are
+four-momenta and the group is a subgroup of the Lorentz group. Our code is the network
+`src/algorithms/components/vector_neurons.py` and the `JetTaggingModule` subclass
+`src/algorithms/vector_neurons.py`, which reads `[px, py, pz, e]` and hands the network
+(E, px, py, pz) in GeV. Around them sit the two algorithm configs `configs/algorithm/vn_z.yaml` and
+`vn_so2.yaml`, the six experiment configs `configs/experiment/hls4ml/vn_{z,so2}_{16,50,150}.yaml`,
+the two search configs `configs/hparams_search/hls4ml/vn_{z,so2}_optuna.yaml` and the six
+catalogues `scripts/hls4ml/runvn_{z,so2}_{search,train,eval}.sh`. The network divides the
+constituents by `units` (20 GeV), sorts them by p_T and runs a stack of blocks, the first of which
+reads the sorted constituents as its vector channels and their rank invariants, described below,
+as its scalars. Each block mixes the vector channels with a linear layer, reads invariants off the
+mixed vectors, updates the scalars with a two-layer MLP of the scalars, the invariants and the
+context, and gates the vectors with a sigmoid of the new scalars. A learned invariant is the
+Minkowski product of two learned combinations of the vectors, compressed by the signed log `psi`
+of the LorentzNet component. The gate replaces the projection of the reference, which would divide
+by the Minkowski norm of a learned direction, zero for a lightlike one, so the network is vector
+neurons with a gated non-linearity. The gates start at exactly 1/2, their last layer being
+initialised to zero, because a gate started near zero would stay there: the learned invariants are
+quadratic in the vectors, so their gradient vanishes with them. Every block but the first, whose
+input is the constituents and their rank invariants rather than a state, adds its input to both
+states. The context, psi(n) of the number n of real constituents, reaches every block and the
+head, since a missing constituent and a vanishingly soft one give a bias-free layer the same
+output; the head is an MLP of the final scalars, the invariants of the final vectors and the
+context. No layer normalises the states: on a boost-exact row no invariant divisor can bound the
+components of a vector. The optimiser is AdamW with OneCycleLR, the block of L-GATr-slim and
+LLoCa, at a default learning rate of 2e-3 in place of their 3e-4. The vector-neuron models the
+repository carried before the refactor (`network/vector_neurons_lorentz.py` at `14c1c788`,
+`network_new/vector_neurons_so2.py` at `87ae3ab6`) also gave their first layer one weight per
+constituent slot, but had no sort, no padding mask and no partition of the four-vector; only their
+idea is reused.
+
+The partition of the four-momentum sets the exact group. The components (E, px, py, pz) are
+divided into splits, and the metric is the Minkowski one, (+, -, -, -), which every split inherits.
+Every linear layer shares its weights inside a split and keeps them free across splits, the gate
+scales each split of each vector channel as a whole, and every product, learned or among the rank
+invariants, is taken on a split or a union of splits, so a transformation that acts within every
+split and preserves the metric on it leaves the logits alone. The sign the metric puts on a whole
+split is absorbed by that split's weights and leaves the group unchanged. The switch `symmetry`
+picks the partition, one per row; it is not called `group` because `JetTaggingModule.__init__`
+already owns that name for the group of the symmetry-consistency loss. The `vn_z` row splits the
+components into (px, py) and (E, p_z) and is exact under O(2)×O(1,1): rotations about the beam,
+boosts along it, and the reflections φ -> -φ and p_z -> -p_z. The probe groups `so2` and `lorentz`
+are therefore exact for it, and `so3` and `lorentz_iso` are measured. The `vn_so2` row has three
+splits, E, p_z and (px, py), and is exact under O(2) about the beam and p_z -> -p_z, so `so2` alone
+is exact and the three other groups are measured. With one weight for all four components the
+linear layer would be the Lorentz-equivariant one of L-GATr-slim; the separate weights are what cut
+the group down. The `vn_so2` networks contain the `vn_z` ones: a `vn_z` network is the `vn_so2`
+network whose E and p_z weights are tied and whose first scalar layer gives no weight to the rank
+invariants of E and p_z taken apart, which `vn_z` lacks; `tests/test_algorithms.py` checks this on
+whole networks. The two rows are one module and one network: `vn_so2.yaml` is a standalone copy of
+`vn_z.yaml` that differs in `name` and `symmetry` alone, kept in step by `tests/test_configs.py`,
+as for PELICAN, L-GATr-slim and LLoCa.
+
+The network reads the constituents by rank. It sorts those of each jet by decreasing p_T and feeds
+them to the first block as its input vector channels, one weight per rank. From the first block on,
+the state belongs to the jet, and every layer runs once per jet, not once per constituent, which
+is what makes the network cheap. Rotations about the beam and boosts along it leave every p_T
+unchanged, so the rank is an invariant label under both groups and under no larger one: that is
+why a network that reads by rank stays exact here, and why no Lorentz or SO(3) row exists. The
+sort also makes the logits invariant under any permutation of the constituents and sends the
+padded rows, whose p_T is zero, to the end, where they contribute nothing to the bias-free first
+layer. The record is already sorted by p_T (checked on the first 50 000 training jets at 16, 50
+and 150 constituents on 2026-09-29), so on it the sort is the identity, and in a trigger the sort
+is already done. The network sorts what it is given, so a jet transformed by the probe is ranked
+afresh, as a trigger would rank it; the `mlp` row, the other network that reads by rank, is probed
+in the record's order.
+
+The rank invariants, the first block's input scalars, are fixed functions of the sorted
+constituents. With J the sum of the constituents (the jet), they are, for every rank i and every
+block b of components, the Minkowski square of p_i on b and the Cauchy-Schwarz deficit of p_i
+against J on b; for every rank, the product ⟨p_i, J⟩ over all four components; and for the jet,
+its square on every block and its mass squared, all compressed by `psi`. For N constituents
+and n_b blocks their width is N(2 n_b + 1) + n_b + 1, 83 for `vn_z` and 149 for `vn_so2` at 16
+constituents. The blocks of `vn_z` are its splits, (px, py) and (E, p_z), on which the entries of
+rank i are -p_T^2, m_T^2, p_T p_TJ (1 - cos Δφ), m_T m_TJ (cosh Δy - 1) and ⟨p_i, J⟩. Those of
+`vn_so2`, listed in `RANK_BLOCKS`, are its splits E, p_z and (px, py) and the union (E, p_z) that
+`vn_z` uses, so that the inputs of `vn_so2` contain those of `vn_z`. The invariants carry no
+parameters, every entry of a padded rank is exactly zero, and every entry is a product within a
+block that the row's group preserves, so both rows stay exact under the same groups. They are
+there because every constituent of a jet is nearly parallel to the jet: an inner product is then
+dominated by the product of the norms, and the information sits in the deficit, of relative size
+ΔR^2, about 1e-2, which the signed log of the raw product buries and which the learned products
+reach only through a fine cancellation between the weights of two splits. In single runs of fifty
+epochs at the default size and 16 constituents, on olgpu on 2026-09-29, `vn_z` reached a
+validation accuracy of 0.66 without them and 0.71 with them. The deficit
+equals |p||J| - p·J on a definite block and ⟨p, J⟩ - |p||J| on (E, p_z), but is computed as half
+the squared norm of the difference of the two unit vectors, times the two norms, which subtracts
+no two nearly equal numbers. The products ⟨p_i, J⟩ and the jet mass squared, by contrast,
+are raw sums that cancel to about 1e-2 of their terms, so in float32 they carry a rounding that
+differs between a jet and its transformed copy, as the Minkowski products of LorentzNet, PELICAN
+and L-GATr-slim do.
+
+The experiments run in fp32, since the metric products cancel to a small fraction of their terms,
+which fp16 cannot resolve. They alone among the embedded experiments also run without TF32, with
+`extras.matmul_precision` unset, which `tests/test_configs.py` checks: TF32 rounds the inputs of
+every float32 matmul to about 5e-4, and the linear layers here act on the vector components
+themselves, so a transformed jet would be rounded differently and the embedded group would hold to
+that precision only. Even so, px and py are rounded afresh after a rotation about the beam, so two
+constituents whose p_T agree to rounding can swap ranks and leave a small flip rate under `so2`; a
+boost along the beam leaves px and py untouched. At the defaults (3 blocks, 16 vector and 64
+scalar channels, 16 invariants, head [64, 32]) `vn_z` has 48 805, 60 773 and 95 973 parameters and
+costs 0.108, 0.134 and 0.211 MFLOP per jet at 16, 50 and 150 constituents, and `vn_so2` has
+58 965, 80 181 and 142 581 parameters and costs 0.122, 0.166 and 0.294 MFLOP. At the corner of the
+search space (6 blocks, 64 vector and 128 scalar channels, 32 invariants, head [128, 64]) `vn_z`
+has 0.45 to 0.55 M parameters and costs 1.09 to 1.33 MFLOP, and `vn_so2` 0.55 to 0.73 M and 1.20
+to 1.58 MFLOP. These figures were measured on olgpu on 2026-09-29. The cost grows with the number
+of constituents through the first block alone, mostly through the first layer of its scalar MLP,
+which reads the rank invariants; the invariants themselves are elementwise and so are left out of
+the FLOP count, which covers matmul-type operations alone. At 16 constituents PELICAN costs
+4.5 MFLOP (33 k parameters), LLoCa 34 (1.06 M) and L-GATr-slim 97 to 114 (2.0 M).
 
 ## nano-PELICAN
 

@@ -40,6 +40,8 @@ MODELS = (
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
+    "vn_z",
+    "vn_so2",
 )
 # The symmetry-embedded class, trained in the baseline regime alone and never under the SCL.
 EMBEDDED = (
@@ -52,6 +54,8 @@ EMBEDDED = (
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
+    "vn_z",
+    "vn_so2",
 )
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.

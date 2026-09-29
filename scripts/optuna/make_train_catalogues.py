@@ -35,6 +35,8 @@ MODELS = [
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
+    "vn_z",
+    "vn_so2",
 ]
 NCONSTITUENTS = [16, 50, 150]
 
@@ -51,9 +53,9 @@ VARIANTS = [
 ]
 
 # LorentzNet, PELICAN (with and without the beams), L-GATr-slim (with and without the spurion
-# tokens) and LLoCa (with the Lorentz, SO(2)xSO(1,1), SO(2) and SO(3) frames) embed the symmetry
-# rather than acquiring it, so they are the architectures trained at baseline alone, never under
-# augmentation or the SCL.
+# tokens), LLoCa (with the Lorentz, SO(2)xSO(1,1), SO(2) and SO(3) frames) and the vector neurons
+# (with the SO(2)xSO(1,1) and SO(2) partitions) embed the symmetry rather than acquiring it, so
+# they are the architectures trained at baseline alone, never under augmentation or the SCL.
 EMBEDDED = {
     "lorentznet",
     "pelican",
@@ -64,6 +66,8 @@ EMBEDDED = {
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
+    "vn_z",
+    "vn_so2",
 }
 
 VARIANTS_OF = {

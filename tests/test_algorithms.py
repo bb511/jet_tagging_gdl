@@ -6,8 +6,17 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from src.algorithms import JetTaggingModule
+from src.algorithms.components.lorentznet import psi
 from src.algorithms.components.pelican import LinEq2to2
-from src.data.components.augmentation import make_transform
+from src.algorithms.components.vector_neurons import (
+    RANK_BLOCKS,
+    SplitGate,
+    SplitLinear,
+    VectorNeuronsClassifier,
+    _rank_invariants,
+    _sort_by_pt,
+)
+from src.data.components.augmentation import _sample_boosts, make_transform
 from src.symmetry import GROUPS
 from tests.conftest import (
     EMBEDDED,
@@ -72,6 +81,16 @@ ARCHITECTURE_KEYS = {
         "mass_reg",
         "units",
     },
+    "vn_z": {
+        "head_layers",
+        "symmetry",
+        "num_blocks",
+        "vector_channels",
+        "scalar_channels",
+        "invariants",
+        "dropout",
+        "units",
+    },
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
@@ -81,6 +100,8 @@ ARCHITECTURE_KEYS["lgatr_slim_lorentz"] = ARCHITECTURE_KEYS["lgatr_slim"]
 ARCHITECTURE_KEYS["lloca_z"] = ARCHITECTURE_KEYS["lloca_lorentz"]
 ARCHITECTURE_KEYS["lloca_so2"] = ARCHITECTURE_KEYS["lloca_lorentz"]
 ARCHITECTURE_KEYS["lloca_so3"] = ARCHITECTURE_KEYS["lloca_lorentz"]
+# The same network with another partition of the four-momentum, so the same keys.
+ARCHITECTURE_KEYS["vn_so2"] = ARCHITECTURE_KEYS["vn_z"]
 
 
 def _algorithm(
@@ -559,6 +580,348 @@ def test_lloca_standardises_its_frames_net_on_the_first_training_batch() -> None
     state = module.state_dict()
     for name in ("edge_inited", "edge_mean", "edge_std"):
         assert f"net.framesnet.equivectors.block.{name}" in state
+
+
+def _with_random_gates(module: JetTaggingModule) -> JetTaggingModule:
+    # Every gate starts at exactly 1/2, a constant under which the exactness tests would
+    # pass without exercising the gates; N(0, 1) weights make each gate a function of
+    # the scalars.
+    with torch.no_grad():
+        for gate in module.net.modules():
+            if isinstance(gate, SplitGate):
+                gate.linear.weight.normal_()
+                gate.linear.bias.normal_()
+    return module
+
+
+def _vn(symmetry: str, nconstituents: int = 16) -> JetTaggingModule:
+    # float64 throughout: forward() rounds the batch to float32, but the
+    # de-normalisation against the float64 buffer promotes everything after it.
+    torch.manual_seed(0)
+    module = _algorithm("vn_z", nconstituents=nconstituents, symmetry=symmetry)
+    return _with_random_gates(module.eval().double())
+
+
+# The probe groups each partition makes exact. Every one of them keeps the beam axis
+# and p_T, by which the constituents are ranked. The z splits keep (E, pz) together,
+# whose Minkowski product a boost along the beam preserves; so2 weighs E and pz apart,
+# and any boost mixes them.
+VN_EXACT = {"z": ("so2", "lorentz"), "so2": ("so2",)}
+
+
+@pytest.mark.parametrize(
+    "symmetry, scheme",
+    [(symmetry, scheme) for symmetry, exact in VN_EXACT.items() for scheme in exact],
+)
+def test_vn_is_invariant_under_the_group_its_splits_respect(
+    symmetry: str, scheme: str
+) -> None:
+    # Every layer acts on each split with weights of its own, and the only other
+    # operations on a vector are the Minkowski products and the gates on whole splits,
+    # so a transform that acts within the splits and keeps the metric on each commutes
+    # with the network; the rank invariants are products within unions of splits.
+    assert _shift_under(_vn(symmetry), scheme) < 1e-4
+
+
+@pytest.mark.parametrize(
+    "symmetry, scheme",
+    [
+        (symmetry, scheme)
+        for symmetry, exact in VN_EXACT.items()
+        for scheme in GROUPS
+        if scheme not in exact
+    ],
+)
+def test_vn_splits_break_every_group_that_mixes_them(
+    symmetry: str, scheme: str
+) -> None:
+    # A rotation off the beam and a boost off its axis mix pz into the transverse split
+    # and change p_T, and with it the ranks; under so2 a boost along the beam mixes E
+    # and pz, which carry weights of their own. Read against the SO(2) shift of the same
+    # network, as for PELICAN, L-GATr-slim and LLoCa: at initialisation SO(2) sits at
+    # the float32 floor of the cast in forward(), below 1e-7, and the broken groups
+    # move the logits by 0.45 to 0.76 times the largest of them.
+    module = _vn(symmetry)
+    assert _shift_under(module, scheme) > 1000 * _shift_under(module, "so2")
+
+
+@pytest.mark.parametrize("symmetry", VN_EXACT)
+def test_vn_is_blind_to_the_reflections_its_splits_keep(symmetry: str) -> None:
+    # py -> -py and pz -> -pz act within a split and keep its metric, and neither moves
+    # p_T: the flipped component changes sign in every vector and nowhere else, so the
+    # logits stand.
+    module = _vn(symmetry)
+    batch = jets(8, 16, 11).double() * 10.0
+
+    with torch.no_grad():
+        logits = module(batch)
+        for flip in ([1.0, -1.0, 1.0, 1.0], [1.0, 1.0, -1.0, 1.0]):
+            flipped = batch * torch.tensor(flip).double()
+            assert torch.allclose(logits, module(flipped), atol=1e-10)
+
+
+@pytest.mark.parametrize("symmetry", VN_EXACT)
+def test_vn_ignores_padding_and_undoes_the_normalisation_of_its_batch(
+    symmetry: str,
+) -> None:
+    # The ranks are the input channels of the first block and index its rank
+    # invariants, so a ninth slot adds a column to its linear map and a group of inputs
+    # to its MLP, both of which an all-zero row leaves at exactly zero; a hole among
+    # the slots is sorted to the end, and the multiplicity is read off the mask.
+    narrow = _with_random_gates(_algorithm("vn_z", nconstituents=8, symmetry=symmetry))
+    wide = _algorithm("vn_z", nconstituents=9, symmetry=symmetry)
+    # The eight ranks' inputs keep their columns, the ninth's are left alone and the
+    # tail (the jet entries, the invariants and the context) moves up by one rank.
+    per_rank = 2 * len(RANK_BLOCKS[symmetry]) + 1
+    state = wide.state_dict()
+    for name, value in narrow.state_dict().items():
+        if name == "net.blocks.0.mlp.0.weight":
+            state[name][:, : 8 * per_rank] = value[:, : 8 * per_rank]
+            state[name][:, 9 * per_rank :] = value[:, 8 * per_rank :]
+        else:
+            state[name][..., : value.shape[-1]] = value
+    wide.load_state_dict(state, strict=True)
+    narrow.eval()
+    wide.eval()
+    batch = jets(4, 8, 6)
+    holed = batch.clone()
+    holed[:, 3] = 0.0
+    compacted = torch.cat(
+        [holed[:, [0, 1, 2, 4, 5, 6, 7]], torch.zeros(4, 1, 4)], dim=1
+    )
+    scales = {"px": 2.0, "py": 3.0, "pz": 4.0, "e": 5.0}
+
+    with torch.no_grad():
+        physical = narrow(batch)
+        padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
+        assert torch.allclose(narrow(holed), narrow(compacted), atol=1e-6)
+        narrow.norm_scales = scales
+        narrow._on_features_resolved()
+        normalised = narrow(
+            batch / torch.tensor([scales[name] for name in FOUR_MOMENTUM])
+        )
+
+    assert torch.allclose(physical, padded, atol=1e-5)
+    assert torch.allclose(physical, normalised, atol=1e-3)
+
+
+@pytest.mark.parametrize("symmetry", VN_EXACT)
+def test_vn_is_blind_to_the_order_of_the_constituents(symmetry: str) -> None:
+    module = _vn(symmetry)
+    batch = jets(8, 16, 11).double() * 10.0
+    generator = torch.Generator().manual_seed(2)
+    # A permutation of its own for every jet.
+    order = torch.rand(8, 16, generator=generator).argsort(dim=1)
+    shuffled = batch.gather(1, order.unsqueeze(-1).expand_as(batch))
+
+    with torch.no_grad():
+        assert torch.allclose(module(batch), module(shuffled), atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    "scheme, commutes", [("so2", True), ("lorentz", True), ("so3", False)]
+)
+def test_the_vn_ranking_by_pt_commutes_with_the_groups_that_keep_the_beam_axis(
+    scheme: str, commutes: bool
+) -> None:
+    # The claim the design rests on: a network that reads the constituents by rank is
+    # invariant only under a group that leaves the ranks alone. A rotation about the
+    # beam and a boost along it keep every p_T; a rotation off the beam does not.
+    # Stable, so the padded slots, all at p_T = 0, keep their order.
+    torch.manual_seed(0)
+    batch = jets(8, 16, 11).double() * 10.0
+    transformed = make_transform(scheme, FOUR_MOMENTUM, None, 2.0)(batch)
+
+    def ranks(x: torch.Tensor) -> torch.Tensor:
+        pt2 = x[..., 0] ** 2 + x[..., 1] ** 2
+        return pt2.argsort(dim=1, descending=True, stable=True)
+
+    assert torch.equal(ranks(batch), ranks(transformed)) == commutes
+
+
+def _in_float64(scheme: str, batch: torch.Tensor) -> torch.Tensor:
+    # make_transform draws its matrices in the default dtype, and in float32 a rotation
+    # is orthogonal to 1e-7 alone, which would swamp a comparison at 1e-10.
+    default = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    try:
+        return make_transform(scheme, FOUR_MOMENTUM, None, 2.0)(batch)
+    finally:
+        torch.set_default_dtype(default)
+
+
+def _rank_invariants_of(batch: torch.Tensor, symmetry: str) -> torch.Tensor:
+    # From the test columns [px, py, pz, e] in GeV to what the network reads: the ranks
+    # of [E, px, py, pz] in units of 20 GeV.
+    p = _sort_by_pt(batch[..., [3, 0, 1, 2]] / 20.0)
+    return _rank_invariants(p, RANK_BLOCKS[symmetry])
+
+
+# At 16 slots: 16 ranks of 2 * 2 + 1 entries and 3 jet entries on z, 16 ranks of
+# 2 * 4 + 1 and 5 on so2.
+VN_RANK_WIDTH = {"z": 83, "so2": 149}
+
+
+@pytest.mark.parametrize("symmetry", VN_EXACT)
+def test_vn_rank_invariants_have_their_width_and_vanish_on_padding(
+    symmetry: str,
+) -> None:
+    invariants = _rank_invariants_of(jets(4, 16, 11), symmetry)
+    per_rank = 2 * len(RANK_BLOCKS[symmetry]) + 1
+    ranks = invariants[:, : 16 * per_rank].unflatten(1, (16, per_rank))
+
+    assert invariants.shape == (4, VN_RANK_WIDTH[symmetry])
+    assert torch.equal(ranks[:, 11:], torch.zeros_like(ranks[:, 11:]))
+    assert (ranks[:, :11] != 0.0).any(dim=-1).all()
+
+
+def test_vn_rank_deficits_are_the_angular_distances_to_the_jet() -> None:
+    # The stable form of the deficit against its closed forms on z: p_T p_TJ
+    # (1 - cos dphi) on (px, py) and m_T m_TJ (cosh dy - 1) on (E, pz), in units.
+    p = _sort_by_pt(jets(4, 16, 11).double()[..., [3, 0, 1, 2]] / 20.0)[:, :11]
+    jet = p.sum(dim=1, keepdim=True)
+    ranks = _rank_invariants(p, RANK_BLOCKS["z"])[:, : 11 * 5].unflatten(1, (11, 5))
+    pt, pt_jet = (x[..., 1:3].norm(dim=-1) for x in (p, jet))
+    mt, mt_jet = ((x[..., 0] ** 2 - x[..., 3] ** 2).sqrt() for x in (p, jet))
+    phi, phi_jet = (torch.atan2(x[..., 2], x[..., 1]) for x in (p, jet))
+    y, y_jet = (torch.atanh(x[..., 3] / x[..., 0]) for x in (p, jet))
+
+    transverse = pt * pt_jet * (1.0 - torch.cos(phi - phi_jet))
+    longitudinal = mt * mt_jet * (torch.cosh(y - y_jet) - 1.0)
+    assert torch.allclose(ranks[..., 2], psi(transverse), rtol=1e-9, atol=0.0)
+    assert torch.allclose(ranks[..., 3], psi(longitudinal), rtol=1e-9, atol=0.0)
+
+
+@pytest.mark.parametrize("symmetry", VN_EXACT)
+def test_vn_rank_invariants_hold_under_the_groups_of_their_row(symmetry: str) -> None:
+    # Taken on the ranks of the transformed batch, as the network takes them.
+    torch.manual_seed(0)
+    batch = jets(8, 16, 11).double() * 10.0
+    reference = _rank_invariants_of(batch, symmetry)
+
+    for scheme in VN_EXACT[symmetry]:
+        moved = _rank_invariants_of(_in_float64(scheme, batch), symmetry)
+        assert torch.allclose(moved, reference, rtol=1e-10, atol=0.0), scheme
+    rotated = _rank_invariants_of(_in_float64("so3", batch), symmetry)
+    assert _relative_shift(reference, rotated) > 1e-3
+
+
+# The z split each so2 split copies: E and pz both from (E, pz), (px, py) from itself.
+Z_TO_SO2 = [1, 1, 0]
+
+
+def _z_inputs_in_so2(nconstituents: int, invariants: int) -> torch.Tensor:
+    # Where each input of the first z MLP sits among the so2 ones. Per rank, so2 reads
+    # the squares on (E,), (pz,), (px, py) and (E, pz), the deficits on the same four
+    # blocks and the product with the jet, and z the last two blocks of each group and
+    # that product; the jet entries follow the same pattern, and the invariants and the
+    # context close both.
+    ranks = 9 * torch.arange(nconstituents)[:, None] + torch.tensor([2, 3, 6, 7, 8])
+    jet = 9 * nconstituents + torch.tensor([2, 3, 4])
+    tail = 9 * nconstituents + 5 + torch.arange(invariants + 1)
+    return torch.cat([ranks.flatten(), jet, tail])
+
+
+def _as_so2(z: JetTaggingModule) -> JetTaggingModule:
+    # The so2 network that computes what the z network does: its E and pz splits carry
+    # the weights of the (E, pz) split, and its first layer reads the inputs z has with
+    # z's weights and the others with zero.
+    n, invariants = z.hparams.nconstituents, z.hparams.invariants
+    so2 = _algorithm("vn_z", nconstituents=n, symmetry="so2").eval().double()
+    source = dict(z.net.named_modules())
+    with torch.no_grad():
+        for name, target in so2.net.named_modules():
+            if isinstance(target, SplitLinear):
+                target.weight.copy_(source[name].weight[Z_TO_SO2])
+            elif isinstance(target, SplitGate):
+                # The gate rows are channel-major: row c * splits + split.
+                for key in ("weight", "bias"):
+                    rows = getattr(source[name].linear, key).unflatten(0, (-1, 2))
+                    getattr(target.linear, key).copy_(rows[:, Z_TO_SO2].flatten(0, 1))
+            elif name == "blocks.0.mlp.0":
+                target.weight.zero_()
+                target.weight[:, _z_inputs_in_so2(n, invariants)] = source[name].weight
+                target.bias.copy_(source[name].bias)
+            elif isinstance(target, torch.nn.Linear) and "gate" not in name:
+                target.load_state_dict(source[name].state_dict())
+    return so2
+
+
+def test_a_vn_z_network_is_an_so2_network_with_tied_longitudinal_weights() -> None:
+    # The so2 group is a subgroup of the z one, so the so2 networks include the z ones:
+    # a z network is the so2 network whose E and pz splits share their weights and
+    # whose first layer ignores the rank invariants of E and pz taken apart.
+    z = _vn("z")
+    batch = jets(8, 16, 11).double() * 10.0
+
+    with torch.no_grad():
+        assert torch.allclose(z(batch), _as_so2(z)(batch), atol=1e-10)
+
+
+def test_tying_the_vn_z_splits_makes_a_linear_layer_commute_with_every_boost() -> None:
+    # One weight for all four components is the Lorentz-equivariant layer of
+    # L-GATr-slim: separate weights on (px, py) and (E, pz) are what cut the group down
+    # to the beam's.
+    torch.manual_seed(0)
+    layer = SplitLinear(5, 3, "z").double()
+    v = torch.randn(4, 5, 4).double()
+    along = _sample_boosts(4, 2.0, isotropic=False, device=None).double()
+    across = _sample_boosts(4, 2.0, isotropic=True, device=None).double()
+
+    def commutator(boosts: torch.Tensor) -> float:
+        def boost(x: torch.Tensor) -> torch.Tensor:
+            return torch.einsum("bij,bcj->bci", boosts, x)
+
+        return (layer(boost(v)) - boost(layer(v))).abs().max().item()
+
+    with torch.no_grad():
+        assert commutator(along) < 1e-10
+        assert commutator(across) > 1e-3
+        layer.weight[0] = layer.weight[1]
+        assert commutator(across) < 1e-10
+
+
+def test_vn_reads_the_multiplicity_on_its_own() -> None:
+    # Removing a constituent also removes its momentum, so the softest one is first
+    # scaled down by 1e9, since some of its rank invariants are linear in it. Scaling it
+    # down by a further factor of ten moves the logits by about 3e-8 of their scale,
+    # removing it by about 0.3 per cent: that is the multiplicity, which every block
+    # and the head read.
+    module = _vn("z")
+    batch = jets(8, 16, 11).double() * 10.0
+    rows = torch.arange(8)
+    softest = (batch[..., 0] ** 2 + batch[..., 1] ** 2)[:, :11].argmin(dim=1)
+    soft, softer, removed = batch.clone(), batch.clone(), batch.clone()
+    soft[rows, softest] *= 1e-9
+    softer[rows, softest] *= 1e-10
+    removed[rows, softest] = 0.0
+
+    with torch.no_grad():
+        logits = module(soft)
+        content = _relative_shift(logits, module(softer))
+        assert _relative_shift(logits, module(removed)) > 1000 * content
+
+
+@pytest.mark.parametrize("symmetry", VN_EXACT)
+def test_vn_starts_with_every_gate_at_one_half(symmetry: str) -> None:
+    torch.manual_seed(0)
+    module = _algorithm("vn_z", symmetry=symmetry)
+    gates = [gate for gate in module.net.modules() if isinstance(gate, SplitGate)]
+
+    assert len(gates) == module.hparams.num_blocks
+    for gate in gates:
+        s = torch.randn(3, gate.linear.in_features)
+        u = torch.randn(3, gate.linear.out_features // gate.n_split, 4)
+        assert torch.equal(gate(s, u), u / 2)
+    # The FLOP counter's input, whose energies are as often negative as not.
+    module.train()
+    assert torch.isfinite(module(torch.randn(2, 8, 4))).all()
+
+
+def test_vn_refuses_an_unknown_symmetry_by_name() -> None:
+    # The network itself: instantiate() would wrap the error into one of Hydra's.
+    with pytest.raises(ValueError, match="symmetry must be one of"):
+        VectorNeuronsClassifier(8, [32], symmetry="so3")
 
 
 def _ragged(multiplicities: list[int], n_slots: int = 16) -> torch.Tensor:
