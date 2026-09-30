@@ -42,6 +42,7 @@ MODELS = (
     "lloca_so3",
     "vn_z",
     "vn_so2",
+    "jedi_linear",
 )
 # The symmetry-embedded class, trained in the baseline regime alone and never under the SCL.
 EMBEDDED = (
@@ -57,6 +58,10 @@ EMBEDDED = (
     "vn_z",
     "vn_so2",
 )
+# Trained in the baseline regime alone, never under augmentation or the SCL: the embedded
+# class, and JEDI-linear, a comparator from the literature that reads data.features as
+# DeepSets does.
+BASELINE_ONLY = (*EMBEDDED, "jedi_linear")
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.
 RECORD_COLUMNS = (

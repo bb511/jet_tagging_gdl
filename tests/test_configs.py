@@ -6,6 +6,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from tests.conftest import (
+    BASELINE_ONLY,
     EMBEDDED,
     MODELS,
     NCONSTITUENTS,
@@ -15,12 +16,13 @@ from tests.conftest import (
 )
 
 EXPECTED_EXPERIMENTS = {f"{model}_{n}" for model in MODELS for n in NCONSTITUENTS}
-# The embedded architectures are trained in the baseline regime alone, so they have no SCL space.
+# The baseline-only models (the embedded class and the JEDI-linear comparator) are never
+# trained under the SCL, so they have no SCL space.
 EXPECTED_SEARCHES = {
     f"{model}{variant}_optuna"
     for model in MODELS
     for variant in ("", "_scl")
-    if not (model in EMBEDDED and variant == "_scl")
+    if not (model in BASELINE_ONLY and variant == "_scl")
 }
 
 
@@ -170,6 +172,32 @@ def test_the_vn_rows_differ_in_name_and_symmetry_alone() -> None:
         for key in ("name", "symmetry"):
             cfg.pop(key)
     assert rows["so2"] == rows["z"]
+
+
+def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
+    # jedi_linear.yaml is a standalone copy of deepsets.yaml, because the algorithm
+    # tests load these files with OmegaConf alone and a defaults list would not resolve
+    # there. The comparator is read against DeepSets, so the training recipe is held
+    # fixed and only the network moves; this is what keeps the copy from drifting.
+    deepsets, jedi = (
+        OmegaConf.to_container(
+            OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
+        )
+        for name in ("deepsets", "jedi_linear")
+    )
+    assert (deepsets["_target_"], jedi["_target_"]) == (
+        "src.algorithms.deepsets.DeepSets",
+        "src.algorithms.deepsets.JEDILinear",
+    )
+    assert (deepsets["name"], jedi["name"]) == ("deepsets", "jedi_linear")
+    architectures = (
+        (deepsets, "phi_layers rho_layers activation aggregation dropout mask"),
+        (jedi, "hidden head_layers"),
+    )
+    for cfg, keys in architectures:
+        for key in ("_target_", "name", *keys.split()):
+            cfg.pop(key)
+    assert deepsets == jedi
 
 
 def test_the_vn_rows_share_one_search_space() -> None:

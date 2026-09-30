@@ -3,7 +3,7 @@ import re
 import sys
 from pathlib import Path
 
-from tests.conftest import ROOT
+from tests.conftest import BASELINE_ONLY, EMBEDDED, MODELS, ROOT
 
 # scripts/ is not a package, so the generator is loaded by path, as the analysis scripts'
 # tests load theirs. It is registered before it is executed because dataclasses resolves
@@ -77,9 +77,40 @@ def test_a_feature_set_has_no_catalogue_for_the_embedded_architectures(
 
     assert sorted(path.name for path in out.iterdir()) == sorted(
         f"run{model}_{task}.sh"
-        for model in ("deepsets", "mlp", "jetformer")
+        for model in ("deepsets", "mlp", "jetformer", "jedi_linear")
         for task in ("train", "eval")
     )
+
+
+def test_a_baseline_only_comparator_has_its_three_blocks_in_every_layout(
+    tmp_path: Path,
+) -> None:
+    # JEDI-linear runs the baseline alone, as the embedded class does, but reads
+    # data.features, so every feature set has its catalogues too; the header gives the
+    # comparator's reason for the single regime rather than the embedded class's.
+    dbs = _empty_dbs(tmp_path)
+
+    for layout in (Layout(), Layout(features=FEATURES)):
+        assert "jedi_linear" in make_train_catalogues.models_of(layout)
+        for task in ("train", "eval"):
+            text = make_train_catalogues.render("jedi_linear", task, dbs, layout)
+            assert make_train_catalogues.count_commands(LIB, text) == 3
+            assert text.count("data.augmentation_scheme=none") == 3
+            assert "data.method=symm_loss" not in text
+            assert text.count(OVERRIDE) == (3 if layout.features else 0)
+            assert "comparator from the literature" in text
+            assert "embeds the symmetry" not in text
+    # The phrase checked above is live: the embedded class's catalogues carry it.
+    vn_z = make_train_catalogues.render("vn_z", "train", dbs, Layout())
+    assert "embeds the symmetry" in vn_z
+
+
+def test_the_generator_names_the_rows_and_regimes_the_tests_do() -> None:
+    # The generator keeps lists of its own, since it runs without the test suite; a
+    # row added to one side and not the other would otherwise go unnoticed.
+    assert tuple(make_train_catalogues.MODELS) == MODELS
+    assert make_train_catalogues.EMBEDDED == set(EMBEDDED)
+    assert make_train_catalogues.BASELINE_ONLY == set(BASELINE_ONLY)
 
 
 def test_the_four_momentum_layout_names_no_feature_set_anywhere(

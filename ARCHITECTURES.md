@@ -6,7 +6,9 @@ a clean rewrite), L-GATr-slim, LLoCa and the vector neurons. The last three were
 2026-09-28 and 2026-09-29: L-GATr-slim runs in two rows, `lgatr_slim` with the spurion tokens and
 `lgatr_slim_lorentz` without, LLoCa in four, one per frames class (`lloca_lorentz`, `lloca_z`,
 `lloca_so2` and `lloca_so3`), and the vector neurons in two, one per partition of the
-four-momentum (`vn_z` and `vn_so2`). PELICAN, a plain Transformer encoder, a
+four-momentum (`vn_z` and `vn_so2`). A ninth architecture, JEDI-linear, joined on 2026-09-30 as a
+second class in the DeepSets module; it runs in one row, `jedi_linear`, as a comparator from the
+literature trained in the baseline regime alone. PELICAN, a plain Transformer encoder, a
 Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the refactor; nano-PELICAN,
 which existed as configuration only, went with them, and so did the permutation check. This file
 records what each was, why it went, and what putting it back involves.
@@ -57,7 +59,12 @@ two hooks. The steps:
   `configs/hparams_search/hls4ml/<name>_optuna.yaml` and `<name>_scl_optuna.yaml`, and the
   three catalogues `scripts/hls4ml/run<name>_{search,train,eval}.sh`. An architecture with an
   embedded symmetry follows LorentzNet and PELICAN instead: the baseline regime alone, so no
-  `_scl_optuna` config and three blocks per catalogue rather than 21.
+  `_scl_optuna` config and three blocks per catalogue rather than 21. JEDI-linear shows a third
+  case, a comparator from the literature that runs the baseline regime alone but reads
+  `data.features`: such a row goes in `BASELINE_ONLY`, not `EMBEDDED`, in both
+  `scripts/optuna/make_train_catalogues.py` and `tests/conftest.py`, has the `_optuna` config
+  alone, and needs a search catalogue under every feature-set directory,
+  `scripts/hls4ml/pt_eta_phi/` and `scripts/hls4ml/pt_etarel_phirel/` as well as `scripts/hls4ml/`.
 - Extend `tests/test_algorithms.py`, which exercises every algorithm config under both
   methods.
 
@@ -312,6 +319,119 @@ of constituents through the first block alone, mostly through the first layer of
 which reads the rank invariants; the invariants themselves are elementwise and so are left out of
 the FLOP count, which covers matmul-type operations alone. At 16 constituents PELICAN costs
 4.5 MFLOP (33 k parameters), LLoCa 34 (1.06 M) and L-GATr-slim 97 to 114 (2.0 M).
+
+## JEDI-linear
+
+Added on 2026-09-30 as a comparator from the literature, the first row that is neither a subject of
+the regimes nor symmetry-embedded. JEDI-linear (Que, Sun et al., arXiv:2508.15468, Field
+Programmable Technology 2025) is a jet tagger built for FPGAs; it runs here in the baseline regime
+alone and is judged on accuracy and cost, against the vector neurons in particular. Its published
+accuracy, 73.6 % at 16 constituents on three features, is measured on the record's `etarel` and
+`phirel`, which are taken from the axis of the untruncated jet. This repository rebases them on the
+kept constituents, which is worth about 2 points, so a comparison needs the network trained on this
+preparation. Our code is a second class in each DeepSets file: the network `JEDILinearNet` beside
+`DeepSetsNet` in `src/algorithms/components/deepsets.py` and the `JetTaggingModule` subclass
+`JEDILinear` beside `DeepSets` in `src/algorithms/deepsets.py`, the two older classes untouched.
+Around them sit `configs/algorithm/jedi_linear.yaml`, the three experiment configs
+`configs/experiment/hls4ml/jedi_linear_{16,50,150}.yaml`, the search config
+`configs/hparams_search/hls4ml/jedi_linear_optuna.yaml`, with no `_scl` companion, the three search
+catalogues `scripts/hls4ml{,/pt_eta_phi,/pt_etarel_phirel}/runjedi_linear_search.sh` and the
+generated `scripts/hls4ml/runjedi_linear_{train,eval}.sh`.
+
+The reference is the paper and `src/model.py::get_gnn` of its code, github.com/calad0i/JEDI-linear,
+both read on 2026-09-30. In float it is one network for every number of constituents and every
+feature set. A dense layer of width 64 projects each constituent to h_i. A dense layer of h_i and a
+dense layer of the pooled Σ_j h_j, both of width 64, are added, the second by broadcast over the
+constituents; a shared dense layer of width 64 follows; the result is pooled over the jet and read
+by a head 64-32-16-5. Every dense layer carries a BatchNorm, and every one but the last a ReLU. Both
+poolings are sums with a constant scale, 2^-round(log2 N) at N slots for the context and 1/16 for
+the readout, never per-jet means, and nothing masks the padded rows, which the reference's
+standardisation turns into the constant -μ/σ. This is DeepSets whose per-constituent network
+carries one permutation-equivariant layer of Zaheer et al. (Deep Sets, arXiv:1703.06114),
+f(X) = σ(XΛ + (1/N) 1 1ᵀ X Γ), which the paper rederives by linearising the edge function of
+JEDI-net (its eq. 4). What the paper adds is the FPGA co-design, per-weight bitwidths and
+distributed arithmetic, not the function class, so the row enters as a comparator and not as a
+subject of the augmentation and SCL regimes; our paper says so in a sentence. The paper's variant on
+p_T-sorted constituents, described as not permutation-invariant, differs only in its per-slot
+quantisation bitwidths: in float there is one architecture, and it is permutation-invariant, so
+there is one row.
+
+The reference reads three features, record columns 5, 8 and 11, which are `pt`, `etarel` and
+`phirel` (the paper writes p_T, η and φ), or all 16 columns. The 16-feature variant is not run
+here: no transform rewrites `erel`, `etarot`, `phirot`, `costheta` or `costhetarel`, so the probes
+would feed it stale values. The row is searched instead on the three feature sets of the
+repository. The paper's cut at 2 GeV on the constituents is not in the released code and is not
+applied. The reference trains with Adam at 3e-3, a cosine decay restarted every 100 epochs and
+batches of 2790, for 7000 epochs of quantisation-aware training under HGQ with a ramped penalty on
+the EBOPs cost. That training is a scan along the Pareto front of accuracy against cost and does not
+transfer to a float network. The reference's histories peak at a validation accuracy of 0.738 at
+16 constituents on three features, before the quantisation starts to cost accuracy. With the 2
+points of the jet axis removed, the row should land near 0.715 at 16 constituents on
+`[pt, etarel, phirel]`, between tuned DeepSets (0.705) and JetFormer (0.720). A calibration on olgpu
+on 2026-09-30, one fold at 16 constituents on that set, gave a validation accuracy of 0.707 after
+50 epochs at the reference's learning rate of 3e-3 (0.696 at the config's 1e-3), while DeepSets
+and the row reached 0.668 and 0.670 under the same 20-epoch protocol at 1e-3; the search sets the
+learning rate.
+
+The port departs from the released code in three ways, each by choice. It has no BatchNorm: at
+inference a BatchNorm folds into the dense layer before it, and in training it served the
+quantiser, so without it the row differs from DeepSets in the context layer alone, which keeps the
+comparison fair. Both poolings are sums over the real constituents with no scale. A padded slot is
+an all-zero row but embeds to the ReLU of the first bias, so the mask (`x.abs().sum(-1) > 0`, the
+convention of the other components) keeps it out of both sums, and the multiplicity reaches the
+head through the sums rather than through the padded rows. A constant scale in front of a dense
+layer is absorbed by its weights, so dropping it changes nothing the network can express. And the
+network is float only, with no quantisation. With σ the ReLU and both sums over the real
+constituents, it computes h_i = σ(W_0 x_i + b_0), g_i = σ(W_1 h_i + b_1) + σ(W_2 Σ_j h_j + b_2)
+and z = Σ_i σ(W_3 g_i + b_3), and the head reads z. One width, `hidden` (64 by default, the
+published point), serves the projection, both context branches and the shared layer; the head is
+`[64, 32, 16]`, the activation is ReLU, fixed, and there is no dropout. The state dict does not
+depend on the number of constituents.
+
+The optimiser and scheduler are the DeepSets block verbatim, Adam at 1e-3 with weight decay 1e-7
+and ReduceLROnPlateau on `val/acc`: `jedi_linear.yaml` is a standalone copy of `deepsets.yaml`
+that differs in `_target_`, `name` and the architecture keys, and `tests/test_configs.py` keeps the
+rest in step. The experiments keep the `16-mixed` precision of `trainer/gpu.yaml`, as DeepSets, MLP
+and JetFormer do. The row sits between the two classes the tooling knew before. It runs the
+baseline regime alone, as the embedded rows do, but reads `data.features`
+(`nbr_feats: ${len:${data.features}}`), as DeepSets does, so its rows land in
+`results/<label>/results_table_baseline.csv` and `results_table.subdir` stays null.
+`scripts/optuna/make_train_catalogues.py` and `tests/conftest.py` therefore hold a second set,
+`BASELINE_ONLY`, of the embedded rows and `jedi_linear`. Membership of it means no `_scl_optuna`
+config and baseline blocks alone; `results/embedded/` and the pinned four-momentum belong to
+`EMBEDDED` alone, so every feature-set layout has catalogues for the comparator, three blocks each,
+whose headers give its own reason for the single regime.
+
+The search, `jedi_linear_optuna.yaml`, runs one study per constituent count,
+`jedi_linear_nconst<N>_augmentation_none`, in `logs/optuna/hls4ml/jedi_linear.db` on the
+four-momentum and in `logs/optuna/hls4ml/<label>/jedi_linear.db` on the other sets, each of 200
+trials of 50 epochs. It draws `hidden` from {16, 32, 64, 128}, the head from the `rho_layers`
+choices of DeepSets plus [64, 32, 16], the learning rate log-uniformly from 1e-4 to 1e-2 and the
+weight decay from {0, 1e-7, 1e-6, 1e-5, 1e-4}, so the published point lies inside the space. Nine
+studies, three feature sets times three counts, are planned.
+
+At the published point the network has 64F + 19 397 parameters on F features, 19 589 on three and
+19 653 on four, at every number of constituents; at the corner of the search space (hidden 128,
+head [64, 32, 16]) it has 128F + 60 613, 61 125 on four. It costs 0.290, 0.860 and 2.537 MFLOP per
+jet at 16, 50 and 150 constituents on three features and 0.292, 0.866 and 2.556 on four, counting
+two FLOPs per multiply-add and leaving the poolings out, as the FLOP counter does; the corner costs
+1.12, 3.37 and 10.0 MFLOP on three features. Nearly all of the cost is per constituent,
+128F + 16 384 FLOPs per slot against 21 664 per jet at the published point, so it grows linearly
+with N. The vector neurons run every block after the first once per jet, and `vn_z` costs 0.108,
+0.134 and 0.211 MFLOP; tuned DeepSets costs about 0.28, 0.64 and 0.98. A V100 pre-flight at the
+corner, with batches of 2048 under fp16 autocast, reserved 0.12, 0.32 and 0.77 GiB and took 3.3,
+3.9 and 6.3 ms per step at 16, 50 and 150 constituents, so every study fits a 1g MIG slice. These
+figures were measured on olgpu on 2026-09-30.
+
+`tests/test_algorithms.py` checks that the logits are invariant, to 1e-10 in float64, under a
+permutation of the constituents and under padding, both a zero slot appended to the jet and a hole
+among its slots; it calls the network directly, because `forward` casts every batch to float32. It
+also checks that both poolings are sums: on jets made of k copies of one constituent, the pooled
+vector divided by k is the same for every k with the context silenced and moves with k with the
+context live, which a mean in either pool would break. Last, it checks the parameter count.
+`tests/test_configs.py` keeps `jedi_linear.yaml` a copy of `deepsets.yaml`, and
+`tests/test_make_train_catalogues.py` checks the three blocks in every layout and that the
+generator's registries equal those of the tests.
 
 ## nano-PELICAN
 

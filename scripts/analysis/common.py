@@ -52,6 +52,7 @@ MODEL_DISPLAY = {
     "lloca_so3": "LLoCa (SO(3))",
     "vn_z": "Vector neurons (SO(2)xSO(1,1))",
     "vn_so2": "Vector neurons (SO(2))",
+    "jedi_linear": "JEDI-linear",
     "transformer": "JetFormer",
 }
 

@@ -1,12 +1,12 @@
-"""DeepSets jet tagger.
+"""DeepSets jet taggers: DeepSets itself and JEDI-linear, which adds one context layer.
 
-The network is invariant under a permutation of the constituents by construction.
+Both networks are invariant under a permutation of the constituents by construction.
 """
 
 from torch import nn
 
 from src.algorithms import JetTaggingModule
-from src.algorithms.components.deepsets import DeepSetsNet
+from src.algorithms.components.deepsets import DeepSetsNet, JEDILinearNet
 
 
 class DeepSets(JetTaggingModule):
@@ -31,4 +31,18 @@ class DeepSets(JetTaggingModule):
             aggregation=aggregation,
             dropout=dropout,
             mask=mask,
+        )
+
+
+class JEDILinear(JetTaggingModule):
+    """JEDI-linear in float: DeepSets with one permutation-equivariant context layer, a
+    comparator from the literature (arXiv:2508.15468) trained at baseline alone."""
+
+    def build_net(self, hidden: int, head_layers: list[int]) -> nn.Module:
+        """Build the network; the arguments are documented in components/deepsets.py."""
+        return JEDILinearNet(
+            in_dim=self.hparams.nbr_feats,
+            hidden=hidden,
+            head_layers=head_layers,
+            out_dim=self.hparams.output_dim,
         )

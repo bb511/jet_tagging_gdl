@@ -8,7 +8,8 @@ DeepSets, MLP and JetFormer are trained on a 3 x 7 grid:
     - SO(2), SO(3) and Lorentz augmentation
     - SO(2), SO(3) and Lorentz symmetry loss
 
-Symmetry-embedded architectures are trained on the baseline only.
+Symmetry-embedded architectures are trained on the baseline only, and so is JEDI-linear,
+a comparator from the literature that, unlike them, reads every feature set.
 The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 ``logs/optuna/hls4ml/<label>/`` for a feature set other than the four-momentum.
 """
@@ -37,6 +38,7 @@ MODELS = [
     "lloca_so3",
     "vn_z",
     "vn_so2",
+    "jedi_linear",
 ]
 NCONSTITUENTS = [16, 50, 150]
 
@@ -69,9 +71,13 @@ EMBEDDED = {
     "vn_z",
     "vn_so2",
 }
+# JEDI-linear (arXiv:2508.15468) is a comparator from the literature rather than a subject of
+# the augmentation-against-SCL grid, so it is trained at baseline alone like the embedded
+# class; unlike that class it reads data.features, so every feature set has catalogues for it.
+BASELINE_ONLY = EMBEDDED | {"jedi_linear"}
 
 VARIANTS_OF = {
-    model: VARIANTS[:1] if model in EMBEDDED else VARIANTS for model in MODELS
+    model: VARIANTS[:1] if model in BASELINE_ONLY else VARIANTS for model in MODELS
 }
 
 # The searches use one fold; five is what the results table callback needs to put a confidence
@@ -263,6 +269,17 @@ BASELINE_ONLY_NOTE = [
     "# Baseline only: this architecture embeds the symmetry rather than acquiring it,",
     "# so the augmentation and SCL regimes are not run on it.",
 ]
+COMPARATOR_NOTE = [
+    "# Baseline only: this architecture is a comparator from the literature rather than",
+    "# a subject of the study, so the augmentation and SCL regimes are not run on it.",
+]
+
+
+def regime_note(model: str) -> list[str]:
+    """Why a catalogue covers the baseline alone; nothing for the full grid."""
+    if model in EMBEDDED:
+        return BASELINE_ONLY_NOTE
+    return COMPARATOR_NOTE if model in BASELINE_ONLY else []
 
 
 def tuned_note(layout: Layout) -> list[str]:
@@ -300,7 +317,7 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
         f"# One block per (constituent count, regime): {grid} {task} runs. Generated",
         "# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.",
         *features_note(layout),
-        *([] if nvariants == len(VARIANTS) else BASELINE_ONLY_NOTE),
+        *regime_note(model),
         *(TRANSFERRED_NOTE if layout.transferred else tuned_note(layout)),
         "#",
         "# Every command is commented out: copy one to run it by hand, or feed the whole",

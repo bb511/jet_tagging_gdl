@@ -1,0 +1,44 @@
+# JEDI-linear (arXiv:2508.15468) in float, a comparator from the literature trained in the
+# baseline regime alone. It is DeepSets whose per-constituent network carries one
+# permutation-equivariant context layer; both pools are sums over the real constituents with no
+# scale, and the released code's BatchNorm is left out. This file is a copy of deepsets.yaml
+# differing in _target_, name and the architecture keys (tests/test_configs.py keeps the rest in
+# step).
+_target_: src.algorithms.deepsets.JEDILinear
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: jedi_linear
+
+nconstituents: ${data.nconstituents}
+nbr_feats: ${len:${data.features}}
+output_dim: 5
+
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+symm_loss_metric: l2
+transform_kwargs: ${data.transform_kwargs}
+
+# The published point, one architecture for every N and feature set.
+hidden: 64 # width of every per-constituent layer, of the context and of the pooled vector
+head_layers: [64, 32, 16] # hidden widths of the MLP on the pooled vector
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 1.0e-3
+  weight_decay: 1.0e-7
+
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 1.0e-4
+  monitor: val/acc
+  interval: epoch
+  frequency: 1
+
+compile: false

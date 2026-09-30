@@ -19,6 +19,7 @@ from src.algorithms.components.vector_neurons import (
 from src.data.components.augmentation import _sample_boosts, make_transform
 from src.symmetry import GROUPS
 from tests.conftest import (
+    BASELINE_ONLY,
     EMBEDDED,
     FOUR_MOMENTUM,
     MODELS,
@@ -91,6 +92,7 @@ ARCHITECTURE_KEYS = {
         "dropout",
         "units",
     },
+    "jedi_linear": {"hidden", "head_layers"},
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
@@ -136,12 +138,13 @@ def _attach(module: JetTaggingModule, datamodule: StubDataModule) -> JetTaggingM
     return module
 
 
-# The embedded models carry their symmetry in the architecture, so neither is trained under
-# the SCL.
+# The baseline-only models are never trained under the SCL: the embedded ones carry
+# their symmetry in the architecture, and JEDI-linear is a comparator from the
+# literature rather than a subject of the study.
 @pytest.mark.parametrize(
     "name, method, group",
     [(name, "augmentation", "none") for name in MODELS]
-    + [(name, "symm_loss", "so2") for name in MODELS if name not in EMBEDDED],
+    + [(name, "symm_loss", "so2") for name in MODELS if name not in BASELINE_ONLY],
 )
 def test_every_algorithm_takes_one_step_under_either_method(
     name: str, method: str, group: str
@@ -237,6 +240,88 @@ def test_deepsets_mean_pools_over_the_jets_own_constituents() -> None:
         padded = wide(torch.cat([batch, torch.zeros(4, 1, 4)], dim=1))
 
     assert torch.allclose(physical, padded, atol=1e-6)
+
+
+def _jedi_net(nconstituents: int = 16) -> torch.nn.Module:
+    # The network alone, in float64: forward() rounds the batch to float32, and this row
+    # has no float64 buffer to promote it again, as the de-normalising rows have.
+    torch.manual_seed(0)
+    return _algorithm("jedi_linear", nconstituents=nconstituents).net.eval().double()
+
+
+def test_jedi_linear_is_blind_to_the_order_of_the_constituents() -> None:
+    net = _jedi_net()
+    batch = jets(8, 16, 11).double()
+    generator = torch.Generator().manual_seed(2)
+    # A permutation of its own for every jet, which also moves padded slots among the
+    # real ones.
+    order = torch.rand(8, 16, generator=generator).argsort(dim=1)
+    shuffled = batch.gather(1, order.unsqueeze(-1).expand_as(batch))
+
+    with torch.no_grad():
+        assert torch.allclose(net(batch), net(shuffled), atol=1e-10)
+
+
+def test_jedi_linear_ignores_padding() -> None:
+    # A padded row embeds to the ReLU of the first bias, so it is the mask that keeps it
+    # out of both sums, whether the row trails the jet or sits among its constituents.
+    # Unlike the embedded rows, the network reads the features as stored, so there is
+    # no normalisation of the batch to undo.
+    narrow = _jedi_net(nconstituents=8)
+    wide = _algorithm("jedi_linear", nconstituents=9).net.eval().double()
+    wide.load_state_dict(narrow.state_dict(), strict=True)
+    batch = jets(4, 8, 6).double()
+    zero_slot = torch.zeros(4, 1, 4, dtype=torch.float64)
+    holed = batch.clone()
+    holed[:, 3] = 0.0
+    compacted = torch.cat([holed[:, [0, 1, 2, 4, 5, 6, 7]], zero_slot], dim=1)
+
+    with torch.no_grad():
+        padded = wide(torch.cat([batch, zero_slot], dim=1))
+        assert torch.allclose(narrow(batch), padded, atol=1e-10)
+        assert torch.allclose(narrow(holed), narrow(compacted), atol=1e-10)
+
+
+def test_jedi_linear_sums_over_the_real_constituents_in_both_pools() -> None:
+    # Jet k holds one constituent k times. With the context branch zeroed (it then adds
+    # relu(0) = 0), a summed readout makes the pooled vector k times that of one copy;
+    # with it live, a summed context reads k times the copy's embedding, so the pooled
+    # vector per copy moves with k. A mean readout would fail the first check and a mean
+    # context the second: either would hide the multiplicity from the head.
+    net = _jedi_net(nconstituents=8)
+    constituent = jets(1, 1, 1).double()[0, 0]
+    batch = torch.zeros(8, 8, 4, dtype=torch.float64)
+    for k in range(1, 9):
+        batch[k - 1, :k] = constituent
+    copies = torch.arange(1, 9, dtype=torch.float64).unsqueeze(-1)
+
+    with torch.no_grad():
+        live = net.pooled(batch) / copies
+        for parameter in net.context.parameters():
+            parameter.zero_()
+        readout = net.pooled(batch) / copies
+
+    assert readout.abs().max() > 0
+    assert torch.allclose(readout, readout[:1].expand_as(readout), rtol=1e-12)
+    # 5.9 at this initialisation, measured on olgpu on 2026-09-30.
+    assert _relative_shift(live[:1], live[-1:]) > 1.0
+
+
+@pytest.mark.parametrize(
+    "features, n_parameters", [(["pt", "eta", "phi"], 19_589), (FOUR_MOMENTUM, 19_653)]
+)
+def test_jedi_linear_has_the_parameters_of_its_dense_layers_alone(
+    features: list[str], n_parameters: int
+) -> None:
+    # 64 F + 64 for the input layer on F features, 4160 for each of the three 64 x 64
+    # layers (local, context, shared) and 4160 + 2080 + 528 + 85 for the head: 64 F +
+    # 19 397 at the published point, with none of the released code's BatchNorm, and
+    # the same at every multiplicity.
+    for nconstituents in (16, 150):
+        module = _algorithm(
+            "jedi_linear", nconstituents=nconstituents, features=features
+        )
+        assert sum(p.numel() for p in module.parameters()) == n_parameters
 
 
 def test_lorentznet_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:
