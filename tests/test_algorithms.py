@@ -6,6 +6,7 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from src.algorithms import JetTaggingModule
+from src.algorithms.components.deepsets import AGGREGATIONS
 from src.algorithms.components.lorentznet import psi
 from src.algorithms.components.pelican import LinEq2to2
 from src.algorithms.components.vector_neurons import (
@@ -92,7 +93,7 @@ ARCHITECTURE_KEYS = {
         "dropout",
         "units",
     },
-    "jedi_linear": {"hidden", "head_layers"},
+    "jedi_linear": {"hidden", "head_layers", "activation", "aggregation"},
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
@@ -242,15 +243,24 @@ def test_deepsets_mean_pools_over_the_jets_own_constituents() -> None:
     assert torch.allclose(physical, padded, atol=1e-6)
 
 
-def _jedi_net(nconstituents: int = 16) -> torch.nn.Module:
+# Every activation and pooling the search offers; tanh with the maximum is the pair in
+# which a padded slot could win the maximum if it entered as zero.
+JEDI_CHOICES = [(act, agg) for act in ("relu", "tanh") for agg in AGGREGATIONS]
+
+
+def _jedi_net(nconstituents: int = 16, **overrides: object) -> torch.nn.Module:
     # The network alone, in float64: forward() rounds the batch to float32, and this row
     # has no float64 buffer to promote it again, as the de-normalising rows have.
     torch.manual_seed(0)
-    return _algorithm("jedi_linear", nconstituents=nconstituents).net.eval().double()
+    module = _algorithm("jedi_linear", nconstituents=nconstituents, **overrides)
+    return module.net.eval().double()
 
 
-def test_jedi_linear_is_blind_to_the_order_of_the_constituents() -> None:
-    net = _jedi_net()
+@pytest.mark.parametrize("activation, aggregation", JEDI_CHOICES)
+def test_jedi_linear_is_blind_to_the_order_of_the_constituents(
+    activation: str, aggregation: str
+) -> None:
+    net = _jedi_net(activation=activation, aggregation=aggregation)
     batch = jets(8, 16, 11).double()
     generator = torch.Generator().manual_seed(2)
     # A permutation of its own for every jet, which also moves padded slots among the
@@ -262,15 +272,20 @@ def test_jedi_linear_is_blind_to_the_order_of_the_constituents() -> None:
         assert torch.allclose(net(batch), net(shuffled), atol=1e-10)
 
 
-def test_jedi_linear_ignores_padding() -> None:
-    # A padded row embeds to the ReLU of the first bias, so it is the mask that keeps it
-    # out of both sums, whether the row trails the jet or sits among its constituents.
-    # Unlike the embedded rows, the network reads the features as stored, so there is
-    # no normalisation of the batch to undo.
-    narrow = _jedi_net(nconstituents=8)
-    wide = _algorithm("jedi_linear", nconstituents=9).net.eval().double()
+@pytest.mark.parametrize("activation, aggregation", JEDI_CHOICES)
+def test_jedi_linear_ignores_padding(activation: str, aggregation: str) -> None:
+    # A padded row embeds to the activation of the first bias, so it is the mask that
+    # keeps it out of both pools, whether the row trails the jet or sits among its
+    # constituents. The jets fill every slot of the narrow network, so the wide one's
+    # single padded slot is the only one: under tanh with the maximum it would win every
+    # channel whose real values are all negative if it entered as zero. Unlike the
+    # embedded rows, the network reads the features as stored, so there is no
+    # normalisation of the batch to undo.
+    choices = {"activation": activation, "aggregation": aggregation}
+    narrow = _jedi_net(nconstituents=8, **choices)
+    wide = _algorithm("jedi_linear", nconstituents=9, **choices).net.eval().double()
     wide.load_state_dict(narrow.state_dict(), strict=True)
-    batch = jets(4, 8, 6).double()
+    batch = jets(4, 8, 8).double()
     zero_slot = torch.zeros(4, 1, 4, dtype=torch.float64)
     holed = batch.clone()
     holed[:, 3] = 0.0
@@ -283,6 +298,7 @@ def test_jedi_linear_ignores_padding() -> None:
 
 
 def test_jedi_linear_sums_over_the_real_constituents_in_both_pools() -> None:
+    # At the published point, the sum with ReLU, which the config defaults to.
     # Jet k holds one constituent k times. With the context branch zeroed (it then adds
     # relu(0) = 0), a summed readout makes the pooled vector k times that of one copy;
     # with it live, a summed context reads k times the copy's embedding, so the pooled

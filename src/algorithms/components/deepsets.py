@@ -95,19 +95,40 @@ class DeepSetsNet(nn.Module):
         return nn.Sequential(*layers)
 
 
-def _masked_sum(h: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
-    """Sum (jets, constituents, width) over the real constituents, to (jets, width)."""
-    return (h * real).sum(dim=1)
+def _check_choices(aggregation: str, activation: str) -> None:
+    """Refuse a pooling or an activation this module does not provide, by name."""
+    if aggregation not in AGGREGATIONS:
+        raise ValueError(
+            f"aggregation must be one of {list(AGGREGATIONS)}, got {aggregation!r}."
+        )
+    if activation not in _ACTIVATIONS:
+        raise ValueError(
+            f"activation must be one of {list(_ACTIVATIONS)}, got {activation!r}."
+        )
 
 
-def _dense(dims: list[int], final_activation: bool) -> nn.Sequential:
-    """Stack ``len(dims) - 1`` linear layers with a ReLU between them and, if asked,
-    after the last."""
+def _masked_pool(h: torch.Tensor, real: torch.Tensor, aggregation: str) -> torch.Tensor:
+    """Pool (jets, constituents, width) over the real constituents, to (jets, width).
+
+    :param real: (jets, constituents, 1), True for a real constituent.
+    :param aggregation: one of `AGGREGATIONS`.
+    """
+    if aggregation == "max":
+        # A tanh embedding can be negative, so a padded slot must lose every comparison
+        # rather than enter the maximum as zero.
+        return h.masked_fill(~real, float("-inf")).amax(dim=1)
+    total = (h * real).sum(dim=1)
+    return total if aggregation == "sum" else total / real.sum(dim=1).clamp(min=1)
+
+
+def _dense(dims: list[int], activation: str, final_activation: bool) -> nn.Sequential:
+    """Stack ``len(dims) - 1`` linear layers with the activation between them and, if
+    asked, after the last."""
     layers: list[nn.Module] = []
     for i in range(len(dims) - 1):
         layers.append(nn.Linear(dims[i], dims[i + 1]))
         if final_activation or i < len(dims) - 2:
-            layers.append(nn.ReLU())
+            layers.append(_ACTIVATIONS[activation]())
     return nn.Sequential(*layers)
 
 
@@ -115,28 +136,40 @@ class JEDILinearNet(nn.Module):
     """DeepSets whose per-constituent network carries one permutation-equivariant layer
     (Zaheer et al., arXiv:1703.06114): JEDI-linear (arXiv:2508.15468) in float.
 
-    The context layer maps the embedding h_i of constituent i to relu(W1 h_i + b1) +
-    relu(W2 sum_j h_j + b2), a shared layer follows, and the head reads the sum of the
-    result over the jet. Both sums run over the real constituents and carry no scale, so
-    the multiplicity reaches the head through the sums and padding changes nothing. The
-    released code scales each sum by a constant, which the next dense layer absorbs, and
-    sums the padded rows too. Its BatchNorm is left out: it folds into the dense layers
-    at inference and served the quantiser in training.
+    With s the activation, the context layer maps the embedding h_i of constituent i to
+    s(W1 h_i + b1) + s(W2 pool_j h_j + b2); a shared layer follows, and the head reads
+    the pool of the result over the jet. Both pools use one aggregation over the real
+    constituents, chosen among those the DeepSets row searches, so that the two rows
+    differ in the context layer alone; padding changes nothing, and only the sum carries
+    the multiplicity to the head. The published point is the sum with ReLU. The released
+    code scales each sum by a constant, which the next dense layer absorbs, and sums the
+    padded rows too. Its BatchNorm is left out: it folds into the dense layers at
+    inference and served the quantiser in training.
 
     :param hidden: width of the projection, the two context branches and the shared
         layer.
     :param head_layers: hidden widths of the MLP that reads the pooled vector.
+    :param activation: a key of ``_ACTIVATIONS``, after every layer but the last.
+    :param aggregation: one of `AGGREGATIONS`, for the context and the readout alike.
     """
 
     def __init__(
-        self, in_dim: int, hidden: int, head_layers: list[int], out_dim: int
+        self,
+        in_dim: int,
+        hidden: int,
+        head_layers: list[int],
+        out_dim: int,
+        activation: str = "relu",
+        aggregation: str = "sum",
     ) -> None:
         super().__init__()
-        self.embed = _dense([in_dim, hidden], True)
-        self.local = _dense([hidden, hidden], True)
-        self.context = _dense([hidden, hidden], True)
-        self.shared = _dense([hidden, hidden], True)
-        self.head = _dense([hidden, *head_layers, out_dim], False)
+        _check_choices(aggregation, activation)
+        self.aggregation = aggregation
+        self.embed = _dense([in_dim, hidden], activation, True)
+        self.local = _dense([hidden, hidden], activation, True)
+        self.context = _dense([hidden, hidden], activation, True)
+        self.shared = _dense([hidden, hidden], activation, True)
+        self.head = _dense([hidden, *head_layers, out_dim], activation, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.pooled(x))
@@ -145,8 +178,9 @@ class JEDILinearNet(nn.Module):
         """Return the jet vector the head reads, (jets, hidden), from a batch of shape
         (jets, constituents, features)."""
         h = self.embed(x)
-        # A padded slot is an all-zero row but embeds to the ReLU of the first bias, so
-        # the mask, not the input, keeps it out of both sums.
-        real = (x.abs().sum(dim=-1, keepdim=True) > 0).to(h.dtype)
-        h = self.local(h) + self.context(_masked_sum(h, real)).unsqueeze(1)
-        return _masked_sum(self.shared(h), real)
+        # A padded slot is an all-zero row but embeds to the activation of the first
+        # bias, so the mask, not the input, keeps it out of both pools.
+        real = x.abs().sum(dim=-1, keepdim=True) > 0
+        context = self.context(_masked_pool(h, real, self.aggregation))
+        h = self.local(h) + context.unsqueeze(1)
+        return _masked_pool(self.shared(h), real, self.aggregation)

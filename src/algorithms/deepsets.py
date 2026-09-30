@@ -38,11 +38,19 @@ class JEDILinear(JetTaggingModule):
     """JEDI-linear in float: DeepSets with one permutation-equivariant context layer, a
     comparator from the literature (arXiv:2508.15468) trained at baseline alone."""
 
-    def build_net(self, hidden: int, head_layers: list[int]) -> nn.Module:
+    def build_net(
+        self,
+        hidden: int,
+        head_layers: list[int],
+        activation: str = "relu",
+        aggregation: str = "sum",
+    ) -> nn.Module:
         """Build the network; the arguments are documented in components/deepsets.py."""
         return JEDILinearNet(
             in_dim=self.hparams.nbr_feats,
             hidden=hidden,
             head_layers=head_layers,
             out_dim=self.hparams.output_dim,
+            activation=activation,
+            aggregation=aggregation,
         )

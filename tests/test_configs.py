@@ -178,7 +178,9 @@ def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
     # jedi_linear.yaml is a standalone copy of deepsets.yaml, because the algorithm
     # tests load these files with OmegaConf alone and a defaults list would not resolve
     # there. The comparator is read against DeepSets, so the training recipe is held
-    # fixed and only the network moves; this is what keeps the copy from drifting.
+    # fixed and only the network moves; this is what keeps the copy from drifting. The
+    # pooling defaults differ (the DeepSets mean, the published sum), and the searches
+    # offer both rows the same choices.
     deepsets, jedi = (
         OmegaConf.to_container(
             OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
@@ -191,13 +193,28 @@ def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
     )
     assert (deepsets["name"], jedi["name"]) == ("deepsets", "jedi_linear")
     architectures = (
-        (deepsets, "phi_layers rho_layers activation aggregation dropout mask"),
-        (jedi, "hidden head_layers"),
+        (deepsets, "phi_layers rho_layers aggregation dropout mask"),
+        (jedi, "hidden head_layers aggregation"),
     )
     for cfg, keys in architectures:
         for key in ("_target_", "name", *keys.split()):
             cfg.pop(key)
     assert deepsets == jedi
+
+
+def test_jedi_linear_searches_the_training_and_pooling_choices_of_deepsets() -> None:
+    # A first campaign with the pooling fixed to the sum fell 8 to 14 points behind
+    # DeepSets wherever the best DeepSets trial took the maximum, so every choice the two
+    # rows share is searched over the same values; only the network's widths differ.
+    deepsets, jedi = (
+        OmegaConf.load(
+            ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}_optuna.yaml"
+        ).hydra.sweeper.params
+        for name in ("deepsets", "jedi_linear")
+    )
+    shared = ("activation", "aggregation", "optimizer.lr", "optimizer.weight_decay")
+    for key in shared:
+        assert jedi[f"algorithm.{key}"] == deepsets[f"algorithm.{key}"], key
 
 
 def test_the_vn_rows_share_one_search_space() -> None:

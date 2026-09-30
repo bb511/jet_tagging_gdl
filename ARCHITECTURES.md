@@ -376,17 +376,20 @@ learning rate.
 The port departs from the released code in three ways, each by choice. It has no BatchNorm: at
 inference a BatchNorm folds into the dense layer before it, and in training it served the
 quantiser, so without it the row differs from DeepSets in the context layer alone, which keeps the
-comparison fair. Both poolings are sums over the real constituents with no scale. A padded slot is
-an all-zero row but embeds to the ReLU of the first bias, so the mask (`x.abs().sum(-1) > 0`, the
-convention of the other components) keeps it out of both sums, and the multiplicity reaches the
-head through the sums rather than through the padded rows. A constant scale in front of a dense
-layer is absorbed by its weights, so dropping it changes nothing the network can express. And the
-network is float only, with no quantisation. With σ the ReLU and both sums over the real
-constituents, it computes h_i = σ(W_0 x_i + b_0), g_i = σ(W_1 h_i + b_1) + σ(W_2 Σ_j h_j + b_2)
-and z = Σ_i σ(W_3 g_i + b_3), and the head reads z. One width, `hidden` (64 by default, the
-published point), serves the projection, both context branches and the shared layer; the head is
-`[64, 32, 16]`, the activation is ReLU, fixed, and there is no dropout. The state dict does not
-depend on the number of constituents.
+comparison fair. Its two pools use one aggregation over the real constituents, with no scale, which
+the search picks among the sum, the mean and the maximum that the DeepSets search offers; the
+published point is the sum. A padded slot is an all-zero row but embeds to the activation of the
+first bias, so the mask (`x.abs().sum(-1) > 0`, the convention of the other components) keeps it
+out of both pools; for the maximum it enters as minus infinity, since a tanh embedding can be
+negative. Only the sum carries the multiplicity to the head, which then reads it from the real
+constituents rather than from the padded rows. A constant scale in front of a dense layer is
+absorbed by its weights, so dropping it changes nothing the network can express. And the network is
+float only, with no quantisation. With σ the activation and P the pool over the real constituents,
+it computes h_i = σ(W_0 x_i + b_0), g_i = σ(W_1 h_i + b_1) + σ(W_2 P_j h_j + b_2) and
+z = P_i σ(W_3 g_i + b_3), and the head reads z. One width, `hidden` (64 by default, the published
+point), serves the projection, both context branches and the shared layer; the head is
+`[64, 32, 16]`, the activation ReLU by default with tanh as the search's alternative, as for
+DeepSets, and there is no dropout. The state dict does not depend on the number of constituents.
 
 The optimiser and scheduler are the DeepSets block verbatim, Adam at 1e-3 with weight decay 1e-7
 and ReduceLROnPlateau on `val/acc`: `jedi_linear.yaml` is a standalone copy of `deepsets.yaml`
@@ -406,9 +409,21 @@ The search, `jedi_linear_optuna.yaml`, runs one study per constituent count,
 `jedi_linear_nconst<N>_augmentation_none`, in `logs/optuna/hls4ml/jedi_linear.db` on the
 four-momentum and in `logs/optuna/hls4ml/<label>/jedi_linear.db` on the other sets, each of 200
 trials of 50 epochs. It draws `hidden` from {16, 32, 64, 128}, the head from the `rho_layers`
-choices of DeepSets plus [64, 32, 16], the learning rate log-uniformly from 1e-4 to 1e-2 and the
-weight decay from {0, 1e-7, 1e-6, 1e-5, 1e-4}, so the published point lies inside the space. Nine
-studies, three feature sets times three counts, are planned.
+choices of DeepSets plus [64, 32, 16], the activation from {relu, tanh}, the pooling from
+{sum, mean, max}, the learning rate log-uniformly from 1e-4 to 1e-2 and the weight decay from
+{0, 1e-7, 1e-6, 1e-5, 1e-4}, so the published point lies inside the space. Every choice the two rows
+share is searched over the values of the DeepSets search, which `tests/test_configs.py` checks, so
+that the two rows differ in the network alone. Nine studies, three feature sets times three counts,
+are run.
+
+The pooling and activation choices came from a first campaign, launched on 2026-09-30 with the sum
+and ReLU fixed and stopped after 40 to 90 trials per study. It matched tuned DeepSets on
+`[pt, etarel, phirel]` (0.711, 0.803 and 0.813 at 16, 50 and 150 constituents, against 0.705, 0.802
+and 0.813), where the best DeepSets trials also pooled with the sum. On `[px, py, pz, e]` and
+`[pt, eta, phi]` it fell 8 to 14 points behind wherever the best DeepSets trial took the maximum,
+and agreed where it took the sum (0.513 against 0.514 on the four-momentum at 150). Its three
+databases were backed up to `/shared/claude/jet_tagging_gdl/searches_2026-09-30_jedi/stale_dbs/`
+and removed.
 
 At the published point the network has 64F + 19 397 parameters on F features, 19 589 on three and
 19 653 on four, at every number of constituents; at the corner of the search space (hidden 128,
@@ -423,13 +438,16 @@ corner, with batches of 2048 under fp16 autocast, reserved 0.12, 0.32 and 0.77 G
 3.9 and 6.3 ms per step at 16, 50 and 150 constituents, so every study fits a 1g MIG slice. These
 figures were measured on olgpu on 2026-09-30.
 
-`tests/test_algorithms.py` checks that the logits are invariant, to 1e-10 in float64, under a
-permutation of the constituents and under padding, both a zero slot appended to the jet and a hole
-among its slots; it calls the network directly, because `forward` casts every batch to float32. It
-also checks that both poolings are sums: on jets made of k copies of one constituent, the pooled
-vector divided by k is the same for every k with the context silenced and moves with k with the
-context live, which a mean in either pool would break. Last, it checks the parameter count.
-`tests/test_configs.py` keeps `jedi_linear.yaml` a copy of `deepsets.yaml`, and
+`tests/test_algorithms.py` checks, for every activation and pooling on offer, that the logits are
+invariant, to 1e-10 in float64, under a permutation of the constituents and under padding, both a
+zero slot appended to a full jet and a hole among its slots; it calls the network directly, because
+`forward` casts every batch to float32. The appended slot is the jet's only padded one, so a maximum
+that let it in as zero fails under tanh, which was checked by substituting such a pool. At the
+published point it also checks that both pools are sums: on jets made of k copies of one
+constituent, the pooled vector divided by k is the same for every k with the context silenced and
+moves with k with the context live, which a mean in either pool would break. Last, it checks the
+parameter count. `tests/test_configs.py` keeps `jedi_linear.yaml` a copy of `deepsets.yaml` and the
+shared search choices equal to those of DeepSets, and
 `tests/test_make_train_catalogues.py` checks the three blocks in every layout and that the
 generator's registries equal those of the tests.
 
