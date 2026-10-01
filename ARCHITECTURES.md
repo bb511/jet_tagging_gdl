@@ -381,19 +381,19 @@ The port departs from the released code in three ways, each by choice. It has no
 inference a BatchNorm folds into the dense layer before it, and in training it served the
 quantiser, so without it the row differs from DeepSets in the context layer alone, which keeps the
 comparison fair. Its two pools use one aggregation over the real constituents, with no scale, which
-the search picks among the sum, the mean and the maximum that the DeepSets search offers; the
-published point is the sum. A padded slot is an all-zero row but embeds to the activation of the
-first bias, so the mask (`x.abs().sum(-1) > 0`, the convention of the other components) keeps it
-out of both pools; for the maximum it enters as minus infinity, since a tanh embedding can be
-negative. Only the sum carries the multiplicity to the head, which then reads it from the real
-constituents rather than from the padded rows. A constant scale in front of a dense layer is
-absorbed by its weights, so dropping it changes nothing the network can express. And the network is
-float only, with no quantisation. With σ the activation and P the pool over the real constituents,
-it computes h_i = σ(W_0 x_i + b_0), g_i = σ(W_1 h_i + b_1) + σ(W_2 P_j h_j + b_2) and
+the search picks among the sum, the mean and the maximum, the DeepSets choices before that row's
+rerun for the FPGA; the published point is the sum. A padded slot is an all-zero row but embeds to
+the activation of the first bias, so the mask (`x.abs().sum(-1) > 0`, the convention of the other
+components) keeps it out of both pools; for the maximum it enters as minus infinity, since a tanh
+embedding can be negative. Only the sum carries the multiplicity to the head, which then reads it
+from the real constituents rather than from the padded rows. A constant scale in front of a dense
+layer is absorbed by its weights, so dropping it changes nothing the network can express. And the
+network is float only, with no quantisation. With σ the activation and P the pool over the real
+constituents, it computes h_i = σ(W_0 x_i + b_0), g_i = σ(W_1 h_i + b_1) + σ(W_2 P_j h_j + b_2) and
 z = P_i σ(W_3 g_i + b_3), and the head reads z. One width, `hidden` (64 by default, the published
 point), serves the projection, both context branches and the shared layer; the head is
-`[64, 32, 16]`, the activation ReLU by default with tanh as the search's alternative, as for
-DeepSets, and there is no dropout. The state dict does not depend on the number of constituents.
+`[64, 32, 16]`, the activation ReLU by default with tanh as the search's alternative, and there is
+no dropout. The state dict does not depend on the number of constituents.
 
 The optimiser and scheduler are the DeepSets block verbatim, Adam at 1e-3 with weight decay 1e-7
 and ReduceLROnPlateau on `val/acc`: `jedi_linear.yaml` is a standalone copy of `deepsets.yaml`
@@ -415,10 +415,13 @@ four-momentum and in `logs/optuna/hls4ml/<label>/jedi_linear.db` on the other se
 trials of 50 epochs. It draws `hidden` from {16, 32, 64, 128}, the head from the `rho_layers`
 choices of DeepSets plus [64, 32, 16], the activation from {relu, tanh}, the pooling from
 {sum, mean, max}, the learning rate log-uniformly from 1e-4 to 1e-2 and the weight decay from
-{0, 1e-7, 1e-6, 1e-5, 1e-4}, so the published point lies inside the space. Every choice the two rows
-share is searched over the values of the DeepSets search, which `tests/test_configs.py` checks, so
-that the two rows differ in the network alone. Nine studies, three feature sets times three counts,
-are run.
+{0, 1e-7, 1e-6, 1e-5, 1e-4}, so the published point lies inside the space. The learning rate and
+the weight decay are searched over the values of the DeepSets search, which `tests/test_configs.py`
+checks. The activation and the pooling were shared too until 2026-10-01, when the DeepSets search
+was cut to ReLU and the sum, the maximum or the sum divided by the constant N (`sum_over_n`), the
+operations an FPGA computes without a lookup table or a per-jet division; this row keeps the older
+choices until its own studies are rerun. Nine studies, three feature sets times three counts, are
+run.
 
 The pooling and activation choices came from a first campaign, launched on 2026-09-30 with the sum
 and ReLU fixed and stopped after 40 to 90 trials per study. It matched tuned DeepSets on

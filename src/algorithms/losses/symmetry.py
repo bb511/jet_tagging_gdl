@@ -2,7 +2,7 @@
 
 The training objective is
 
-.. math:: L = L_\\mathrm{cls} + w \\, d\\bigl(f(x), f(T x)\\bigr),
+L = L_\\mathrm{cls} + w \\, d\\bigl(f(x), f(T x)\\bigr),
 
 with `T` drawn independently per jet from one of `src.symmetry.GROUPS`, and `d` a distance
 between the logits (``components/distance.py``) or a divergence between the class

@@ -8,7 +8,7 @@ its per-constituent network.
 import torch
 from torch import nn
 
-AGGREGATIONS = ("sum", "mean", "max")
+AGGREGATIONS = ("sum", "mean", "max", "sum_over_n")
 
 _ACTIVATIONS = {
     "relu": nn.ReLU,
@@ -36,7 +36,7 @@ class DeepSetsNet(nn.Module):
         rho_layers: list[int],
         out_dim: int,
         activation: str = "relu",
-        aggregation: str = "mean",
+        aggregation: str = "sum",
         dropout: float = 0.0,
         mask: bool = True,
     ) -> None:
@@ -68,6 +68,8 @@ class DeepSetsNet(nn.Module):
         """
         if self.aggregation == "sum":
             return h.sum(dim=1)
+        if self.aggregation == "sum_over_n":
+            return h.sum(dim=1) / h.shape[1]
         if self.aggregation == "max":
             return h.max(dim=1).values
         return h.sum(dim=1) / real.sum(dim=1).clamp(min=1)
@@ -111,14 +113,20 @@ def _masked_pool(h: torch.Tensor, real: torch.Tensor, aggregation: str) -> torch
     """Pool (jets, constituents, width) over the real constituents, to (jets, width).
 
     :param real: (jets, constituents, 1), True for a real constituent.
-    :param aggregation: one of `AGGREGATIONS`.
+    :param aggregation: one of `AGGREGATIONS`. ``sum_over_n`` divides the masked sum by
+        the slot count N, the same for every jet, so unlike the mean it needs no per-jet
+        division on an FPGA.
     """
     if aggregation == "max":
         # A tanh embedding can be negative, so a padded slot must lose every comparison
         # rather than enter the maximum as zero.
         return h.masked_fill(~real, float("-inf")).amax(dim=1)
     total = (h * real).sum(dim=1)
-    return total if aggregation == "sum" else total / real.sum(dim=1).clamp(min=1)
+    if aggregation == "sum":
+        return total
+    if aggregation == "sum_over_n":
+        return total / h.shape[1]
+    return total / real.sum(dim=1).clamp(min=1)
 
 
 def _dense(dims: list[int], activation: str, final_activation: bool) -> nn.Sequential:

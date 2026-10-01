@@ -1,24 +1,20 @@
-"""Single-head Linformer jet tagger in float, after Laatu et al., "Sub-microsecond
-Transformers for Jet Tagging on FPGAs" (arXiv:2510.24784).
+"""Single-head Linformer jet tagger in float of Laatu et al. (arXiv:2510.24784).
 
-The paper fixes one head and no positional encoding and gives no widths. The block
-layout follows ``get_llformer`` in github.com/calad0i/HGQ2-examples
-(``jsc150/model.py``): a dense embedding, one attention and one feed-forward sub-layer,
-each with a residual, a global average pool and a small head, with BatchNorm, which
-folds into the dense layers at inference. Its point in float (width 16, k = 4, head 16)
-is the config default. The attention is the Linformer of Wang et al. (arXiv:2006.04768)
-as ``QLinformerAttention`` of github.com/calad0i/HGQ2
-(``src/hgq/layers/attn/linformer.py``) implements it. Four departures from that code
-are deliberate: the network is float only, with plain dense layers where the code has
-LUT-based ones and no quantisation; padded slots are masked, where the code has no
-mask; the readout pool is one of `AGGREGATIONS`, where the code averages over all N
-slots, which ``sum_over_n`` restricts to the real constituents; and BatchNorm is a
-switch.
+The attention component is the Linformer of Wang et al. (arXiv:2006.04768) as
+``QLinformerAttention`` of github.com/calad0i/HGQ2 (``src/hgq/layers/attn/linformer.py``)
+implements it.
+
+We change that code in four places:
+* the network is float only, with plain dense layers where the code has LUT-based ones
+* padded slots are masked, where the code has no mask
+* the readout pool is one of `AGGREGATIONS`, where the code averages over all N slots
+* BatchNorm is a switch
 
 The network is not permutation-invariant. The projections of the keys and values over
-the slot axis carry one weight per slot, which is one per p_T rank because the record is
-sorted by p_T, so the parameter count grows with N by 2Nk. The slots are read in the
-record's order, with no sort inside the network, as the MLP row reads them.
+the slot axis have one weight per slot, which is one per p_T rank.
+We sort the data by pT, since we can do this easily in the trigger.
+The parameter count grows with N by 2Nk.
+The slots are read in the record's order; there's no sort in the record.
 """
 
 import torch
@@ -31,7 +27,7 @@ AGGREGATIONS = ("sum", "max", "sum_over_n")
 
 
 def _check_aggregation(aggregation: str) -> None:
-    """Refuse a readout pool this module does not provide, by name."""
+    """Refuse a readout pool this module does not provide."""
     if aggregation not in AGGREGATIONS:
         raise ValueError(
             f"aggregation must be one of {list(AGGREGATIONS)}, got {aggregation!r}."
@@ -59,13 +55,12 @@ def _slot_projection(nconstituents: int, kv_proj_dim: int) -> nn.Parameter:
 
 
 class LinformerAttention(nn.Module):
-    """Single-head attention whose keys and values are read from k learned mixtures of
-    the N constituent slots.
+    """Single-head attention whose keys and values are read from k learned mixtures.
 
     Before its dense layer, the key input is projected over the slot axis by E_k, a
     bias-free (N, k) matrix, and the value input by E_v, a second one; the key dense
     layer has no bias. Padded slots are zeroed before both projections. Their queries
-    are still computed, and the tokens they give enter nothing but the batch statistics
+    are still computed, and the tokens they give enter the batch statistics
     of the feed-forward BatchNorm.
     """
 
@@ -80,8 +75,7 @@ class LinformerAttention(nn.Module):
         self.e_v = _slot_projection(nconstituents, kv_proj_dim)
 
     def forward(self, h: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
-        """Return the attention output for tokens of shape (jets, constituents, dim),
-        without the residual.
+        """Return the attention output for tokens of shape (jets, constituents, dim).
 
         :param real: (jets, constituents, 1), True for a real constituent.
         """
@@ -95,8 +89,7 @@ class LinformerAttention(nn.Module):
 
 
 def _token_dense(in_dim: int, out_dim: int, batchnorm: bool) -> nn.Sequential:
-    """Return Linear, BatchNorm if asked, then ReLU, for tokens of shape (jets,
-    constituents, channels)."""
+    """Return Linear, BatchNorm if asked, then ReLU."""
     # The BatchNorm statistics include the padded slots, as in the reference, which has
     # no mask, and in JetFormer's batch option.
     norm = SeqNorm(out_dim, "batch") if batchnorm else nn.Identity()
@@ -104,8 +97,7 @@ def _token_dense(in_dim: int, out_dim: int, batchnorm: bool) -> nn.Sequential:
 
 
 def _head(widths: list[int], out_dim: int, batchnorm: bool) -> nn.Sequential:
-    """Stack Linear, BatchNorm if asked and ReLU for each step of *widths*, then a
-    linear layer to the logits."""
+    """Stack Linear, BatchNorm if asked and ReLU for each *width*, then a linear."""
     layers: list[nn.Module] = []
     for width_in, width_out in zip(widths, widths[1:]):
         norm = nn.BatchNorm1d(width_out) if batchnorm else nn.Identity()
@@ -114,8 +106,7 @@ def _head(widths: list[int], out_dim: int, batchnorm: bool) -> nn.Sequential:
 
 
 class LinformerNet(nn.Module):
-    """Embed the constituents, run one Linformer block and read the pool of its tokens
-    with a small head.
+    """Embed the constituents, run one Linformer block and read the pool of its tokens.
 
     With h the embedded tokens, the block adds attention(h) to h and then adds the
     output of the feed-forward sub-layer, W2 ReLU(BN(W1 h + b1)) + b2, to the result.
@@ -153,11 +144,9 @@ class LinformerNet(nn.Module):
         self.head = _head([embed_dim, *head_layers], out_dim, batchnorm)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Return the class logits for a batch of shape (jets, constituents,
-        features)."""
+        """Return the class logits."""
         # A padded slot is an all-zero row but does not embed to zero, since the first
-        # bias survives the dense layer, so the mask, not the input, keeps it out of
-        # the keys, the values and the pool.
+        # bias survives the dense layer. The mask is keeping it out of the pool.
         real = x.abs().sum(dim=-1, keepdim=True) > 0
         h = self.embed(x)
         h = h + self.attention(h, real)

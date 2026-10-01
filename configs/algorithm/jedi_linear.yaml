@@ -22,7 +22,7 @@ transform_kwargs: ${data.transform_kwargs}
 # The published point, one architecture for every N and feature set.
 hidden: 64 # width of every per-constituent layer, of the context and of the pooled vector
 head_layers: [64, 32, 16] # hidden widths of the MLP on the pooled vector
-activation: relu # after every layer but the last; the search offers DeepSets' relu and tanh
+activation: relu # after every layer but the last; the search offers relu and tanh
 aggregation: sum # sum, mean or max over the real constituents, for the context and the readout
 
 optimizer:

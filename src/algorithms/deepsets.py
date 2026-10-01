@@ -17,7 +17,7 @@ class DeepSets(JetTaggingModule):
         phi_layers: list[int],
         rho_layers: list[int],
         activation: str = "relu",
-        aggregation: str = "mean",
+        aggregation: str = "sum",
         dropout: float = 0.0,
         mask: bool = True,
     ) -> nn.Module:

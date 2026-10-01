@@ -6,7 +6,7 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from src.algorithms import JetTaggingModule
-from src.algorithms.components.deepsets import AGGREGATIONS
+from src.algorithms.components.deepsets import _masked_pool
 from src.algorithms.components.linformer import AGGREGATIONS as LINFORMER_AGGREGATIONS
 from src.algorithms.components.linformer import LinformerNet, _pool
 from src.algorithms.components.lorentznet import psi
@@ -240,10 +240,9 @@ def test_each_schedule_is_handed_what_lightning_cannot_infer() -> None:
 def test_deepsets_mean_pools_over_the_jets_own_constituents() -> None:
     # The mean divides by the multiplicity, so a ninth all-zero slot changes nothing; a slot-count
     # mean, as the reference implementation pooled, would scale every pooled vector by 8/9.
-    narrow = _algorithm("deepsets", nconstituents=8).eval()
-    wide = _algorithm("deepsets", nconstituents=9).eval()
+    narrow = _algorithm("deepsets", nconstituents=8, aggregation="mean").eval()
+    wide = _algorithm("deepsets", nconstituents=9, aggregation="mean").eval()
     wide.load_state_dict(narrow.state_dict(), strict=True)
-    assert narrow.net.aggregation == "mean"
     batch = jets(4, 8, 6)
 
     with torch.no_grad():
@@ -253,9 +252,28 @@ def test_deepsets_mean_pools_over_the_jets_own_constituents() -> None:
     assert torch.allclose(physical, padded, atol=1e-6)
 
 
-# Every activation and pooling the search offers; tanh with the maximum is the pair in
-# which a padded slot could win the maximum if it entered as zero.
-JEDI_CHOICES = [(act, agg) for act in ("relu", "tanh") for agg in AGGREGATIONS]
+def test_sum_over_n_divides_the_masked_sum_by_the_slot_count() -> None:
+    # The divisor is N for every jet, not the multiplicity of 5 or 6, so the pool differs
+    # from the sum by one factor, which the next dense layer absorbs. Row 0 has a hole
+    # among its real slots.
+    generator = torch.Generator().manual_seed(5)
+    h = torch.randn(4, 8, 16, generator=generator, dtype=torch.float64)
+    real = torch.zeros(4, 8, 1, dtype=torch.bool)
+    real[:, :6] = True
+    real[0, 2] = False
+    masked = h * real
+    net = _algorithm("deepsets", nconstituents=8, aggregation="sum_over_n").net
+    by_slots = masked.sum(dim=1) / 8
+
+    assert torch.allclose(_masked_pool(h, real, "sum_over_n"), by_slots, rtol=1e-12)
+    assert torch.allclose(net._pool(masked, real.double()), by_slots, rtol=1e-12)
+
+
+# Every activation and pooling the JEDI-linear search offers; tanh with the maximum is
+# the pair in which a padded slot could win the maximum if it entered as zero.
+JEDI_CHOICES = [
+    (act, agg) for act in ("relu", "tanh") for agg in ("sum", "mean", "max")
+]
 
 
 def _jedi_net(nconstituents: int = 16, **overrides: object) -> torch.nn.Module:

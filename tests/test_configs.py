@@ -178,9 +178,7 @@ def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
     # jedi_linear.yaml is a standalone copy of deepsets.yaml, because the algorithm
     # tests load these files with OmegaConf alone and a defaults list would not resolve
     # there. The comparator is read against DeepSets, so the training recipe is held
-    # fixed and only the network moves; this is what keeps the copy from drifting. The
-    # pooling defaults differ (the DeepSets mean, the published sum), and the searches
-    # offer both rows the same choices.
+    # fixed and only the network moves; this is what keeps the copy from drifting.
     deepsets, jedi = (
         OmegaConf.to_container(
             OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
@@ -202,19 +200,32 @@ def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
     assert deepsets == jedi
 
 
-def test_jedi_linear_searches_the_training_and_pooling_choices_of_deepsets() -> None:
-    # A first campaign with the pooling fixed to the sum fell 8 to 14 points behind
-    # DeepSets wherever the best DeepSets trial took the maximum, so every choice the two
-    # rows share is searched over the same values; only the network's widths differ.
+def test_jedi_linear_searches_the_training_choices_of_deepsets() -> None:
+    # The optimiser block is shared, so it is tuned over the same values. The activation
+    # and the pooling are not: the DeepSets search offers ReLU and the FPGA-cheap pools
+    # alone, and JEDI-linear keeps relu or tanh and sum, mean or max until its rerun.
     deepsets, jedi = (
         OmegaConf.load(
             ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}_optuna.yaml"
         ).hydra.sweeper.params
         for name in ("deepsets", "jedi_linear")
     )
-    shared = ("activation", "aggregation", "optimizer.lr", "optimizer.weight_decay")
-    for key in shared:
+    for key in ("optimizer.lr", "optimizer.weight_decay"):
         assert jedi[f"algorithm.{key}"] == deepsets[f"algorithm.{key}"], key
+
+
+def test_the_deepsets_search_offers_relu_and_the_fpga_cheap_pools_alone() -> None:
+    # tanh costs an FPGA a lookup table and the mean a per-jet division. With no
+    # activation in the space, every trial takes the config's ReLU; sum_over_n divides
+    # by the constant N.
+    params = OmegaConf.load(
+        ROOT / "configs" / "hparams_search" / "hls4ml" / "deepsets_optuna.yaml"
+    ).hydra.sweeper.params
+    algorithm = OmegaConf.load(ROOT / "configs" / "algorithm" / "deepsets.yaml")
+
+    assert "algorithm.activation" not in params
+    assert params["algorithm.aggregation"] == "choice(sum, max, sum_over_n)"
+    assert (algorithm.activation, algorithm.aggregation) == ("relu", "sum")
 
 
 def test_the_vn_rows_share_one_search_space() -> None:

@@ -23,12 +23,13 @@ hydra:
       n_startup_trials: 20
 
     # phi (per-constituent) and rho (set-level) widths span the compact nconst=8 pair to beyond the
-    # tuned nconst=16 one. aggregation: sum keeps a multiplicity signal, mean removes it, max pools
-    # the hardest constituent, and which survives a rotation best is not known in advance.
+    # tuned nconst=16 one. The activation is the config's ReLU and the pooling one of the three an
+    # FPGA computes without a lookup table or a per-jet division: sum keeps a multiplicity signal,
+    # max pools the hardest constituent, and sum_over_n is the sum divided by the constant N. Which
+    # survives a rotation best is not known in advance.
     params:
       algorithm.phi_layers: choice([16,16], [32,32], [32,32,32], [64,32,32], [64,64,32], [64,64,64], [128,64,32])
       algorithm.rho_layers: choice([16], [32], [32,16], [32,32,16], [64,32])
-      algorithm.activation: choice(relu, tanh)
-      algorithm.aggregation: choice(sum, mean, max)
+      algorithm.aggregation: choice(sum, max, sum_over_n)
       algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-2))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5, 1e-4)
