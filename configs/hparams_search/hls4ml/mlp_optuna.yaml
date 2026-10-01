@@ -24,10 +24,11 @@ hydra:
 
     # hidden_layers reach four times the tuned nconst=16 width, since the flattened input grows with
     # N (600 columns at N=150) and no inductive bias compensates. batchnorm: the padded zero rows
-    # shift the per-batch statistics it normalises against, for better or worse.
+    # shift the per-batch statistics it normalises against, for better or worse; it folds into the
+    # dense layers at inference. The activation stays at the algorithm's ReLU, since GELU and SiLU
+    # cost an FPGA a lookup table and a multiplier per unit.
     params:
       algorithm.hidden_layers: choice([32,16], [64,32], [64,64,32], [128,64,32], [128,128,64], [256,128,64])
       algorithm.batchnorm: choice(true, false)
-      algorithm.activation: choice(relu, gelu, silu)
       algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-2))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5, 1e-4)

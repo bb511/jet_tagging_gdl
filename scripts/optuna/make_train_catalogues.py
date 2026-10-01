@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the run<model>_train.sh and run<model>_eval.sh catalogues.
 
-DeepSets, MLP and JetFormer are trained on a 3 x 7 grid:
+DeepSets, MLP, JetFormer and the Linformer are trained on a 3 x 7 grid:
 * three constituent counts (16, 50, 150)
 * seven regimes:
     - the unaugmented baseline
@@ -39,6 +39,7 @@ MODELS = [
     "vn_z",
     "vn_so2",
     "jedi_linear",
+    "linformer",
 ]
 NCONSTITUENTS = [16, 50, 150]
 

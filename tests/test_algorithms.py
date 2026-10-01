@@ -7,6 +7,8 @@ from omegaconf import OmegaConf
 
 from src.algorithms import JetTaggingModule
 from src.algorithms.components.deepsets import AGGREGATIONS
+from src.algorithms.components.linformer import AGGREGATIONS as LINFORMER_AGGREGATIONS
+from src.algorithms.components.linformer import LinformerNet, _pool
 from src.algorithms.components.lorentznet import psi
 from src.algorithms.components.pelican import LinEq2to2
 from src.algorithms.components.vector_neurons import (
@@ -94,6 +96,14 @@ ARCHITECTURE_KEYS = {
         "units",
     },
     "jedi_linear": {"hidden", "head_layers", "activation", "aggregation"},
+    "linformer": {
+        "embed_dim",
+        "kv_proj_dim",
+        "ff_dim",
+        "head_layers",
+        "aggregation",
+        "batchnorm",
+    },
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
@@ -338,6 +348,117 @@ def test_jedi_linear_has_the_parameters_of_its_dense_layers_alone(
             "jedi_linear", nconstituents=nconstituents, features=features
         )
         assert sum(p.numel() for p in module.parameters()) == n_parameters
+
+
+# Every readout pool the search offers, with BatchNorm on and off.
+LINFORMER_CHOICES = [
+    (aggregation, batchnorm)
+    for aggregation in LINFORMER_AGGREGATIONS
+    for batchnorm in (True, False)
+]
+
+
+def _linformer_net(nconstituents: int = 8, **overrides: object) -> torch.nn.Module:
+    # The network alone, in float64, since forward() rounds the batch to float32, and in
+    # eval mode, since BatchNorm in training mode would couple the jets of a batch.
+    torch.manual_seed(0)
+    module = _algorithm("linformer", nconstituents=nconstituents, **overrides)
+    return module.net.eval().double()
+
+
+def test_linformer_attention_with_identity_projections_is_plain_attention() -> None:
+    # With k = N and both projections the identity, each key and value slot is one
+    # constituent, so on a jet with every slot real the layer is single-head scaled
+    # dot-product attention built from its own dense layers, at the same 1 / sqrt(d).
+    net = _linformer_net(nconstituents=8, kv_proj_dim=8)
+    attention = net.attention
+    real = torch.ones(4, 8, 1, dtype=torch.bool)
+
+    with torch.no_grad():
+        attention.e_k.copy_(torch.eye(8))
+        attention.e_v.copy_(torch.eye(8))
+        h = net.embed(jets(4, 8, 8).double())
+        plain = torch.nn.functional.scaled_dot_product_attention(
+            attention.q(h), attention.k(h), attention.v(h)
+        )
+        assert torch.allclose(attention(h, real), attention.out(plain), atol=1e-10)
+
+
+@pytest.mark.parametrize("aggregation, batchnorm", LINFORMER_CHOICES)
+def test_linformer_reads_nothing_through_the_projection_rows_of_its_padded_slots(
+    aggregation: str, batchnorm: bool
+) -> None:
+    # Each slot owns a row of E_k and one of E_v. A padded slot embeds to a function of
+    # the first bias, not to zero, so only the mask keeps its rows out of the keys and
+    # the values. The last check guards against a vacuous pass: a real slot's row
+    # moves the logits.
+    net = _linformer_net(aggregation=aggregation, batchnorm=batchnorm)
+    batch = jets(8, 8, 6).double()
+    generator = torch.Generator().manual_seed(3)
+
+    with torch.no_grad():
+        logits = net(batch)
+        for projection in (net.attention.e_k, net.attention.e_v):
+            projection[6:] = torch.randn(
+                2, projection.shape[1], generator=generator, dtype=torch.float64
+            )
+        assert torch.allclose(net(batch), logits, atol=1e-10)
+        net.attention.e_v[0] += 1.0
+        assert not torch.allclose(net(batch), logits, atol=1e-6)
+
+
+def test_the_linformer_pool_reads_the_real_constituents_alone() -> None:
+    # After the block a padded token is no longer zero, so the pool must mask it:
+    # flooded with 1e6, it would win every channel of the maximum and swamp either sum.
+    # Row 0 has a hole among its real slots.
+    generator = torch.Generator().manual_seed(4)
+    tokens = torch.randn(4, 8, 16, generator=generator, dtype=torch.float64)
+    real = torch.zeros(4, 8, 1, dtype=torch.bool)
+    real[:, :6] = True
+    real[0, 2] = False
+    flooded = torch.where(real, tokens, 1e6)
+
+    for aggregation in LINFORMER_AGGREGATIONS:
+        pooled = _pool(tokens, real, aggregation)
+        assert torch.allclose(_pool(flooded, real, aggregation), pooled), aggregation
+    # The divisor is the slot count, 8 for every jet, not the multiplicity of 5 or 6,
+    # so the two sums differ by one factor, which the head's first layer absorbs.
+    by_slots = _pool(tokens, real, "sum") / 8
+    assert torch.allclose(_pool(tokens, real, "sum_over_n"), by_slots, rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "features, nconstituents",
+    [(FOUR_MOMENTUM, 8), (["pt", "eta", "phi"], 16), (FOUR_MOMENTUM, 150)],
+)
+def test_linformer_has_the_parameters_of_its_layers_and_two_slot_projections(
+    features: list[str], nconstituents: int
+) -> None:
+    # Every BatchNorm carries a weight and a bias per channel; its running statistics
+    # are buffers. At the defaults (d = 16, k = 4, ff = 16, head [16]) the count is
+    # 16 F + 8 N + 2085: 2213 at F = 4 and N = 8, 2261 at F = 3 and N = 16.
+    module = _algorithm("linformer", nconstituents=nconstituents, features=features)
+    hp = module.hparams
+    d, k, ff, n_features = hp.embed_dim, hp.kv_proj_dim, hp.ff_dim, len(features)
+    widths = [d, *hp.head_layers]
+    assert hp.batchnorm
+
+    embedding = n_features * d + d + 2 * d
+    # Four d x d dense layers, the key one without a bias, and the (N, k) E_k and E_v.
+    attention = 4 * d * d + 3 * d + 2 * nconstituents * k
+    feed_forward = d * ff + ff + 2 * ff + ff * d + d
+    hidden = sum(a * b + b + 2 * b for a, b in zip(widths, widths[1:]))
+    head = hidden + widths[-1] * hp.output_dim + hp.output_dim
+    total = embedding + attention + feed_forward + head
+
+    assert total == 16 * n_features + 8 * nconstituents + 2085
+    assert sum(p.numel() for p in module.parameters()) == total
+
+
+def test_linformer_refuses_an_unknown_aggregation_by_name() -> None:
+    # The network itself: instantiate() would wrap the error into one of Hydra's.
+    with pytest.raises(ValueError, match=r"one of \['sum', 'max', 'sum_over_n'\]"):
+        LinformerNet(4, 8, 16, 4, 16, [16], 5, aggregation="mean")
 
 
 def test_lorentznet_ignores_padding_and_undoes_the_normalisation_of_its_batch() -> None:

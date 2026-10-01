@@ -77,7 +77,7 @@ def test_a_feature_set_has_no_catalogue_for_the_embedded_architectures(
 
     assert sorted(path.name for path in out.iterdir()) == sorted(
         f"run{model}_{task}.sh"
-        for model in ("deepsets", "mlp", "jetformer", "jedi_linear")
+        for model in ("deepsets", "mlp", "jetformer", "jedi_linear", "linformer")
         for task in ("train", "eval")
     )
 

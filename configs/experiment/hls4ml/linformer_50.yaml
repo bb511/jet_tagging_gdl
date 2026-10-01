@@ -1,0 +1,26 @@
+# @package _global_
+# Linformer at 50 constituents; data.method and data.augmentation_scheme stay CLI overrides.
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: linformer
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "linformer", "nconst-50"]
+
+experiment_name: hls4ml_linformer_nconst50
+
+# Set by a V100 pre-flight at the largest search point (width 64, k = 8, ff 128, head [64, 32],
+# BatchNorm on, 41 253 parameters on four features; 2026-10-01, reserved memory): 0.30 GiB and
+# 6.2 ms/step at 2048 jets, which fits a 1g MIG slice.
+data:
+  nconstituents: 50
+  batch_size: 2048
+  n_folds: 5
+
+# No algorithm block: its defaults are the point of the reference example in float (width 16, k = 4,
+# head [16]), until the searches replace them.
+trainer:
+  max_epochs: 200

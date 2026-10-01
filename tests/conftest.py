@@ -43,6 +43,7 @@ MODELS = (
     "vn_z",
     "vn_so2",
     "jedi_linear",
+    "linformer",
 )
 # The symmetry-embedded class, trained in the baseline regime alone and never under the SCL.
 EMBEDDED = (

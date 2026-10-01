@@ -14,7 +14,7 @@ The available directories contain the following scripts:
 
 The `run<model>_{search,train,eval}.sh` in `hls4ml` are lists of commented-out `python3 src/train.py` and `src/eval.py` blocks.
 Running a file does nothing unless you uncomment the command that you want to be ran.
-DeepSets, MLP and JetFormer have 21 blocks each, the three constituent counts over the seven regimes.
+DeepSets, MLP, JetFormer and Linformer have 21 blocks each, the three constituent counts over the seven regimes.
 LorentzNet, PELICAN, LGATr, LLoCA, and vector neurons have embedded symmetries and are run with baseline only: three blocks each.
 `runpelican_lorentz_search.sh` carries two: the 150-constituent row is not searched and its experiment config holds the beams-on optimum instead.
 JEDI-linear, a comparator from the literature, is also run with baseline only (three blocks), but it reads the feature set, so `hls4ml/pt_eta_phi/` and `hls4ml/pt_etarel_phirel/` carry its search catalogue too.

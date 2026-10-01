@@ -8,10 +8,12 @@ a clean rewrite), L-GATr-slim, LLoCa and the vector neurons. The last three were
 `lloca_so2` and `lloca_so3`), and the vector neurons in two, one per partition of the
 four-momentum (`vn_z` and `vn_so2`). A ninth architecture, JEDI-linear, joined on 2026-09-30 as a
 second class in the DeepSets module; it runs in one row, `jedi_linear`, as a comparator from the
-literature trained in the baseline regime alone. PELICAN, a plain Transformer encoder, a
-Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the refactor; nano-PELICAN,
-which existed as configuration only, went with them, and so did the permutation check. This file
-records what each was, why it went, and what putting it back involves.
+literature trained in the baseline regime alone. A tenth architecture, the Linformer, joined on
+2026-10-01 in a module of its own, the ninth, and runs in one row, `linformer`, over the seven
+regimes. PELICAN, a plain Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets
+were removed at the refactor; nano-PELICAN, which existed as configuration only, went with them,
+and so did the permutation check. This file records what each was, why it went, and what putting
+it back involves.
 
 The last commit that holds all of it is `a667b346`. Any file named below is recovered with
 `git show a667b346:<path>`.
@@ -65,6 +67,8 @@ two hooks. The steps:
   `scripts/optuna/make_train_catalogues.py` and `tests/conftest.py`, has the `_optuna` config
   alone, and needs a search catalogue under every feature-set directory,
   `scripts/hls4ml/pt_eta_phi/` and `scripts/hls4ml/pt_etarel_phirel/` as well as `scripts/hls4ml/`.
+  A row of the grid that reads `data.features`, as the Linformer does, needs both search configs
+  and a 21-block search catalogue under every feature-set directory.
 - Extend `tests/test_algorithms.py`, which exercises every algorithm config under both
   methods.
 
@@ -450,6 +454,173 @@ parameter count. `tests/test_configs.py` keeps `jedi_linear.yaml` a copy of `dee
 shared search choices equal to those of DeepSets, and
 `tests/test_make_train_catalogues.py` checks the three blocks in every layout and that the
 generator's registries equal those of the tests.
+
+## Linformer
+
+Added on 2026-10-01 as the fourth row of the acquired-symmetry class, beside DeepSets, MLP and
+JetFormer, and as a further candidate for an FPGA beside `jedi_linear` and the vector neurons. The
+row, `linformer`, is the single-head Linformer transformer of Laatu et al. (arXiv:2510.24784),
+trained in float on this repository's preparation. Unlike `jedi_linear`, it runs all seven regimes
+on the three feature sets, 21 studies per set and 63 in all, none of them launched yet
+(2026-10-01); Patrick took the decisions recorded below that day. The network, `LinformerNet`, and
+its attention, `LinformerAttention`, are in `src/algorithms/components/linformer.py`, and the
+subclass `Linformer`, which supplies `build_net` alone, is in `src/algorithms/linformer.py`. The
+configs (`linformer.yaml`, `linformer_{16,50,150}.yaml`, `linformer_optuna.yaml` and
+`linformer_scl_optuna.yaml`) and the catalogues `runlinformer_{search,train,eval}.sh` sit where
+those of the other grid rows do, with a search catalogue under every feature-set directory. Each
+catalogue holds 21 blocks, and every train and eval block is still "transferred from experiment
+config (no study yet)".
+
+The reference is Laatu, Sun, Cox, Gandrakota, Maier, Ngadiuba, Que, Luk, Spiropulu and Tapper,
+"Sub-microsecond Transformers for Jet Tagging on FPGAs" (arXiv:2510.24784, NeurIPS 2025 ML4PS
+workshop), read on 2026-10-01. Its model is an encoder-only transformer with a single attention
+head and no positional encoding, fed the 8, 16, 32 or 64 hardest constituents, sorted by p_T, with
+three features (p_T, η, φ). The attention comes in two variants: vanilla multi-head attention
+(MHA), O(N²), and the linear attention of the Linformer (Wang et al., arXiv:2006.04768), which
+projects the keys and values onto k < N slots and costs O(kN); a figure legend reads "Linformer
+proj dim 2". Both are trained quantisation-aware with HGQ at a fixed target of 350 000 EBOPs;
+da4ml optimises the constant matrix-vector products, and the firmware is synthesised with Vitis
+HLS. Table 1 of the paper, test accuracy after quantisation at 8, 16, 32 and 64 particles, gives
+66.3, 72.8, 78.4 and 79.8 % for the Linformer, 66.3, 72.3, 77.0 and 77.9 % for MHA and 64.7, 70.1,
+77.4 and 79.4 % for DeepSets under HGQ. MHA falls behind DeepSets at 32 particles, and its
+attention block collapsed in several trainings at 64, which is why Patrick chose the Linformer;
+MHA with one head and one block would also nearly duplicate a corner of `jetformer_optuna.yaml`
+(one block, one head, width 16 or 32). None of these accuracies is comparable with ours. They are
+test accuracies after quantisation at a fixed budget, and the example loader described below reads
+the record's `etarel` and `phirel`, measured from the axis of the untruncated jet, which this
+repository rebases on the kept constituents; at 16 constituents the difference is worth about 2
+points (see JEDI-linear above).
+
+The paper gives no widths, no block layout and no readout, and no training script is published:
+"code is available as part of the HGQ and hls4ml packages". The layers are `QMultiHeadAttention`
+and `QLinformerAttention` in github.com/calad0i/HGQ2 (`src/hgq/layers/attn/mha.py` and
+`linformer.py`), which hls4ml parses (pull request 1360). In `QLinformerAttention`, two learned,
+bias-free (N, k) matrices, separate by default (`share_kv_proj=False`), project the key and value
+inputs over the constituent axis before their dense layers; the key dense layer has no bias, and
+the softmax runs over the k slots with scale 1/√(key width). The nearest model definitions are in
+github.com/calad0i/HGQ2-examples, `jsc150/model.py`, which Chang Sun, a co-author, added in March
+and July 2026, after the paper. `get_llformer` has one head, k = 4, width 16, LUT-based dense
+layers with BatchNorm, an attention and a feed-forward sub-layer each with a residual, a global
+average pool over all N slots and a head of width 16; `get_transformer` is the MHA variant, with
+2 heads. Neither matches the paper's description: `get_llformer` has k = 4 against the 2 of the
+legend, and `get_transformer` two heads against one. The row is therefore the Linformer of the
+paper with the block layout of its co-author's example, not a replica of an unpublished model. The
+example's loader, `jsc150/data.py`, reads record columns 5, 8 and 11 (`pt`, `etarel` and
+`phirel`), zeroes the constituents below 2 GeV, standardises over all slots and applies no mask.
+Training there uses Adam at 3e-3 with cosine restarts and batches of 2790, for 7000 epochs under
+HGQ.
+
+With d = `embed_dim`, k = `kv_proj_dim`, f = `ff_dim` and real the mask `x.abs().sum(-1) > 0`, the
+network computes
+
+```
+h   = ReLU(BN(W_e x + b_e))
+q   = W_q h + b_q
+K   = W_k (E_kᵀ (h·real))            E_k: (N, k), no bias in W_k
+V   = W_v (E_vᵀ (h·real)) + b_v      E_v: (N, k)
+A   = softmax(q Kᵀ / √d) over the k slots
+h   = h + W_o (A V) + b_o
+h   = h + W_2 ReLU(BN(W_1 h + b_1)) + b_2
+z   = pool of h over the real constituents
+out = head(z): Linear, BN, ReLU per width of head_layers, then Linear to 5
+```
+
+with one block, one head, no positional encoding, no dropout and no LayerNorm; ReLU is the only
+activation besides the softmax. E_k and E_v are initialised Glorot-uniform, as in the reference.
+The port departs from the reference code in four ways, each by choice. It is float only, with plain
+dense layers where the example has LUT-based ones. It masks the padding: padded embeddings are
+zeroed before both projections and kept out of the readout. A padded row is all zeros, but its
+embedding is a function of the first bias, so the mask, and not the zero input, keeps it out. The
+queries of padded slots are computed all the same; with BatchNorm on, they enter the batch
+statistics of the feed-forward sub-layer and nothing else. The readout pool is searched among
+`sum`, `max` and `sum_over_n`, the masked sum divided by the constant N, which is the reference's
+average pool restricted to the real constituents; the sum and the maximum come from `_masked_pool`
+of the DeepSets component. The sum and `sum_over_n` express the same functions, since the head's
+first dense layer absorbs 1/N, and differ only in their conditioning at initialisation; both stay
+in the search at Patrick's request. All three are cheap on an FPGA: an adder tree, a comparator
+tree and a constant scale. Last, BatchNorm is a switch, `batchnorm`, searched on or off as the
+MLP's is, since it folds into the dense layers at inference. Its statistics include the padded
+slots, as in the reference and in JetFormer's batch option.
+
+The network is not permutation-invariant. E_k and E_v carry one weight per slot, which is one per
+p_T rank because the record is sorted by p_T; the parameter count grows with N by 2Nk, and the
+state dict depends on N. The first block of the vector neurons also has one weight per rank, but
+that network sorts each jet afresh; this one reads the slots in the record's order, with no sort,
+as the MLP does. No transform re-sorts a jet. SO(2) about the beam and boosts along it keep every
+p_T, so the slots stay in p_T order. SO(3) and `lorentz_iso` change the p_T, and the network then
+sees the slots in the p_T order of the untransformed jet, exactly as the MLP row does.
+
+The config defaults in `configs/algorithm/linformer.yaml` are the example's point in float:
+`embed_dim: 16`, `kv_proj_dim: 4`, `ff_dim: 16`, `head_layers: [16]`, `aggregation: sum_over_n` and
+`batchnorm: true`. The optimiser and scheduler are the DeepSets block, Adam at 1e-3 with weight
+decay 1e-7 and ReduceLROnPlateau on `val/acc`. The experiments keep the `16-mixed` precision of
+`trainer/gpu.yaml` and leave `extras.matmul_precision` unset, as the DeepSets, MLP, JetFormer and
+`jedi_linear` experiments do. They train for 200 epochs on batches of 2048, with 5 folds, and the
+150 file sets `data.num_workers: 16` for the online transform. As a row of the grid that reads
+`data.features`, `linformer` is in `MODELS` of `scripts/optuna/make_train_catalogues.py` and
+`tests/conftest.py` but in neither `EMBEDDED` nor `BASELINE_ONLY`, so its results land in
+`results/<label>/results_table_<regime>.csv` and `results_table.subdir` stays null.
+
+The search, `linformer_optuna.yaml`, names its studies `linformer_nconst<N>_<method>_<scheme>` and
+keeps them in `logs/optuna/hls4ml/linformer.db` on the four-momentum and in
+`logs/optuna/hls4ml/<label>/linformer.db` on the other sets, each of 200 trials of 50 epochs;
+`linformer_scl_optuna.yaml` adds `algorithm.symm_loss_weight` for the SCL regimes. With one block
+and one head fixed, it draws `embed_dim` from {16, 24, 32, 48, 64}, `kv_proj_dim` from {2, 4, 8},
+`ff_dim` from {16, 32, 64, 128}, the head from {[16], [32], [32, 16], [32, 32, 16], [64, 32],
+[32, 32, 32]} (the `rho_layers` choices of DeepSets plus [32, 32, 32]), the pool from
+{sum, max, sum_over_n}, `batchnorm` from {true, false}, the learning rate log-uniformly from 1e-4
+to 1e-2 and the weight decay from {0, 1e-7, 1e-6, 1e-5, 1e-4}. The choices of k cover the 2 of
+the paper's legend and the 4 of the example, and the example's point lies inside the space.
+
+The figures below were measured on olgpu on 2026-10-01, with the helper scripts and logs in
+`/data/deodagiu/claude/jet_tagging_gdl/linformer/`. With BatchNorm on, the network has
+
+```
+P = (F d + 3d) + (4d² + 3d + 2Nk) + (2df + 3f + d) + Σ_i (h_{i-1} h_i + 3h_i) + 5h_L + 5
+```
+
+parameters on F features, the terms being the embedding, the attention, the feed-forward sub-layer
+and the head, with h_0 = d and h_L the last width of the head. At the defaults that comes to
+16F + 8N + 2085: 2261, 2533 and 3333 at N = 16, 50 and 150 on three features and 2277, 2549 and
+3349 on four. At the corner of the search space (width 64, k = 8, ff 128, head [64, 32]) it is
+40 645, 41 189 and 42 789 on three features and 40 709, 41 253 and 42 853 on four. Counting two
+FLOPs per multiply-add and leaving out the BatchNorm, the softmax and the pooling, as the FLOP
+counter does, a jet costs 2[N(F d + 2d² + 4kd + 2df) + 2kd² + head], where head stands for the
+multiply-adds of the head; the counter and this count agree to every digit. At the defaults that
+is 0.0473, 0.1376 and 0.4032 MFLOP at N = 16, 50 and 150 on three features (0.0478, 0.1392 and
+0.4080 on four), and at the corner 1.0018, 2.8253 and 8.1885 (1.0038, 2.8317 and 8.2077 on four).
+For comparison, the JEDI-linear section gives 0.290, 0.860 and 2.537 MFLOP on three features for
+`jedi_linear` at its published point, 0.108, 0.134 and 0.211 for `vn_z` and about 0.28, 0.64 and
+0.98 for tuned DeepSets. A V100 pre-flight at the corner with BatchNorm on, on batches of 2048
+fully occupied random jets with four features under fp16 autocast, reserved 0.11, 0.30 and
+0.97 GiB and took 5.7, 6.2 and 13.1 ms per step at N = 16, 50 and 150, with finite losses
+throughout, so every study fits a 1g MIG slice.
+
+A calibration on one fold at 16 constituents, 20 epochs at a learning rate of 1e-3, recorded the
+validation accuracy of the best epoch. At a mid point of the space (width 32, k = 4, ff 64, head
+[32, 16], `sum_over_n`) the row reached 0.687 with BatchNorm and 0.652 without on
+`[pt, etarel, phirel]`, and 0.431 with and 0.407 without on `[px, py, pz, e]`; with the maximum as
+pool and BatchNorm on, it reached 0.561 on `[px, py, pz, e]`. At the config defaults (2261
+parameters) the accuracy was 0.661 on `[pt, etarel, phirel]`. Under the same 20-epoch protocol on
+that set, DeepSets reached 0.668 and `jedi_linear` 0.670 on 2026-09-30, and their tuned studies
+(50 epochs, best of 200 trials) have 0.705 and 0.713 there and 0.548 and 0.576 on
+`[px, py, pz, e]`. So the block trains with and without BatchNorm, BatchNorm adds 3.5 points on
+`[pt, etarel, phirel]` and 2.4 on the four-momentum at this length of training, and the maximum is
+worth 13 points over the scaled sum on the four-momentum, as it was for `jedi_linear`. These are
+single short runs, not tuned results. Smoke runs at N = 16, a fit and an evaluation on each
+feature set, one SCL fit (so3) and one augmented fit (lorentz), went end to end under `16-mixed`,
+with the results rows written to a scratch directory, not to `results/`.
+
+`tests/test_algorithms.py` calls the network directly, in float64 and in eval mode, since `forward`
+casts every batch to float32 and BatchNorm in training mode would couple the jets of a batch. With
+k = N, identity projections and every slot real, the attention must reduce to plain single-head
+scaled dot-product attention, to 1e-10. For every pool and both BatchNorm settings, overwriting
+the rows of E_k and E_v that belong to padded slots must leave the logits unchanged, while a change
+to a real slot's row must move them, so that the check cannot pass vacuously. The pool must read
+the real constituents alone, with `sum_over_n` equal to the sum divided by the slot count; the
+parameter count must match the formula above; and an unknown aggregation must be refused by name.
+In `tests/test_make_train_catalogues.py`, a feature-set layout must generate train and eval
+catalogues for the row.
 
 ## nano-PELICAN
 

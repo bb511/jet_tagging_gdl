@@ -1,0 +1,40 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: tpe
+  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+
+# One TPE study per (nconstituents, method, augmentation_scheme) regime for the Linformer, on the
+# main run's val/acc_best. Every regime shares this space and its 200 trials, so augmentation and
+# SCL are searched at equal effort. Paired on the CLI with callbacks=search data.n_folds=1.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: sqlite:///logs/optuna/hls4ml/linformer.db?timeout=600
+    # The regime alone picks the study, e.g. linformer_nconst16_symm_loss_so2; never a CLI argument.
+    study_name: linformer_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
+    n_jobs: 1
+    direction: maximize
+    n_trials: 200
+    sampler:
+      seed: 1234
+      n_startup_trials: 20
+
+    # One block and one head are fixed, as in the paper (arXiv:2510.24784) and its authors' example.
+    # k, the number of slots the keys and values are projected to, spans the 2 of the paper's figure
+    # and the 4 of the example. ReLU is the only activation, and the readout pool is the sum, the
+    # maximum or the sum divided by the constant number of slots, all cheap on an FPGA. BatchNorm is
+    # searched on or off, since it folds into the dense layers at inference. The head choices are
+    # the DeepSets rho choices plus [32, 32, 32]; lr and weight_decay take the DeepSets values,
+    # whose optimiser block the row uses.
+    params:
+      algorithm.embed_dim: choice(16, 24, 32, 48, 64)
+      algorithm.kv_proj_dim: choice(2, 4, 8)
+      algorithm.ff_dim: choice(16, 32, 64, 128)
+      algorithm.head_layers: choice([16], [32], [32,16], [32,32,16], [64,32], [32,32,32])
+      algorithm.aggregation: choice(sum, max, sum_over_n)
+      algorithm.batchnorm: choice(true, false)
+      algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-2))
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5, 1e-4)
