@@ -17,7 +17,7 @@ Running a file does nothing unless you uncomment the command that you want to be
 DeepSets, MLP, JetFormer and Linformer have 21 blocks each, the three constituent counts over the seven regimes.
 LorentzNet, PELICAN, LGATr, LLoCA, and vector neurons have embedded symmetries and are run with baseline only: three blocks each.
 `runpelican_lorentz_search.sh` carries two: the 150-constituent row is not searched and its experiment config holds the beams-on optimum instead.
-JEDI-linear, a comparator from the literature, is also run with baseline only (three blocks), but it reads the feature set, so `hls4ml/pt_eta_phi/` and `hls4ml/pt_etarel_phirel/` carry its search catalogue too.
+JEDI-linear, the comparator from the FPGA literature, runs the seven regimes as the other grid rows do (21 blocks), and `hls4ml/pt_eta_phi/` and `hls4ml/pt_etarel_phirel/` carry its search catalogue too.
 
 The submitters in `cluster/` parse these files.
 You can select entire categories of commands to run with `--only nconst150` or `--only symm_so2`.
@@ -49,7 +49,6 @@ logs/train/hls4ml[/<features>]/<model>/nconst<N>/<variant>/checkpoint_manifest.j
   v
 results/<features>/results_table_{baseline,augmentation,symm_loss}.csv
   (LorentzNet, the two PELICANs, the two L-GATr-slims, the four LLoCas and the two vector-neuron rows: results/embedded/results_table_baseline.csv)
-  (JEDI-linear, baseline only, reads the feature set: results/<features>/results_table_baseline.csv)
   |  analysis/compare_to_baseline.py <run table> <baseline table>
   v
 results/<features>/deltas_<run>_vs_<baseline>.csv

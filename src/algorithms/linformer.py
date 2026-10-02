@@ -1,7 +1,7 @@
 """Single-head Linformer jet tagger of arXiv:2510.24784, trained in float.
 
 The network reads the constituent slots in the record's order, by p_T rank: its
-projections over the slots carry one weight per slot, so, unlike plain attention, it is
+projections over the slots have one weight per slot, so, unlike plain attention, it is
 not invariant under a permutation of the constituents.
 """
 

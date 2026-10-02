@@ -269,10 +269,14 @@ def test_sum_over_n_divides_the_masked_sum_by_the_slot_count() -> None:
     assert torch.allclose(net._pool(masked, real.double()), by_slots, rtol=1e-12)
 
 
-# Every activation and pooling the JEDI-linear search offers; tanh with the maximum is
-# the pair in which a padded slot could win the maximum if it entered as zero.
+# Every pooling the JEDI-linear search offers, under the config's ReLU, and tanh with the
+# maximum: the network still accepts tanh, and under it a padded slot that entered the
+# maximum as zero would win every channel whose real values are all negative.
 JEDI_CHOICES = [
-    (act, agg) for act in ("relu", "tanh") for agg in ("sum", "mean", "max")
+    ("relu", "sum"),
+    ("relu", "max"),
+    ("relu", "sum_over_n"),
+    ("tanh", "max"),
 ]
 
 
@@ -321,7 +325,10 @@ def test_jedi_linear_ignores_padding(activation: str, aggregation: str) -> None:
 
     with torch.no_grad():
         padded = wide(torch.cat([batch, zero_slot], dim=1))
-        assert torch.allclose(narrow(batch), padded, atol=1e-10)
+        # sum_over_n divides by the slot count, so the wider network scales both pools by
+        # 8/9 by construction; the hole keeps N fixed and holds for every pool.
+        if aggregation != "sum_over_n":
+            assert torch.allclose(narrow(batch), padded, atol=1e-10)
         assert torch.allclose(narrow(holed), narrow(compacted), atol=1e-10)
 
 

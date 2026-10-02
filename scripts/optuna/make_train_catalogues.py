@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Generate the run<model>_train.sh and run<model>_eval.sh catalogues.
 
-DeepSets, MLP, JetFormer and the Linformer are trained on a 3 x 7 grid:
+DeepSets, MLP, JetFormer, the Linformer and JEDI-linear are trained on a 3 x 7 grid:
 * three constituent counts (16, 50, 150)
 * seven regimes:
     - the unaugmented baseline
     - SO(2), SO(3) and Lorentz augmentation
     - SO(2), SO(3) and Lorentz symmetry loss
 
-Symmetry-embedded architectures are trained on the baseline only, and so is JEDI-linear,
-a comparator from the literature that, unlike them, reads every feature set.
+Symmetry-embedded architectures are trained on the baseline only.
 The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 ``logs/optuna/hls4ml/<label>/`` for a feature set other than the four-momentum.
 """
@@ -72,10 +71,10 @@ EMBEDDED = {
     "vn_z",
     "vn_so2",
 }
-# JEDI-linear (arXiv:2508.15468) is a comparator from the literature rather than a subject of
-# the augmentation-against-SCL grid, so it is trained at baseline alone like the embedded
-# class; unlike that class it reads data.features, so every feature set has catalogues for it.
-BASELINE_ONLY = EMBEDDED | {"jedi_linear"}
+# The rows trained at baseline alone, which today are the embedded class. A row that reads
+# data.features but runs the baseline alone would join this set and not EMBEDDED, so that every
+# feature set still had catalogues for it.
+BASELINE_ONLY = set(EMBEDDED)
 
 VARIANTS_OF = {
     model: VARIANTS[:1] if model in BASELINE_ONLY else VARIANTS for model in MODELS

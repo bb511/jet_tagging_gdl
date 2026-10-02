@@ -200,28 +200,35 @@ def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
     assert deepsets == jedi
 
 
-def test_jedi_linear_searches_the_training_choices_of_deepsets() -> None:
-    # The optimiser block is shared, so it is tuned over the same values. The activation
-    # and the pooling are not: the DeepSets search offers ReLU and the FPGA-cheap pools
-    # alone, and JEDI-linear keeps relu or tanh and sum, mean or max until its rerun.
-    deepsets, jedi = (
+def test_jedi_linear_searches_the_pooling_and_training_choices_of_deepsets() -> None:
+    # The two rows differ in the network alone, so every choice they share is tuned over
+    # the same values, the SCL weight included; neither searches an activation (see the
+    # test below). The SCL configs hold only the weight, over a defaults list.
+    deepsets, jedi, deepsets_scl, jedi_scl = (
         OmegaConf.load(
-            ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}_optuna.yaml"
+            ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}.yaml"
         ).hydra.sweeper.params
-        for name in ("deepsets", "jedi_linear")
+        for name in (
+            "deepsets_optuna",
+            "jedi_linear_optuna",
+            "deepsets_scl_optuna",
+            "jedi_linear_scl_optuna",
+        )
     )
-    for key in ("optimizer.lr", "optimizer.weight_decay"):
+    for key in ("aggregation", "optimizer.lr", "optimizer.weight_decay"):
         assert jedi[f"algorithm.{key}"] == deepsets[f"algorithm.{key}"], key
+    assert dict(jedi_scl) == dict(deepsets_scl)
 
 
-def test_the_deepsets_search_offers_relu_and_the_fpga_cheap_pools_alone() -> None:
+@pytest.mark.parametrize("row", ["deepsets", "jedi_linear"])
+def test_the_search_offers_relu_and_the_fpga_cheap_pools_alone(row: str) -> None:
     # tanh costs an FPGA a lookup table and the mean a per-jet division. With no
     # activation in the space, every trial takes the config's ReLU; sum_over_n divides
     # by the constant N.
     params = OmegaConf.load(
-        ROOT / "configs" / "hparams_search" / "hls4ml" / "deepsets_optuna.yaml"
+        ROOT / "configs" / "hparams_search" / "hls4ml" / f"{row}_optuna.yaml"
     ).hydra.sweeper.params
-    algorithm = OmegaConf.load(ROOT / "configs" / "algorithm" / "deepsets.yaml")
+    algorithm = OmegaConf.load(ROOT / "configs" / "algorithm" / f"{row}.yaml")
 
     assert "algorithm.activation" not in params
     assert params["algorithm.aggregation"] == "choice(sum, max, sum_over_n)"

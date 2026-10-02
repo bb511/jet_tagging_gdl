@@ -82,27 +82,19 @@ def test_a_feature_set_has_no_catalogue_for_the_embedded_architectures(
     )
 
 
-def test_a_baseline_only_comparator_has_its_three_blocks_in_every_layout(
-    tmp_path: Path,
-) -> None:
-    # JEDI-linear runs the baseline alone, as the embedded class does, but reads
-    # data.features, so every feature set has its catalogues too; the header gives the
-    # comparator's reason for the single regime rather than the embedded class's.
+def test_jedi_linear_has_the_whole_grid_in_every_layout(tmp_path: Path) -> None:
+    # JEDI-linear is a grid row: the seven regimes at each count, in the four-momentum
+    # layout and in every feature set, with no baseline-only note in its header.
     dbs = _empty_dbs(tmp_path)
 
     for layout in (Layout(), Layout(features=FEATURES)):
         assert "jedi_linear" in make_train_catalogues.models_of(layout)
         for task in ("train", "eval"):
             text = make_train_catalogues.render("jedi_linear", task, dbs, layout)
-            assert make_train_catalogues.count_commands(LIB, text) == 3
-            assert text.count("data.augmentation_scheme=none") == 3
-            assert "data.method=symm_loss" not in text
-            assert text.count(OVERRIDE) == (3 if layout.features else 0)
-            assert "comparator from the literature" in text
-            assert "embeds the symmetry" not in text
-    # The phrase checked above is live: the embedded class's catalogues carry it.
-    vn_z = make_train_catalogues.render("vn_z", "train", dbs, Layout())
-    assert "embeds the symmetry" in vn_z
+            assert make_train_catalogues.count_commands(LIB, text) == len(GRID)
+            assert text.count("data.method=symm_loss") == 9
+            assert text.count(OVERRIDE) == (len(GRID) if layout.features else 0)
+            assert "Baseline only" not in text
 
 
 def test_the_generator_names_the_rows_and_regimes_the_tests_do() -> None:

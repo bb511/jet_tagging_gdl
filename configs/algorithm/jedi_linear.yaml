@@ -1,9 +1,8 @@
-# JEDI-linear (arXiv:2508.15468) in float, a comparator from the literature trained in the
-# baseline regime alone. It is DeepSets whose per-constituent network carries one
-# permutation-equivariant context layer; both pools use one aggregation over the real
-# constituents, with no scale, and the released code's BatchNorm is left out. This file is a copy
-# of deepsets.yaml differing in _target_, name and the architecture keys (tests/test_configs.py
-# keeps the rest in step).
+# JEDI-linear (arXiv:2508.15468) in float, a grid row and the comparator from the FPGA literature.
+# It is DeepSets whose per-constituent network carries one permutation-equivariant context layer;
+# both pools use one aggregation over the real constituents, and the released code's BatchNorm is
+# left out. This file is a copy of deepsets.yaml differing in _target_, name and the architecture
+# keys (tests/test_configs.py keeps the rest in step).
 _target_: src.algorithms.deepsets.JEDILinear
 _convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
 name: jedi_linear
@@ -22,8 +21,8 @@ transform_kwargs: ${data.transform_kwargs}
 # The published point, one architecture for every N and feature set.
 hidden: 64 # width of every per-constituent layer, of the context and of the pooled vector
 head_layers: [64, 32, 16] # hidden widths of the MLP on the pooled vector
-activation: relu # after every layer but the last; the search offers relu and tanh
-aggregation: sum # sum, mean or max over the real constituents, for the context and the readout
+activation: relu # after every layer but the last; not searched, as for DeepSets
+aggregation: sum # sum, max or sum_over_n over the real constituents, for both pools
 
 optimizer:
   _target_: torch.optim.Adam

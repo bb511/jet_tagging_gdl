@@ -2,10 +2,8 @@
 # ========================================================================
 # JEDI_LINEAR TRAINING COMMANDS
 # ========================================================================
-# One block per (constituent count, regime): 3 x 1 = 3 train runs. Generated
+# One block per (constituent count, regime): 3 x 7 = 21 train runs. Generated
 # by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
-# Baseline only: this architecture is a comparator from the literature rather than
-# a subject of the study, so the augmentation and SCL regimes are not run on it.
 # Each block carries the best trial of its own study under logs/optuna/hls4ml/;
 # a block whose study is missing carries none and says so (transferred ablation).
 #
@@ -29,6 +27,84 @@
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/baseline
 
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=16  aug_so2  (method=augmentation, group=so2)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/aug_so2
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=16  aug_so3  (method=augmentation, group=so3)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/aug_so3
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=16  aug_lorentz  (method=augmentation, group=lorentz)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/aug_lorentz
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=16  symm_so2  (method=symm_loss, group=so2)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/symm_so2
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=16  symm_so3  (method=symm_loss, group=so3)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/symm_so3
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=16  symm_lorentz  (method=symm_loss, group=lorentz)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst16/symm_lorentz
+
 # ========================================================================
 # jedi_linear  nconst=50
 # ========================================================================
@@ -46,6 +122,84 @@
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/baseline
 
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=50  aug_so2  (method=augmentation, group=so2)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/aug_so2
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=50  aug_so3  (method=augmentation, group=so3)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/aug_so3
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=50  aug_lorentz  (method=augmentation, group=lorentz)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/aug_lorentz
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=50  symm_so2  (method=symm_loss, group=so2)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_50 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/symm_so2
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=50  symm_so3  (method=symm_loss, group=so3)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_50 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/symm_so3
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=50  symm_lorentz  (method=symm_loss, group=lorentz)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_50 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst50/symm_lorentz
+
 # ========================================================================
 # jedi_linear  nconst=150
 # ========================================================================
@@ -62,3 +216,81 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/baseline
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=150  aug_so2  (method=augmentation, group=so2)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/aug_so2
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=150  aug_so3  (method=augmentation, group=so3)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/aug_so3
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=150  aug_lorentz  (method=augmentation, group=lorentz)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/aug_lorentz
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=150  symm_so2  (method=symm_loss, group=so2)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_150 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/symm_so2
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=150  symm_so3  (method=symm_loss, group=so3)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_150 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/symm_so3
+
+# ------------------------------------------------------------------------
+# jedi_linear  nconst=150  symm_lorentz  (method=symm_loss, group=lorentz)
+# transferred from experiment config (no study yet)
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_150 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear/nconst150/symm_lorentz

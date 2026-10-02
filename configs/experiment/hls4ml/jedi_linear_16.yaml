@@ -1,8 +1,6 @@
 # @package _global_
 # JEDI-linear at 16 constituents at the algorithm defaults, which are the published point: a
-# starting point, not tuned values. As a comparator from the literature it runs the baseline regime
-# alone, but it reads data.features like DeepSets, so its rows land in results/<features>/ rather
-# than results/embedded/.
+# starting point, not tuned values. data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
   - override /data: hls4ml
   - override /algorithm: jedi_linear
