@@ -35,8 +35,7 @@ MODELS = [
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
-    "vn_z",
-    "vn_so2",
+    "vn",
     "jedi_linear",
     "linformer",
 ]
@@ -56,8 +55,8 @@ VARIANTS = [
 
 # LorentzNet, PELICAN (with and without the beams), L-GATr-slim (with and without the spurion
 # tokens), LLoCa (with the Lorentz, SO(2)xSO(1,1), SO(2) and SO(3) frames) and the vector neurons
-# (with the SO(2)xSO(1,1) and SO(2) partitions) embed the symmetry rather than acquiring it, so
-# they are the architectures trained at baseline alone, never under augmentation or the SCL.
+# (on the lifts of (pt, eta, phi)) embed the symmetry rather than acquiring it, so they are the
+# architectures trained at baseline alone, never under augmentation or the SCL.
 EMBEDDED = {
     "lorentznet",
     "pelican",
@@ -68,8 +67,7 @@ EMBEDDED = {
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
-    "vn_z",
-    "vn_so2",
+    "vn",
 }
 # The rows trained at baseline alone, which today are the embedded class. A row that reads
 # data.features but runs the baseline alone would join this set and not EMBEDDED, so that every
@@ -403,8 +401,9 @@ def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
 def models_of(layout: Layout) -> list[str]:
     """The architectures a layout has catalogues for.
 
-    The embedded architectures read the four-momenta themselves, so no feature set
-    other than that one has anything to run for them.
+    Each embedded architecture pins its own columns through ``required_features``, the
+    four-momentum for all but ``vn``, whose experiment configs set ``[pt, eta, phi]``,
+    so only the default layout has catalogues for them.
     """
     if layout.features is None:
         return MODELS

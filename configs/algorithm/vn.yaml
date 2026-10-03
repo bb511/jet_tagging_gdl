@@ -1,14 +1,13 @@
-# Vector neurons on p_T-ordered constituents, with (E, px, py, pz) split into (px, py) and (E, pz),
-# each with weights of its own: SO(2) about the beam and boosts along it are exact, SO(3) and the
-# isotropic boost are measured. vn_so2.yaml is a copy differing in name and symmetry alone
-# (tests/test_configs.py keeps the two rows in step). Per-nconstituents values in
-# configs/experiment/hls4ml/vn_z_<N>.yaml.
+# Vector neurons on the lifts of (pt, eta, phi), the angles measured from the leading constituent:
+# shifts of eta and phi (SO(2) about the beam and, for massless constituents, boosts along it), both
+# reflections and the rotations of the (eta, phi) plane are exact, SO(3) and the isotropic boost are
+# measured. Per-nconstituents values in configs/experiment/hls4ml/vn_<N>.yaml.
 _target_: src.algorithms.vector_neurons.VectorNeurons
 _convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
-name: vn_z
+name: vn
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+nbr_feats: 3 # not ${len:...}: the net reads pt, eta and phi alone, so features must be pt,eta,phi
 output_dim: 5
 
 # Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
@@ -19,16 +18,15 @@ symm_loss_weight: 0.1
 symm_loss_metric: l2
 transform_kwargs: ${data.transform_kwargs}
 
-# The partition into weight-sharing splits, which sets the exact group: z ((px, py) and (E, pz):
-# SO(2) about the beam times boosts along it) or so2 (E, pz and (px, py): SO(2) about the beam).
-symmetry: z
-num_blocks: 3
-vector_channels: 16 # four-vector channels of every block
+num_blocks: 1
+vector_channels: 16 # lifted vector channels of every block
 scalar_channels: 64 # scalar channels of every block
-invariants: 16 # invariant products read in every block and in the readout
+invariants: 16 # forms read in every block and in the readout
+tensor_invariants: 2 # three-point correlators of each of three kinds, read by the first block
+stream_channels: 16 # width of the per-constituent stream
 head_layers: [64, 32] # hidden widths of the readout MLP
 dropout: 0.0
-units: 20.0 # GeV per unit, the L-GATr-slim and LLoCa rows' scale; never searched
+units: 20.0 # GeV per unit of p_T, the L-GATr-slim and LLoCa rows' scale; never searched
 
 optimizer:
   _target_: torch.optim.AdamW

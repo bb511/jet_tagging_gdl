@@ -9,21 +9,21 @@ from src.data.components.augmentation import get_norm_scale
 
 
 class VectorNeurons(JetTaggingModule):
-    """Jet tagger built on vector neurons (arXiv:2104.12229) whose weights are shared
-    within blocks of the four-momentum, which makes it exact under a subgroup of the
-    Lorentz group."""
+    """Jet tagger built on vector neurons (arXiv:2104.12229) over the lifts of (p_T,
+    eta, phi), exact under the Euclidean group of the (eta, phi) plane."""
 
-    # The network needs only the full four-momentum.
-    required_features = ["px", "py", "pz", "e"]
+    # Absolute angles: the network measures them from its leading constituent itself.
+    required_features = ["pt", "eta", "phi"]
 
     def build_net(
         self,
         head_layers: list[int],
-        symmetry: str = "z",
-        num_blocks: int = 3,
+        num_blocks: int = 1,
         vector_channels: int = 16,
         scalar_channels: int = 64,
         invariants: int = 16,
+        tensor_invariants: int = 2,
+        stream_channels: int = 16,
         dropout: float = 0.0,
         units: float = 20.0,
     ) -> nn.Module:
@@ -32,27 +32,29 @@ class VectorNeurons(JetTaggingModule):
         return VectorNeuronsClassifier(
             nconstituents=self.hparams.nconstituents,
             head_layers=head_layers,
-            symmetry=symmetry,
             num_blocks=num_blocks,
             vector_channels=vector_channels,
             scalar_channels=scalar_channels,
             invariants=invariants,
+            tensor_invariants=tensor_invariants,
+            stream_channels=stream_channels,
             dropout=dropout,
             units=units,
             n_class=self.hparams.output_dim,
         )
 
     def _on_features_resolved(self) -> None:
-        """Cache the factors returning [px, py, pz, e] to GeV, in that column order."""
+        """Cache the factors returning [pt, eta, phi] to GeV and radians, in that column
+        order."""
         scales = [
             get_norm_scale(self.norm_scales, name) for name in self.required_features
         ]
         self.denorm_scales.copy_(torch.tensor(scales))
 
     def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
-        """Undo the normalisation of a batch and hand it over as four-momenta.
+        """Undo the normalisation of a batch.
 
-        :param x: (jets, constituents, 4), the columns [px, py, pz, e] as stored.
-        :return: (jets, constituents, 4), the columns [E, px, py, pz] in GeV.
+        :param x: (jets, constituents, 3), the columns [pt, eta, phi] as stored.
+        :return: the same columns in GeV and radians.
         """
-        return (x * self.denorm_scales)[..., [3, 0, 1, 2]]
+        return x * self.denorm_scales

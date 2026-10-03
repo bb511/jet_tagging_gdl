@@ -40,8 +40,7 @@ MODELS = (
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
-    "vn_z",
-    "vn_so2",
+    "vn",
     "jedi_linear",
     "linformer",
 )
@@ -56,8 +55,7 @@ EMBEDDED = (
     "lloca_z",
     "lloca_so2",
     "lloca_so3",
-    "vn_z",
-    "vn_so2",
+    "vn",
 )
 # Trained in the baseline regime alone, never under augmentation or the SCL; today the
 # embedded class, though a row that reads data.features could join it without EMBEDDED.

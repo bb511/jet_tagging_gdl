@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ========================================================================
-# VN_Z TRAINING COMMANDS
+# VN TRAINING COMMANDS
 # ========================================================================
 # One block per (constituent count, regime): 3 x 1 = 3 train runs. Generated
 # by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
@@ -13,52 +13,52 @@
 # file to scripts/cluster/submit_train.sh, which queues them on a GPU or slurm.
 
 # ========================================================================
-# vn_z  nconst=16
+# vn  nconst=16
 # ========================================================================
 
 # ------------------------------------------------------------------------
-# vn_z  nconst=16  baseline  (method=augmentation, group=none)
+# vn  nconst=16  baseline  (method=augmentation, group=none)
 # transferred from experiment config (no study yet)
 # ------------------------------------------------------------------------
 # python3 src/train.py \
-#     experiment=hls4ml/vn_z_16 \
+#     experiment=hls4ml/vn_16 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/vn_z/nconst16/baseline
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst16/baseline
 
 # ========================================================================
-# vn_z  nconst=50
+# vn  nconst=50
 # ========================================================================
 
 # ------------------------------------------------------------------------
-# vn_z  nconst=50  baseline  (method=augmentation, group=none)
+# vn  nconst=50  baseline  (method=augmentation, group=none)
 # transferred from experiment config (no study yet)
 # ------------------------------------------------------------------------
 # python3 src/train.py \
-#     experiment=hls4ml/vn_z_50 \
+#     experiment=hls4ml/vn_50 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/vn_z/nconst50/baseline
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst50/baseline
 
 # ========================================================================
-# vn_z  nconst=150
+# vn  nconst=150
 # ========================================================================
 
 # ------------------------------------------------------------------------
-# vn_z  nconst=150  baseline  (method=augmentation, group=none)
+# vn  nconst=150  baseline  (method=augmentation, group=none)
 # transferred from experiment config (no study yet)
 # ------------------------------------------------------------------------
 # python3 src/train.py \
-#     experiment=hls4ml/vn_z_150 \
+#     experiment=hls4ml/vn_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
-#     hydra.run.dir=logs/train/hls4ml/vn_z/nconst150/baseline
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst150/baseline

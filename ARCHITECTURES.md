@@ -5,18 +5,20 @@ carries eight now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 202
 rewrite), L-GATr-slim, LLoCa and the vector neurons. The last three were added on 2026-09-28 and
 2026-09-29: L-GATr-slim runs in two rows, `lgatr_slim` with the spurion tokens and
 `lgatr_slim_lorentz` without, LLoCa in four, one per frames class (`lloca_lorentz`, `lloca_z`,
-`lloca_so2` and `lloca_so3`), and the vector neurons in two, one per partition of the four-momentum
-(`vn_z` and `vn_so2`). A ninth architecture, JEDI-linear, joined on 2026-09-30 as a second class in
-the DeepSets module; it runs in one row, `jedi_linear`, the comparator from the FPGA literature,
-which since 2026-10-02 also runs the seven regimes of the grid. A tenth architecture, the Linformer,
-joined on 2026-10-01 in a module of its own, the ninth, and runs in one row, `linformer`, over the
-seven regimes. PELICAN, a plain Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe
-DeepSets were removed at the refactor; nano-PELICAN, which existed as configuration only, went with
-them, and so did the permutation check. This file records what each was, why it went, and what
-putting it back involves.
+`lloca_so2` and `lloca_so3`), and the vector neurons in one, `vn`, on the lifts of (p_T, η, φ),
+which on 2026-10-03 replaced their two rows on the four-momentum, `vn_z` and `vn_so2`. A ninth
+architecture, JEDI-linear, joined on 2026-09-30 as a second class in the DeepSets module; it runs in
+one row, `jedi_linear`, the comparator from the FPGA literature, which since 2026-10-02 also runs
+the seven regimes of the grid. A tenth architecture, the Linformer, joined on 2026-10-01 in a module
+of its own, the ninth, and runs in one row, `linformer`, over the seven regimes. PELICAN, a plain
+Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the
+refactor; nano-PELICAN, which existed as configuration only, went with them, and so did the
+permutation check. The two four-momentum rows of the vector neurons went on 2026-10-03. This file
+records what each was, why it went, and what putting it back involves.
 
-The last commit that holds all of it is `a667b346`. Any file named below is recovered with
-`git show a667b346:<path>`.
+The last commit that holds all of the refactor's removals is `a667b346`, and any file named in
+their sections is recovered with `git show a667b346:<path>`; the four-momentum vector neurons
+are recovered from `b54eef5a`.
 
 Two reasons for removal are shared. Each architecture was a `LightningModule` carrying its
 own copy of the training loop, the metric wiring, the optimiser plumbing and the symmetry
@@ -210,119 +212,208 @@ may leave a small floor on the flip rates even under an exact group.
 
 ## Vector neurons
 
-Added on 2026-09-29 as the fifth symmetry-embedded architecture. Unlike those of L-GATr-slim and
-LLoCa, its network is written here, so it adds no dependency. Vector neurons (arXiv:2104.12229)
-carry lists of vectors as hidden features and mix them with a bias-free linear layer that acts on
-the channel index alone, so that the layer commutes with the group; here the vectors are
-four-momenta and the group is a subgroup of the Lorentz group. Our code is the network
-`src/algorithms/components/vector_neurons.py` and the `JetTaggingModule` subclass
-`src/algorithms/vector_neurons.py`, which reads `[px, py, pz, e]` and hands the network
-(E, px, py, pz) in GeV. Around them sit the two algorithm configs `configs/algorithm/vn_z.yaml` and
-`vn_so2.yaml`, the six experiment configs `configs/experiment/hls4ml/vn_{z,so2}_{16,50,150}.yaml`,
-the two search configs `configs/hparams_search/hls4ml/vn_{z,so2}_optuna.yaml` and the six
-catalogues `scripts/hls4ml/runvn_{z,so2}_{search,train,eval}.sh`. The network divides the
-constituents by `units` (20 GeV), sorts them by p_T and runs a stack of blocks, the first of which
-reads the sorted constituents as its vector channels and their rank invariants, described below,
-as its scalars. Each block mixes the vector channels with a linear layer, reads invariants off the
-mixed vectors, updates the scalars with a two-layer MLP of the scalars, the invariants and the
-context, and gates the vectors with a sigmoid of the new scalars. A learned invariant is the
-Minkowski product of two learned combinations of the vectors, compressed by the signed log `psi`
-of the LorentzNet component. The gate replaces the projection of the reference, which would divide
-by the Minkowski norm of a learned direction, zero for a lightlike one, so the network is vector
-neurons with a gated non-linearity. The gates start at exactly 1/2, their last layer being
-initialised to zero, because a gate started near zero would stay there: the learned invariants are
-quadratic in the vectors, so their gradient vanishes with them. Every block but the first, whose
-input is the constituents and their rank invariants rather than a state, adds its input to both
-states. The context, psi(n) of the number n of real constituents, reaches every block and the
-head, since a missing constituent and a vanishingly soft one give a bias-free layer the same
-output; the head is an MLP of the final scalars, the invariants of the final vectors and the
-context. No layer normalises the states: on a boost-exact row no invariant divisor can bound the
-components of a vector. The optimiser is AdamW with OneCycleLR, the block of L-GATr-slim and
-LLoCa, at a default learning rate of 2e-3 in place of their 3e-4. The vector-neuron models the
-repository carried before the refactor (`network/vector_neurons_lorentz.py` at `14c1c788`,
-`network_new/vector_neurons_so2.py` at `87ae3ab6`) also gave their first layer one weight per
-constituent slot, but had no sort, no padding mask and no partition of the four-vector; only their
-idea is reused.
+Added on 2026-10-03 in one row, `vn`, which replaced the two four-momentum rows `vn_z` and `vn_so2`
+of 2026-09-29 (see "Vector neurons on the four-momentum" below). Unlike those of L-GATr-slim and
+LLoCa, its network is written here, so it adds no dependency. Vector neurons (Deng et al.,
+arXiv:2104.12229) carry lists of vectors as hidden features and mix them with a bias-free linear
+layer that acts on the channel index alone, so that the layer commutes with the group; here the
+vectors are lifts of the constituents' (p_T, η, φ), and the group is the Euclidean group of the
+(η, φ) plane. Our code is the network `VectorNeuronsClassifier` in
+`src/algorithms/components/vector_neurons.py` and the `JetTaggingModule` subclass `VectorNeurons` in
+`src/algorithms/vector_neurons.py`, which pins `required_features` to `[pt, eta, phi]` and returns
+the batch to GeV and radians in `_prepare_inputs`. Around them sit `configs/algorithm/vn.yaml`, the
+three experiment configs `configs/experiment/hls4ml/vn_{16,50,150}.yaml`, the search config
+`configs/hparams_search/hls4ml/vn_optuna.yaml` and the catalogues
+`scripts/hls4ml/runvn_{search,train,eval}.sh`. It is the one embedded row that does not read the
+four-momentum: `setup()` refuses any list but `required_features`, so its experiment configs set
+`data.features: [pt, eta, phi]`. Its catalogues and run directories sit in the default layout all
+the same, and its results land in `results/embedded/`.
 
-The partition of the four-momentum sets the exact group. The components (E, px, py, pz) are
-divided into splits, and the metric is the Minkowski one, (+, -, -, -), which every split inherits.
-Every linear layer shares its weights inside a split and keeps them free across splits, the gate
-scales each split of each vector channel as a whole, and every product, learned or among the rank
-invariants, is taken on a split or a union of splits, so a transformation that acts within every
-split and preserves the metric on it leaves the logits alone. The sign the metric puts on a whole
-split is absorbed by that split's weights and leaves the group unchanged. The switch `symmetry`
-picks the partition, one per row; it is not called `group` because `JetTaggingModule.__init__`
-already owns that name for the group of the symmetry-consistency loss. The `vn_z` row splits the
-components into (px, py) and (E, p_z) and is exact under O(2)×O(1,1): rotations about the beam,
-boosts along it, and the reflections φ -> -φ and p_z -> -p_z. The probe groups `so2` and `lorentz`
-are therefore exact for it, and `so3` and `lorentz_iso` are measured. The `vn_so2` row has three
-splits, E, p_z and (px, py), and is exact under O(2) about the beam and p_z -> -p_z, so `so2` alone
-is exact and the three other groups are measured. With one weight for all four components the
-linear layer would be the Lorentz-equivariant one of L-GATr-slim; the separate weights are what cut
-the group down. The `vn_so2` networks contain the `vn_z` ones: a `vn_z` network is the `vn_so2`
-network whose E and p_z weights are tied and whose first scalar layer gives no weight to the rank
-invariants of E and p_z taken apart, which `vn_z` lacks; `tests/test_algorithms.py` checks this on
-whole networks. The two rows are one module and one network: `vn_so2.yaml` is a standalone copy of
-`vn_z.yaml` that differs in `name` and `symmetry` alone, kept in step by `tests/test_configs.py`,
-as for PELICAN, L-GATr-slim and LLoCa.
+The row is meant for the Level-1 trigger of the CMS Phase-2 upgrade, which delivers every
+particle-flow and PUPPI candidate as (p_T, η, φ): p_T in 16 bits and η and φ in 10 bits each, with
+no Cartesian components (CMS-TDR-021, Sec. 3.5). A network on the four-momentum, as every other
+embedded row is, would first need trigonometric and hyperbolic lookup tables. This one holds only
+multiply-adds, ReLU and comparisons, with no lookup table, logarithm, square root or per-jet
+division, the rule the FPGA rows have followed since 2026-10-01. It reads the constituents by p_T
+rank, an order the trigger is designed to supply: in the TDR the Layer-2 algorithms "assume that
+within a single region the inputs are sorted by pT", and "the sorting is currently not implemented
+in Layer-1, but it is expected to not take a considerable amount of resources"; the CMS DeepSets
+tagger of arXiv:2509.24371 labels its inputs "16 x PUPPI Candidates pT sorted". The order the TDR
+describes is per region and per particle type, so one merge gives the order across types.
 
-The network reads the constituents by rank. It sorts those of each jet by decreasing p_T and feeds
-them to the first block as its input vector channels, one weight per rank. From the first block on,
-the state belongs to the jet, and every layer runs once per jet, not once per constituent, which
-is what makes the network cheap. Rotations about the beam and boosts along it leave every p_T
-unchanged, so the rank is an invariant label under both groups and under no larger one: that is
-why a network that reads by rank stays exact here, and why no Lorentz or SO(3) row exists. The
-sort also makes the logits invariant under any permutation of the constituents and sends the
-padded rows, whose p_T is zero, to the end, where they contribute nothing to the bias-free first
-layer. The record is already sorted by p_T (checked on the first 50 000 training jets at 16, 50
-and 150 constituents on 2026-09-29), so on it the sort is the identity, and in a trigger the sort
-is already done. The network sorts what it is given, so a jet transformed by the probe is ranked
-afresh, as a trigger would rank it; the `mlp` row, the other network that reads by rank, is probed
-in the record's order.
+Each constituent is lifted to u = p (1, η, φ, η² + φ²), where p is its p_T over `units` (20 GeV,
+the scale of the L-GATr-slim and LLoCa rows) and the angles are measured from the leading
+constituent, φ wrapped into the range from −π to π. A shift of the plane acts on the lift by a
+fixed linear map T, and a rotation about the origin by an orthogonal map on its (η, φ) components.
+Both preserve the form B(u, v) = uᵀ G v, with G₀₃ = G₃₀ = 1, G₁₁ = G₂₂ = −2 and every other entry
+zero, and both leave the first component, p, alone. On two constituents
+B(u_i, u_j) = p_i p_j ΔR_ij², and B(u, u) = 0 for every lift. A change of reference is itself a
+shift, so the logits do not depend on it; the leader is taken because it moves with the jet and
+keeps the angles small, so that the wrap of φ stays away from the jet and B is spared the
+cancellation between large terms that absolute angles would cost in float32.
 
-The rank invariants, the first block's input scalars, are fixed functions of the sorted
-constituents. With J the sum of the constituents (the jet), they are, for every rank i and every
-block b of components, the Minkowski square of p_i on b and the Cauchy-Schwarz deficit of p_i
-against J on b; for every rank, the product ⟨p_i, J⟩ over all four components; and for the jet,
-its square on every block and its mass squared, all compressed by `psi`. For N constituents
-and n_b blocks their width is N(2 n_b + 1) + n_b + 1, 83 for `vn_z` and 149 for `vn_so2` at 16
-constituents. The blocks of `vn_z` are its splits, (px, py) and (E, p_z), on which the entries of
-rank i are -p_T^2, m_T^2, p_T p_TJ (1 - cos Δφ), m_T m_TJ (cosh Δy - 1) and ⟨p_i, J⟩. Those of
-`vn_so2`, listed in `RANK_BLOCKS`, are its splits E, p_z and (px, py) and the union (E, p_z) that
-`vn_z` uses, so that the inputs of `vn_so2` contain those of `vn_z`. The invariants carry no
-parameters, every entry of a padded rank is exactly zero, and every entry is a product within a
-block that the row's group preserves, so both rows stay exact under the same groups. They are
-there because every constituent of a jet is nearly parallel to the jet: an inner product is then
-dominated by the product of the norms, and the information sits in the deficit, of relative size
-ΔR^2, about 1e-2, which the signed log of the raw product buries and which the learned products
-reach only through a fine cancellation between the weights of two splits. In single runs of fifty
-epochs at the default size and 16 constituents, on olgpu on 2026-09-29, `vn_z` reached a
-validation accuracy of 0.66 without them and 0.71 with them. The deficit
-equals |p||J| - p·J on a definite block and ⟨p, J⟩ - |p||J| on (E, p_z), but is computed as half
-the squared norm of the difference of the two unit vectors, times the two norms, which subtracts
-no two nearly equal numbers. The products ⟨p_i, J⟩ and the jet mass squared, by contrast,
-are raw sums that cancel to about 1e-2 of their terms, so in float32 they carry a rounding that
-differs between a jet and its transformed copy, as the Minkowski products of LorentzNet, PELICAN
-and L-GATr-slim do.
+The network sorts the constituents of each jet by decreasing p_T and lifts them. The first block
+reads the N sorted lifts as its vector channels, one weight per rank, and as its scalars, for every
+rank, p_i and B(u_i, U), where U = Σ_i u_i is the lift of the jet, and for the jet, Σ_i p_i and
+B(U, U), together with the stream and the tensor invariants described below. From there on the
+state belongs to the jet, and every block runs once per jet. A block mixes the vector channels with
+`SplitLinear`, one bias-free weight matrix shared by the four components of the lift. It then reads
+the forms B(L_k u, R_k u) of pairs of learned combinations of the mixed channels (16 by default)
+and the first component of every mixed channel, a weighted sum of p, and updates the scalars with a
+BatchNorm and a two-layer ReLU MLP of the previous scalars, those invariants and the context. Last,
+it gates each mixed channel, its four components alike, by a hard sigmoid of the new scalars. The
+forms and the p sums are the only invariants the network reads, and a gate scales a whole channel,
+so every operation on a vector commutes with the group. The gates start at exactly 1/2, their
+linear layer being initialised to zero, because a gate started near zero would stay there: the
+first block has no residual, and the forms after it are quadratic in the vectors, so their gradient
+vanishes with the vectors. Every block after the first adds its input to both states. The context,
+the number of real constituents over the constant N, reaches every block and the head, an MLP
+behind a BatchNorm that reads the final scalars, the forms and p sums of the final vectors and the
+context. Every BatchNorm folds into the dense layer after it at inference. One block is the
+default, since three gave the same accuracy (below) at about twice the FLOPs.
 
-The experiments run in fp32, since the metric products cancel to a small fraction of their terms,
-which fp16 cannot resolve. They alone among the embedded experiments also run without TF32, with
+Two branches feed the first block. The stream is the per-constituent network of JEDI-linear
+(arXiv:2508.15468) with one context layer, run over the two scalars of each rank, p_i and
+B(u_i, U): a dense ReLU layer embeds them as h_i, and the stream returns
+Σ_i ReLU(W_1 h_i + W_2 Σ_j h_j + w) over the real ranks (16 channels by default). Both of its pools
+are sums, which need no per-jet division. The tensor invariants are three-point correlators. With
+n_i the lift at unit p_T and t_i = u_i n_iᵀ, each of K learned weightings of the ranks forms the
+vectors L = Σ_i a_i u_i and R = Σ_i b_i u_i and the tensors M, M′ and M″ = Σ_i (c_i, d_i, f_i) t_i,
+and from them
+
+```
+chain     Lᵀ G M G R         = Σ_ijl a_i c_j b_l p_i p_j p_l ΔR_ij² ΔR_jl²
+pair4     tr(G M G M′)       = Σ_ij  c_i d_j p_i p_j ΔR_ij⁴
+triangle  tr(G M G M′ G M″)  = Σ_ijl c_i d_j f_l p_i p_j p_l ΔR_ij² ΔR_jl² ΔR_li²
+```
+
+A shift or a rotation S maps t_i to S t_i Sᵀ, and Sᵀ G S = G, so all three are invariant. They are
+the β = 2 energy flow polynomials (arXiv:1712.07124) of the two-edge path, the doubled edge and the
+triangle, with learned weights per rank in place of the energy fractions, and they cost O(N), as
+energy flow moments do (arXiv:1911.04491), where the sums over pairs and triples would cost O(N²)
+and O(N³). The first block reads K = 2 of each kind by default.
+
+The logits are exact under shifts of η and of φ, across the wrap of φ, under the reflections
+η → −η and φ → −φ, under rotations of the plane about any point and under any permutation of the
+constituents. A rotation about the beam shifts every φ by one angle, and a boost along the beam
+shifts every rapidity by one amount, which for a massless constituent is a shift of η, so the probe
+groups `so2` and `lorentz` are exact. `so3` and `lorentz_iso` change every p_T and move the
+constituents in the plane by different amounts, and are measured. The rotation of the plane has no
+probe of its own. To second order in ΔR the lift is the constituent's null four-momentum in
+coordinates local to the jet and B is 2 p_i · p_j, so this rotation is the rotation about the jet
+axis; to the same order a boost along the jet axis rescales the components of the lift and
+preserves B. That boost is left out on purpose: the network reads p itself, in its p sums and in
+the unit lifts of its tensor invariants, and the boost rescales p. In single runs at N = 16 and 50
+(2026-10-01, three blocks, no tensor invariants), reading no p_T sum cost 7.7 and 4.2 points of
+validation accuracy, and reading the jet's Σp alone cost 1.5 and 0.8.
+
+In float32 the probe's own arithmetic sets the floor. The transform recomputes p_T, η and φ from
+the moved momenta, so a boost along the beam rounds η afresh, and a rotation about the beam
+recomputes p_T from the rotated px and py, so two constituents whose p_T agree to rounding can swap
+ranks. On a three-epoch smoke model of the committed row (2026-10-03, test set, N = 16, test
+accuracy 0.709), the flip rates were 0.000 % under `so2`, 0.01 % under the beam boost, 41.0 % under
+`so3` and 41.6 % under `lorentz_iso`; the version without tensor invariants gave 0.000, 0.013, 40.2
+and 40.8 % on 2026-10-01. The experiments run in
+fp32, since the forms of the learned channels cancel to a small fraction of their terms, which fp16
+cannot resolve, and the tensor invariants, cubic in p_T, widen the range further; fixed point on an
+FPGA will need range handling for the same reason, which is open. They also leave
 `extras.matmul_precision` unset, which `tests/test_configs.py` checks: TF32 rounds the inputs of
 every float32 matmul to about 5e-4, and the linear layers here act on the vector components
 themselves, so a transformed jet would be rounded differently and the embedded group would hold to
-that precision only. Even so, px and py are rounded afresh after a rotation about the beam, so two
-constituents whose p_T agree to rounding can swap ranks and leave a small flip rate under `so2`; a
-boost along the beam leaves px and py untouched. At the defaults (3 blocks, 16 vector and 64
-scalar channels, 16 invariants, head [64, 32]) `vn_z` has 48 805, 60 773 and 95 973 parameters and
-costs 0.108, 0.134 and 0.211 MFLOP per jet at 16, 50 and 150 constituents, and `vn_so2` has
-58 965, 80 181 and 142 581 parameters and costs 0.122, 0.166 and 0.294 MFLOP. At the corner of the
-search space (6 blocks, 64 vector and 128 scalar channels, 32 invariants, head [128, 64]) `vn_z`
-has 0.45 to 0.55 M parameters and costs 1.09 to 1.33 MFLOP, and `vn_so2` 0.55 to 0.73 M and 1.20
-to 1.58 MFLOP. These figures were measured on olgpu on 2026-09-29. The cost grows with the number
-of constituents through the first block alone, mostly through the first layer of its scalar MLP,
-which reads the rank invariants; the invariants themselves are elementwise and so are left out of
-the FLOP count, which covers matmul-type operations alone. At 16 constituents PELICAN costs
-4.5 MFLOP (33 k parameters), LLoCa 34 (1.06 M) and L-GATr-slim 97 to 114 (2.0 M).
+that precision only.
+
+The optimiser is AdamW with OneCycleLR, the block of L-GATr-slim and LLoCa, at a default learning
+rate of 2e-3 and a weight decay of 1e-2, and the experiments train for 200 epochs on batches of 2048
+with 5 folds. The search, `vn_optuna.yaml`, runs one study per constituent count,
+`vn_nconst<N>_augmentation_none`, in `logs/optuna/hls4ml/vn.db`, each of 200 trials of 50 epochs,
+none of them launched yet (2026-10-03). It draws the blocks from {1, 2, 3}, the vector channels from
+{8, 16, 32}, the scalar channels from {32, 64, 128}, the forms from {8, 16, 32}, the tensor
+invariants of each kind from {1, 2, 4}, the stream width from {8, 16, 32}, the head from {[32],
+[64, 32], [128, 64]}, the dropout from {0, 0.1, 0.2}, the learning rate log-uniformly from 1e-4 to
+5e-3 and the weight decay from {0, 1e-4, 1e-3, 1e-2, 5e-2}, so the default lies inside the space;
+`units` is never searched. The train and eval catalogues hold three blocks each, all still
+"transferred from experiment config (no study yet)".
+
+The design was measured on olgpu between 2026-09-30 and 2026-10-02 with a scratch copy of the
+network whose switches, set to this row's choices, compute the committed network (to 9e-16 with
+copied weights, checked on 2026-10-03); the run records are in
+`~/Research/local/claude/scratchpad/jet_tagging_gdl/vnx/rounds/` on the Mac. Each number below is
+the best validation accuracy of a 50-epoch run on the record's own split (`data.n_folds=1`) at the
+row's default sizes, with the number of blocks stated, from one seed unless marked; two seeds are
+given as mean ± standard deviation, and seeds differed by up to 0.0011. At N = 16, 50 and 150 the
+row reached 0.7203 and 0.8195 with one block (N = 150 was not run with one) and 0.7202 ± 0.0004,
+0.8199 ± 0.0004 (two seeds each) and 0.8250 with three. With three blocks and no tensor invariants
+it reached 0.7155 ± 0.0001, 0.8168 ± 0.0008 (two seeds) and 0.8222, so the tensor invariants are
+worth 0.5, 0.3 and 0.3 points; without the tensor invariants and the vector channels, the stream and
+the scalars alone reached 0.7118 and 0.8106 (two seeds), so the vectors are worth 0.4 and 0.6 points
+there. One, two, four and eight tensor invariants of each kind lie within 0.05 points of one another
+at N = 16 and 0.15 at N = 50. Forms of every rank against learned axes, read by the stream, gained
+0.30 and 0.17 points (two seeds) without the tensor invariants and nothing with them. On a precursor
+that lifted η and φ separately, to p (1, η, η²) and p (1, φ, φ²) with weights of their own (three
+blocks, no stream, 2026-09-30), ψ compression of the invariants (the signed log of the LorentzNet
+component), sigmoid gates and a log2 on the invariants each moved the accuracy by less than 0.1
+points, so none is used. One split beat the two by 0.05 and 0.25 points (two seeds), with a
+train-validation gap of 0.6 and 0.7 points against 0.9 and 1.3. The |η| of the leading constituent
+as an extra input gained 0.28 and 0.19 points (two seeds) but is not used: it gives up the beam
+boost and fits the rapidity distribution of the sample.
+
+For comparison, tuned study bests (best of the first 200 trials, 50 epochs) at N = 16, 50 and 150
+are 0.705, 0.802 and 0.813 for DeepSets and 0.720, 0.823 and 0.832 for JetFormer on
+`[pt, etarel, phirel]`, and 0.7305, 0.836 and 0.843 for `lgatr_slim` and 0.733, 0.838 and 0.845 for
+`pelican` on the four-momentum; `jedi_linear` reached 0.7114, 0.8033 and 0.8125 on
+`[pt, etarel, phirel]` in its first campaign (2026-09-30, sum and ReLU fixed, 40 to 90 trials per
+study). Untuned, the row matches JetFormer at N = 16 and sits 0.3 and 0.7 points below it at 50 and
+150, and 1.0 and 1.3 points below `lgatr_slim` and `pelican` at N = 16. The design was chosen on
+these validation accuracies, over about a hundred runs, so the studies and the test folds, not
+these numbers, will settle the comparison.
+
+At the defaults the row has 21.9 k, 27.3 k and 43.1 k parameters and costs 0.064, 0.105 and
+0.223 MFLOP per jet at N = 16, 50 and 150, by the FLOP counter, which counts matrix products
+alone, at two FLOPs per multiply-add, and so leaves out elementwise products such as the last step
+of every form and the gates (measured on 2026-10-03). At the corner of the search space (3 blocks,
+32 vector and 128 scalar channels, 32 forms, 4 tensor invariants of each kind, a 32-wide stream,
+head [128, 64]) it has 178 k, 189 k and 220 k parameters and costs 0.46, 0.58 and 0.92 MFLOP. The
+cost grows with N through the first block's rank inputs, vector and scalar, the stream and the
+tensor invariants alone. A V100 pre-flight at the corner, in fp32 on batches of 2048 fully occupied
+jets, reserved 0.09, 0.14 and 0.28 GiB and took 11 ms per step at every N (7.4 ms at the
+defaults), so every study fits a 1g MIG slice. At N = 16, `jedi_linear` costs 0.29 MFLOP at its
+published point and PELICAN 4.5 MFLOP.
+
+A search on 2026-10-03, over the web and the INSPIRE citation lists of the closest papers, placed
+the row in the literature. The tensor invariants are the energy flow moments of Komiske, Metodiev
+and Thaler (arXiv:1911.04491) with learned weights. Their Sec. IV notes: "While we use the notation
+of Lorentz indices and the Minkowski metric here, the conclusions hold for any inner product among
+vectors using any choice of metric", and their Sec. VI C: "While most current LHC analyses focus on
+β = 1 observables, comparable (or better) performance can be obtained using β = 2". The three
+contractions are the two-edge path, the doubled edge and the triangle of their Table II, with
+learned per-rank weights in place of the energy fractions; equal weights give the unnormalised
+β = 2 energy flow polynomials of arXiv:1712.07124, and per-rank weights are not collinear safe.
+PELICAN (arXiv:2307.16506, App. B) cannot form the triangle with its default layers: its
+single-index aggregators generate only "starfish" graphs, and "even something as simple as the
+triangle graph can never be generated due to the fact that it requires three free indices at an
+intermediate step"; adding a matrix-product aggregator gave "no performance improvements". The form
+is PELICAN's small-angle relation read backwards: "the Lorentz-invariant version of the polynomial
+can then be obtained by replacing each θ_ij² with 2 d̂_ij". Exact E(2) in the (y, φ) plane by
+architecture exists for offline IRC-safe message passing (arXiv:2402.12449, arXiv:2509.22059), with
+pairwise MLP messages and fixed p_T fractions, and BIP (arXiv:2207.08272) builds O(N) polynomial
+invariants in the frame of the jet axis with logarithms and exponentials. The gated non-linearity is
+that of Weiler et al. (arXiv:1807.02547); the vector-neuron projection of Deng et al.
+(arXiv:2104.12229) divides by the length of a learned direction, which an indefinite form such as B
+may send to zero. The search found no prior use of the lift (1, η, φ, η² + φ²) with this form for
+jets or for FPGA networks, and no energy flow moments with learned weights inside a trainable
+equivariant network; that is an absence after a search, not a proof.
+
+`tests/test_algorithms.py` checks, on the network in float64 and eval mode, that the logits are
+invariant to 1e-9 under shifts of η and φ across the wrap, under rotations of the plane about the
+leader and about the fourth-hardest constituent and under both reflections, and to 1e-12 under a
+permutation. Through `forward`, on massless record jets, the probe's `so2` and `lorentz` transforms
+must move the logits by less than 1e-6 (9e-8 and 2e-8, the float32 rounding in `forward`), and
+`so3` and `lorentz_iso` by more than a thousand times the `so2` shift. It also checks the form and
+the tensor invariants against their closed forms, that a padded slot changes nothing (an eight-slot
+network against a nine-slot copy), that the batch is de-normalised, that removing a constituent
+moves the logits through the multiplicity, that every gate starts at 1/2 and that the logits are
+finite on the FLOP counter's input. `tests/test_configs.py` checks that the experiments set
+`data.features` to `required_features` and leave `extras.matmul_precision` unset.
 
 ## JEDI-linear
 
@@ -441,11 +532,11 @@ jet at 16, 50 and 150 constituents on three features and 0.292, 0.866 and 2.556 
 two FLOPs per multiply-add and leaving the poolings out, as the FLOP counter does; the corner costs
 1.12, 3.37 and 10.0 MFLOP on three features. Nearly all of the cost is per constituent,
 128F + 16 384 FLOPs per slot against 21 664 per jet at the published point, so it grows linearly
-with N. The vector neurons run every block after the first once per jet, and `vn_z` costs 0.108,
-0.134 and 0.211 MFLOP; tuned DeepSets costs about 0.28, 0.64 and 0.98. A V100 pre-flight at the
-corner, with batches of 2048 under fp16 autocast, reserved 0.12, 0.32 and 0.77 GiB and took 3.3,
-3.9 and 6.3 ms per step at 16, 50 and 150 constituents, so every study fits a 1g MIG slice. These
-figures were measured on olgpu on 2026-09-30.
+with N. The vector neurons run every block once per jet, and `vn` costs 0.064, 0.105 and
+0.223 MFLOP at its defaults (2026-10-03); tuned DeepSets costs about 0.28, 0.64 and 0.98. A V100
+pre-flight at the corner, with batches of 2048 under fp16 autocast, reserved 0.12, 0.32 and
+0.77 GiB and took 3.3, 3.9 and 6.3 ms per step at 16, 50 and 150 constituents, so every study
+fits a 1g MIG slice. These figures were measured on olgpu on 2026-09-30.
 
 `tests/test_algorithms.py` checks, for every pooling on offer under ReLU and for tanh with the
 maximum, that the logits are invariant, to 1e-10 in float64, under a permutation of the constituents
@@ -596,11 +687,11 @@ multiply-adds of the head; the counter and this count agree to every digit. At t
 is 0.0473, 0.1376 and 0.4032 MFLOP at N = 16, 50 and 150 on three features (0.0478, 0.1392 and
 0.4080 on four), and at the corner 1.0018, 2.8253 and 8.1885 (1.0038, 2.8317 and 8.2077 on four).
 For comparison, the JEDI-linear section gives 0.290, 0.860 and 2.537 MFLOP on three features for
-`jedi_linear` at its published point, 0.108, 0.134 and 0.211 for `vn_z` and about 0.28, 0.64 and
-0.98 for tuned DeepSets. A V100 pre-flight at the corner with BatchNorm on, on batches of 2048
-fully occupied random jets with four features under fp16 autocast, reserved 0.11, 0.30 and
-0.97 GiB and took 5.7, 6.2 and 13.1 ms per step at N = 16, 50 and 150, with finite losses
-throughout, so every study fits a 1g MIG slice.
+`jedi_linear` at its published point, 0.064, 0.105 and 0.223 for `vn` at its defaults and about
+0.28, 0.64 and 0.98 for tuned DeepSets. A V100 pre-flight at the corner with BatchNorm on, on
+batches of 2048 fully occupied random jets with four features under fp16 autocast, reserved 0.11,
+0.30 and 0.97 GiB and took 5.7, 6.2 and 13.1 ms per step at N = 16, 50 and 150, with finite
+losses throughout, so every study fits a 1g MIG slice.
 
 A calibration on one fold at 16 constituents, 20 epochs at a learning rate of 1e-3, recorded the
 validation accuracy of the best epoch. At a mid point of the space (width 32, k = 4, ff 64, head
@@ -627,6 +718,51 @@ the real constituents alone, with `sum_over_n` equal to the sum divided by the s
 parameter count must match the formula above; and an unknown aggregation must be refused by name.
 In `tests/test_make_train_catalogues.py`, a feature-set layout must generate train and eval
 catalogues for the row.
+
+## Vector neurons on the four-momentum
+
+The rows `vn_z` and `vn_so2`, added on 2026-09-29 in bb236e70 and replaced on 2026-10-03 by `vn`
+(above). They ran vector neurons on the four-momentum (E, px, py, pz) in units of 20 GeV, divided
+into splits with weights of their own under the Minkowski metric: (px, py) and (E, p_z) for `vn_z`,
+exact under rotations about the beam, boosts along it and the reflections φ → −φ and p_z → −p_z,
+and so under the probe's `so2` and `lorentz`; and E, p_z and (px, py) for `vn_so2`, exact under
+`so2` alone. A block mixed the vector channels split by split, read learned Minkowski products
+compressed by the signed log `psi` of the LorentzNet component, and gated each split of each
+channel with a sigmoid. The first block also read fixed rank invariants, the Minkowski squares of
+every sorted constituent and its Cauchy-Schwarz deficits against the jet on each split, without
+which `vn_z` reached a validation accuracy of 0.66 rather than 0.71 at N = 16. The default was
+three blocks of 16 vector and 64 scalar channels with 16 invariants.
+
+Files, recovered with `git show b54eef5a:<path>`: `configs/algorithm/vn_{z,so2}.yaml`,
+`configs/experiment/hls4ml/vn_{z,so2}_{16,50,150}.yaml`,
+`configs/hparams_search/hls4ml/vn_{z,so2}_optuna.yaml` and
+`scripts/hls4ml/runvn_{z,so2}_{search,train,eval}.sh`, all added in bb236e70, and the versions of
+`src/algorithms/components/vector_neurons.py`, `src/algorithms/vector_neurons.py`,
+`tests/test_algorithms.py` and `tests/test_configs.py` at b54eef5a; the two modules were rewritten
+in place for `vn`. The section "Vector neurons" of this file at b54eef5a holds the design and its
+reasons. The two N = 16 study databases, `logs/optuna/hls4ml/vn_z.db` and `vn_so2.db` (200 trials
+each, 2026-09-29), stay.
+
+Why removed: the Phase-2 L1 trigger delivers (p_T, η, φ), so these rows would need trigonometric
+and hyperbolic tables in front of their first layer, and lookup tables for their logarithms and
+sigmoids, while the lifted row needs none and equals or beats them: 0.7203 against 0.7105 at
+N = 16, both untuned, with under half the parameters and 0.6 of the FLOPs.
+
+The numbers are best validation accuracies of single 50-epoch runs at the defaults, measured on
+olgpu on 2026-09-29 and 2026-09-30; reruns and second seeds spread by up to 0.0007. `vn_z` reached
+0.7105, 0.8107 and 0.8164 at N = 16, 50 and 150, and `vn_so2` 0.7115, 0.8110 and 0.8164; the
+N = 16 study bests (200 trials each, 2026-09-29) are 0.7138 and 0.7149. On the test set, `vn_z` at
+N = 16 flipped 0.01 % of the jets under `so2` and under the beam boost, 39.8 % under `so3` and
+40.0 % under `lorentz_iso`; `vn_so2`, which does not embed the boost, flipped 3.1 to 5.0 % under it
+at the three counts. At the defaults `vn_z` had 48 805, 60 773 and 95 973 parameters and cost
+0.108, 0.134 and 0.211 MFLOP per jet at N = 16, 50 and 150, and `vn_so2` 58 965, 80 181 and
+142 581 parameters and 0.122, 0.166 and 0.294 MFLOP (2026-09-29).
+
+Porting notes. The partition was set by the switch `symmetry`, not `group`, which
+`JetTaggingModule.__init__` owns for the SCL. A port restores `required_features` to the
+four-momentum, `vn_z` and `vn_so2` to `MODELS` and `EMBEDDED` in both
+`scripts/optuna/make_train_catalogues.py` and `tests/conftest.py`, and their display names to
+`scripts/analysis/common.py`; the TF32 exclusion holds for them as for `vn`.
 
 ## nano-PELICAN
 

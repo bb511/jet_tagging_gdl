@@ -1,0 +1,45 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: tpe
+  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+
+# One TPE study per nconstituents for the vector neurons on the lifts of (pt, eta, phi), three in
+# all, on the main run's val/acc_best, in the baseline regime alone like every embedded
+# architecture. Paired on the CLI with callbacks=search data.n_folds=1. units is a numerical
+# setting, not model capacity, and lorentz_eta_max defines the invariance probe, so neither is
+# searched.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: sqlite:///logs/optuna/hls4ml/vn.db?timeout=600
+    # The regime picks the study, vn_nconst<N>_augmentation_none, never the CLI.
+    study_name: vn_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
+    n_jobs: 1
+    direction: maximize
+    n_trials: 200
+    sampler:
+      seed: 1234
+      n_startup_trials: 20
+
+    # The default (1 block, 16 vector and 64 scalar channels, 16 invariants, 2 tensor invariants of
+    # each kind, a 16-wide stream, head [64, 32]) lies inside the space.
+    # Every block runs once per jet, not once per constituent, so the corner (3 blocks, 32 vector
+    # and 128 scalar channels, 32 invariants, 4 tensor invariants of each kind, a 32-wide stream,
+    # head [128, 64]) costs 0.46, 0.58 and 0.92 MFLOP per jet at 0.18, 0.19 and 0.22 M parameters
+    # at 16, 50 and 150 constituents, against 0.064, 0.105 and 0.223 MFLOP at 22, 27 and 43 k
+    # parameters for the default (measured on 2026-10-03). lr and weight_decay follow the ranges of
+    # L-GATr-slim and LLoCa, whose optimiser block this is.
+    params:
+      algorithm.num_blocks: choice(1, 2, 3)
+      algorithm.vector_channels: choice(8, 16, 32)
+      algorithm.scalar_channels: choice(32, 64, 128)
+      algorithm.invariants: choice(8, 16, 32)
+      algorithm.tensor_invariants: choice(1, 2, 4)
+      algorithm.stream_channels: choice(8, 16, 32)
+      algorithm.head_layers: choice([32], [64,32], [128,64])
+      algorithm.dropout: choice(0.0, 0.1, 0.2)
+      algorithm.optimizer.lr: tag(log, interval(1e-4, 5e-3))
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-4, 1e-3, 1e-2, 5e-2)
