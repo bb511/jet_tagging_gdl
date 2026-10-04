@@ -3,6 +3,10 @@ import re
 import sys
 from pathlib import Path
 
+import optuna
+from optuna.distributions import CategoricalDistribution
+from optuna.trial import TrialState, create_trial
+
 from tests.conftest import BASELINE_ONLY, EMBEDDED, MODELS, ROOT
 
 # scripts/ is not a package, so the generator is loaded by path, as the analysis scripts'
@@ -24,6 +28,10 @@ GRID = [
     for nconst in make_train_catalogues.NCONSTITUENTS
     for variant in make_train_catalogues.VARIANTS
 ]
+STUDY = "mlp_nconst16_augmentation_none"
+# Each completed trial carries its own value as its one parameter, so that a test sees
+# whose parameters came back.
+VALUES = CategoricalDistribution((0.5, 0.8, 0.9))
 
 
 def _render(task: str, dbs: Path, layout: Layout) -> str:
@@ -43,6 +51,24 @@ def _empty_dbs(tmp_path: Path) -> Path:
     dbs = tmp_path / "optuna"
     dbs.mkdir()
     return dbs
+
+
+def _study(db: Path, rows: list[float | TrialState]) -> None:
+    # A float is a completed trial with that value. A RUNNING row is left open through
+    # ask(), as a killed driver leaves one.
+    study = optuna.create_study(
+        study_name=STUDY, storage=f"sqlite:///{db}", direction="maximize"
+    )
+    for row in rows:
+        if row == TrialState.RUNNING:
+            study.ask()
+        elif row == TrialState.FAIL:
+            study.add_trial(create_trial(state=TrialState.FAIL))
+        else:
+            params, distributions = {"x": row}, {"x": VALUES}
+            study.add_trial(
+                create_trial(params=params, distributions=distributions, value=row)
+            )
 
 
 def test_a_feature_set_puts_its_override_and_its_own_run_dirs_in_every_block(
@@ -133,3 +159,38 @@ def test_the_transferred_ablation_of_a_feature_set_carries_both_marks(
     assert run in _manifest_paths(evaluate)
     assert train.count(OVERRIDE) == len(GRID)
     assert evaluate.count(OVERRIDE) == len(GRID)
+
+
+def test_best_trial_keeps_to_the_first_200_completed_trials(tmp_path: Path) -> None:
+    # The overall best, 0.9, is trial 230, past the budget; within it 0.8 is shared by
+    # trials 120 and 150, and the earlier one wins the tie.
+    db = tmp_path / "x.db"
+    peaks = {120: 0.8, 150: 0.8, 230: 0.9}
+    _study(db, [peaks.get(number, 0.5) for number in range(250)])
+
+    assert make_train_catalogues.TRIAL_BUDGET == 200
+    assert make_train_catalogues.best_trial(db, STUDY) == (120, 0.8, {"x": "0.8"})
+
+
+def test_failed_and_running_trials_take_no_place_in_the_budget(tmp_path: Path) -> None:
+    # A FAIL and an open RUNNING row before every 50th completed trial put the 200th
+    # completed trial at number 207 and the 201st at 210. Counting every row would end
+    # the window at number 199, where no trial beats 0.5.
+    rows = []
+    for k in range(201):
+        rows += [TrialState.FAIL, TrialState.RUNNING] if k % 50 == 0 else []
+        rows.append({199: 0.8, 200: 0.9}.get(k, 0.5))
+    db = tmp_path / "x.db"
+    _study(db, rows)
+
+    assert make_train_catalogues.best_trial(db, STUDY) == (207, 0.8, {"x": "0.8"})
+
+
+def test_best_trial_is_none_without_the_study_or_a_completed_trial(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "x.db"
+    _study(db, [TrialState.FAIL, TrialState.RUNNING])
+
+    assert make_train_catalogues.best_trial(db, STUDY) is None
+    assert make_train_catalogues.best_trial(db, "absent") is None

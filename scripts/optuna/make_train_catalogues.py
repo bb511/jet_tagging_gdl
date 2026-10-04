@@ -21,6 +21,10 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from optuna.trial import FrozenTrial
 
 MODELS = [
     "deepsets",
@@ -82,6 +86,9 @@ VARIANTS_OF = {
 # interval on a run's numbers.
 N_FOLDS = 5
 
+# Regimes compare fairly only on an equal trial budget, which multi-driver campaigns overshoot.
+TRIAL_BUDGET = 200
+
 BANNER = "# " + 72 * "="
 SEP = "# " + 72 * "-"
 
@@ -108,9 +115,26 @@ def quote(value: str) -> str:
     return f"'{value}'" if any(c in value for c in "[]{},") else value
 
 
+def _best_within_budget(complete: list[FrozenTrial]) -> Trial | None:
+    """The best of the first ``TRIAL_BUDGET`` trials by trial number, the earliest on a
+    tie; every study maximises val/acc_best."""
+    window = sorted(complete, key=lambda t: t.number)[:TRIAL_BUDGET]
+    if not window:
+        return None
+    trial = max(window, key=lambda t: (t.value, -t.number))
+    return (
+        trial.number,
+        float(trial.value),
+        {k: str(v) for k, v in trial.params.items()},
+    )
+
+
 def best_trial(db: Path, study: str) -> Trial | None:
-    """Best trial of ``study``, or None when there is no such study and no completed
-    trial.
+    """Best of the first ``TRIAL_BUDGET`` completed trials of ``study``, or None when
+    there is no such study or no completed trial.
+
+    The window holds COMPLETE trials alone, in trial-number order, so failed, pruned and
+    waiting trials and the orphan running rows of killed drivers take no place in it.
 
     Optuna is imported here, not at module scope, so the generator runs with no study
     database present, which is the state the checked-in catalogues were generated in.
@@ -122,14 +146,10 @@ def best_trial(db: Path, study: str) -> Trial | None:
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     try:
         loaded = optuna.load_study(study_name=study, storage=f"sqlite:///{db}")
-        trial = loaded.best_trial
-    except (KeyError, ValueError):  # no such study, or no completed trial in it
+    except KeyError:  # no such study
         return None
-    return (
-        trial.number,
-        float(trial.value),
-        {k: str(v) for k, v in trial.params.items()},
-    )
+    complete = (optuna.trial.TrialState.COMPLETE,)
+    return _best_within_budget(loaded.get_trials(deepcopy=False, states=complete))
 
 
 def overrides_of(params: dict[str, str]) -> list[str]:
@@ -283,8 +303,8 @@ def regime_note(model: str) -> list[str]:
 def tuned_note(layout: Layout) -> list[str]:
     """Where the blocks' hyperparameters were read from, for the reader of one file."""
     return [
-        "# Each block carries the best trial of its own study under"
-        f" {layout.under('logs/optuna/hls4ml')}/;",
+        f"# Each block carries the best of the first {TRIAL_BUDGET} completed trials, by trial",
+        f"# number, of its own study under {layout.under('logs/optuna/hls4ml')}/;",
         "# a block whose study is missing carries none and says so (transferred ablation).",
     ]
 
