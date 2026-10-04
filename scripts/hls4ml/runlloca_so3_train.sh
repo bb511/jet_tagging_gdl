@@ -6,7 +6,8 @@
 # by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
 # Baseline only: this architecture embeds the symmetry rather than acquiring it,
 # so the augmentation and SCL regimes are not run on it.
-# Each block carries the best trial of its own study under logs/optuna/hls4ml/;
+# Each block carries the best of the first 200 completed trials, by trial
+# number, of its own study under logs/optuna/hls4ml/;
 # a block whose study is missing carries none and says so (transferred ablation).
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
@@ -18,13 +19,22 @@
 
 # ------------------------------------------------------------------------
 # lloca_so3  nconst=16  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 196 of lloca_so3_nconst16_augmentation_none, val/acc_best=0.681454
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/lloca_so3_16 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.attn_scalars=8 \
+#     algorithm.attn_vectors=2 \
+#     algorithm.dropout=0.0 \
+#     algorithm.framesnet_hidden=32 \
+#     algorithm.mlp_factor=2 \
+#     algorithm.num_blocks=6 \
+#     algorithm.num_heads=4 \
+#     algorithm.optimizer.lr=0.0019035833384979878 \
+#     algorithm.optimizer.weight_decay=0.05 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/lloca_so3/nconst16/baseline
@@ -35,13 +45,22 @@
 
 # ------------------------------------------------------------------------
 # lloca_so3  nconst=50  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 138 of lloca_so3_nconst50_augmentation_none, val/acc_best=0.809258
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/lloca_so3_50 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.attn_scalars=8 \
+#     algorithm.attn_vectors=1 \
+#     algorithm.dropout=0.0 \
+#     algorithm.framesnet_hidden=64 \
+#     algorithm.mlp_factor=4 \
+#     algorithm.num_blocks=8 \
+#     algorithm.num_heads=8 \
+#     algorithm.optimizer.lr=0.0006710355529113164 \
+#     algorithm.optimizer.weight_decay=0.05 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/lloca_so3/nconst50/baseline
@@ -52,13 +71,22 @@
 
 # ------------------------------------------------------------------------
 # lloca_so3  nconst=150  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 158 of lloca_so3_nconst150_augmentation_none, val/acc_best=0.820394
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/lloca_so3_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.attn_scalars=8 \
+#     algorithm.attn_vectors=2 \
+#     algorithm.dropout=0.0 \
+#     algorithm.framesnet_hidden=64 \
+#     algorithm.mlp_factor=2 \
+#     algorithm.num_blocks=12 \
+#     algorithm.num_heads=4 \
+#     algorithm.optimizer.lr=0.0021632637761112876 \
+#     algorithm.optimizer.weight_decay=0.05 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/lloca_so3/nconst150/baseline

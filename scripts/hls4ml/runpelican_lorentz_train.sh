@@ -6,7 +6,8 @@
 # by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.
 # Baseline only: this architecture embeds the symmetry rather than acquiring it,
 # so the augmentation and SCL regimes are not run on it.
-# Each block carries the best trial of its own study under logs/optuna/hls4ml/;
+# Each block carries the best of the first 200 completed trials, by trial
+# number, of its own study under logs/optuna/hls4ml/;
 # a block whose study is missing carries none and says so (transferred ablation).
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
@@ -18,13 +19,19 @@
 
 # ------------------------------------------------------------------------
 # pelican_lorentz  nconst=16  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 111 of pelican_lorentz_nconst16_augmentation_none, val/acc_best=0.660002
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/pelican_lorentz_16 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.dropout=0.0 \
+#     algorithm.n_blocks=5 \
+#     algorithm.n_hidden=25 \
+#     algorithm.n_message=35 \
+#     algorithm.optimizer.lr=0.0035038960298257225 \
+#     algorithm.optimizer.weight_decay=0.005 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/pelican_lorentz/nconst16/baseline
@@ -35,13 +42,19 @@
 
 # ------------------------------------------------------------------------
 # pelican_lorentz  nconst=50  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 163 of pelican_lorentz_nconst50_augmentation_none, val/acc_best=0.793824
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/pelican_lorentz_50 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.dropout=0.025 \
+#     algorithm.n_blocks=5 \
+#     algorithm.n_hidden=35 \
+#     algorithm.n_message=35 \
+#     algorithm.optimizer.lr=0.0025294648648246003 \
+#     algorithm.optimizer.weight_decay=0.005 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/pelican_lorentz/nconst50/baseline
