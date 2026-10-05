@@ -15,13 +15,11 @@ output_dim: 5
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
-symm_loss_metric: l2
 transform_kwargs: ${data.transform_kwargs}
 
 # The published point, one architecture for every N and feature set.
 hidden: 64 # width of every per-constituent layer, of the context and of the pooled vector
 head_layers: [64, 32, 16] # hidden widths of the MLP on the pooled vector
-activation: relu # after every layer but the last; not searched, as for DeepSets
 aggregation: sum # sum, max or sum_over_n over the real constituents, for both pools
 
 optimizer:

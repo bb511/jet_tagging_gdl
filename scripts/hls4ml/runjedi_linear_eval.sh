@@ -30,7 +30,7 @@
 #     algorithm.optimizer.lr=0.003048592048530535 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/baseline
@@ -50,7 +50,7 @@
 #     algorithm.optimizer.lr=0.0030546033902610716 \
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/aug_so2 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/aug_so2
@@ -70,7 +70,7 @@
 #     algorithm.optimizer.lr=0.004664505762124715 \
 #     algorithm.optimizer.weight_decay=1e-06 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/aug_so3 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/aug_so3
@@ -90,7 +90,7 @@
 #     algorithm.optimizer.lr=0.003772915054661497 \
 #     algorithm.optimizer.weight_decay=1e-06 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/aug_lorentz \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/aug_lorentz
@@ -111,7 +111,7 @@
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     algorithm.symm_loss_weight=0.007087398013906303 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/symm_so2 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/symm_so2
@@ -132,7 +132,7 @@
 #     algorithm.optimizer.weight_decay=0.0 \
 #     algorithm.symm_loss_weight=0.009752183777171774 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/symm_so3 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/symm_so3
@@ -153,7 +153,7 @@
 #     algorithm.optimizer.weight_decay=1e-06 \
 #     algorithm.symm_loss_weight=0.058712136114606954 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst16/symm_lorentz \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst16/symm_lorentz
@@ -177,7 +177,7 @@
 #     algorithm.optimizer.lr=0.0029683358823681763 \
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/baseline
@@ -197,7 +197,7 @@
 #     algorithm.optimizer.lr=0.0029220705473181055 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/aug_so2 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/aug_so2
@@ -217,7 +217,7 @@
 #     algorithm.optimizer.lr=0.008936256846321641 \
 #     algorithm.optimizer.weight_decay=1e-06 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/aug_so3 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/aug_so3
@@ -237,7 +237,7 @@
 #     algorithm.optimizer.lr=0.005008406327332 \
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/aug_lorentz \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/aug_lorentz
@@ -258,7 +258,7 @@
 #     algorithm.optimizer.weight_decay=0.0 \
 #     algorithm.symm_loss_weight=0.0029685086380761092 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/symm_so2 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/symm_so2
@@ -279,7 +279,7 @@
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     algorithm.symm_loss_weight=0.006078631095641767 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/symm_so3 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/symm_so3
@@ -300,7 +300,7 @@
 #     algorithm.optimizer.weight_decay=0.0 \
 #     algorithm.symm_loss_weight=0.03611877965968715 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst50/symm_lorentz \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst50/symm_lorentz
@@ -324,7 +324,7 @@
 #     algorithm.optimizer.lr=0.0018143433840631773 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/baseline
@@ -344,7 +344,7 @@
 #     algorithm.optimizer.lr=0.0029693257793846507 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/aug_so2 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/aug_so2
@@ -364,7 +364,7 @@
 #     algorithm.optimizer.lr=0.0029281970100593067 \
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/aug_so3 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/aug_so3
@@ -384,7 +384,7 @@
 #     algorithm.optimizer.lr=0.007636897510095475 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/aug_lorentz \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/aug_lorentz
@@ -405,7 +405,7 @@
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     algorithm.symm_loss_weight=0.0036851990282835744 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/symm_so2 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/symm_so2
@@ -426,7 +426,7 @@
 #     algorithm.optimizer.weight_decay=0.0 \
 #     algorithm.symm_loss_weight=0.0012094600504099617 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/symm_so3 \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/symm_so3
@@ -447,7 +447,7 @@
 #     algorithm.optimizer.weight_decay=1e-07 \
 #     algorithm.symm_loss_weight=0.0012861144224156009 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jedi_linear/nconst150/symm_lorentz \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear/nconst150/symm_lorentz

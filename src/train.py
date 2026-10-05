@@ -145,7 +145,7 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
-def main(cfg: DictConfig) -> float | None:
+def main(cfg: DictConfig) -> float:
     """Train, and return ``cfg.optimized_metric`` for Optuna to maximise."""
     extras(cfg)
     metric_dict, object_dict = train(cfg)

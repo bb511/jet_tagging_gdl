@@ -172,17 +172,11 @@ class Layout:
     """
 
     features: tuple[str, ...] | None = None
-    transferred: bool = False
 
     @property
     def label(self) -> str | None:
         """The directory component of this feature set, None for the four-momentum."""
         return "_".join(self.features) if self.features else None
-
-    @property
-    def suffix(self) -> str:
-        """What tells a transferred-hyperparameter file and run directory apart."""
-        return "_transferred" if self.transferred else ""
 
     def under(self, root: str) -> str:
         """``root`` itself, or the subdirectory of it this feature set owns."""
@@ -191,7 +185,7 @@ class Layout:
     def run_dir(self, task: str, model: str, nconst: int, label: str) -> str:
         """Where one block's hydra run directory goes under logs/."""
         base = self.under(f"logs/{task}/hls4ml")
-        return f"{base}/{model}/nconst{nconst}/{label}{self.suffix}"
+        return f"{base}/{model}/nconst{nconst}/{label}"
 
     def overrides(self) -> list[str]:
         """The feature-set override every block of this layout carries, if any."""
@@ -271,7 +265,7 @@ def eval_block(
     train_dir = layout.run_dir("train", model, nconst, label)
     body = _common_body(model, nconst, variant, trial, layout) + [
         f"checkpoint_manifest_path={train_dir}",
-        "results_table.invariance_metric=wasserstein",
+        "results_table.invariance_metric=tv",
         "trainer=gpu",
         "trainer.devices=[0]",
         f"hydra.run.dir={layout.run_dir('eval', model, nconst, label)}",
@@ -279,25 +273,15 @@ def eval_block(
     return _block(_header(model, nconst, variant, trial), "src/eval.py", body)
 
 
-TRANSFERRED_NOTE = [
-    "# No block carries hyperparameter overrides: this is the transferred-",
-    "# hyperparameter ablation, at the experiment configs' own values.",
-]
 BASELINE_ONLY_NOTE = [
     "# Baseline only: this architecture embeds the symmetry rather than acquiring it,",
     "# so the augmentation and SCL regimes are not run on it.",
-]
-COMPARATOR_NOTE = [
-    "# Baseline only: this architecture is a comparator from the literature rather than",
-    "# a subject of the study, so the augmentation and SCL regimes are not run on it.",
 ]
 
 
 def regime_note(model: str) -> list[str]:
     """Why a catalogue covers the baseline alone; nothing for the full grid."""
-    if model in EMBEDDED:
-        return BASELINE_ONLY_NOTE
-    return COMPARATOR_NOTE if model in BASELINE_ONLY else []
+    return BASELINE_ONLY_NOTE if model in EMBEDDED else []
 
 
 def tuned_note(layout: Layout) -> list[str]:
@@ -336,7 +320,7 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
         "# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.",
         *features_note(layout),
         *regime_note(model),
-        *(TRANSFERRED_NOTE if layout.transferred else tuned_note(layout)),
+        *tuned_note(layout),
         "#",
         "# Every command is commented out: copy one to run it by hand, or feed the whole",
         f"# file to scripts/cluster/submit_{task}.sh, which queues them on a GPU or slurm.",
@@ -353,7 +337,7 @@ def render(model: str, task: str, dbs: Path, layout: Layout) -> str:
         for variant in VARIANTS_OF[model]:
             study = study_name(model, nconst, variant[1], variant[2])
             db = dbs / f"{model}.db"
-            trial = None if layout.transferred else best_trial(db, study)
+            trial = best_trial(db, study)
             out += make_block(model, nconst, variant, trial, layout)
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -438,7 +422,7 @@ def _generate(dbs: Path, out: Path, repo: Path, layout: Layout, dry_run: bool) -
     for model in models_of(layout):
         for task in ("train", "eval"):
             text, found = _catalogue(model, task, dbs, layout, lib)
-            path = out / f"run{model}_{task}{layout.suffix}.sh"
+            path = out / f"run{model}_{task}.sh"
             stale += _emit(text, path, found, repo, dry_run)
     return stale
 
@@ -466,11 +450,6 @@ def _parse_args() -> argparse.Namespace:
         "four-momentum layout every experiment config reads.",
     )
     parser.add_argument(
-        "--transferred",
-        action="store_true",
-        help="Ignore the studies and write the *_transferred.sh ablation.",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report which files would change; write nothing.",
@@ -492,7 +471,7 @@ def main() -> int:
     """Generate every catalogue, or report which of them a regeneration would change."""
     args = _parse_args()
     repo = find_repo_root(Path(__file__).resolve().parent)
-    layout = Layout(features=_features(args.features), transferred=args.transferred)
+    layout = Layout(features=_features(args.features))
     dbs = _default(args.dbs, repo / "logs" / "optuna" / "hls4ml", layout)
     out = _default(args.out, repo / "scripts" / "hls4ml", layout)
     stale = _generate(dbs, out, repo, layout, args.dry_run)

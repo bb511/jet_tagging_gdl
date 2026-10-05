@@ -1,5 +1,6 @@
 # In-memory dataset that hands the trainer whole batches of jets.
 
+import math
 from collections.abc import Callable
 
 import torch
@@ -20,13 +21,13 @@ class HLS4MLDataset(IterableDataset):
 
     :param x: the constituents, shape (jets, constituents, features).
     :param y: the one-hot flavour labels, shape (jets, classes).
-    :param batch_size: a trailing partial batch is dropped, so ``len(self)`` is exact
-        and OneCycleLR can be given a step count.
+    :param batch_size: jets per batch.
     :param shuffler: seeded generator for the per-epoch permutation, or None to keep the
         stored order.
-    :param max_batches: cap on the batches each worker yields.
     :param transform: online augmentation, from a batch to its transformed batch of the
         same shape.
+    :param drop_last: drop a trailing partial batch, so that every batch holds
+        *batch_size* jets. The test split keeps it, so that every test jet is scored.
     """
 
     def __init__(
@@ -35,8 +36,8 @@ class HLS4MLDataset(IterableDataset):
         y: torch.Tensor,
         batch_size: int,
         shuffler: torch.Generator | None = None,
-        max_batches: int | None = None,
         transform: Callable | None = None,
+        drop_last: bool = True,
     ):
         if x.shape[0] != y.shape[0]:
             raise ValueError("x and y must have the same number of samples.")
@@ -44,26 +45,21 @@ class HLS4MLDataset(IterableDataset):
         self.y = y
         self.batch_size = batch_size
         self.shuffler = shuffler
-        self.max_batches = max_batches
         self.transform = transform
         self.n = x.shape[0]
-        self.num_batches = self.n // batch_size
+        self.num_batches = (
+            self.n // batch_size if drop_last else math.ceil(self.n / batch_size)
+        )
 
     def __len__(self):
-        if self.max_batches is None:
-            return self.num_batches
-        return min(self.num_batches, self.max_batches)
+        return self.num_batches
 
     def __iter__(self):
         order = self._order()
         worker_id, num_workers = _worker_slice()
-        emitted = 0
         # Workers stride through the batches, so each batch is emitted exactly once.
         for i in range(worker_id, self.num_batches, num_workers):
-            if self.max_batches is not None and emitted >= self.max_batches:
-                break
             yield self._batch(order[i * self.batch_size : (i + 1) * self.batch_size])
-            emitted += 1
 
     def _order(self) -> torch.Tensor:
         """The jet order of one epoch: a fresh permutation, or the order the tensors are

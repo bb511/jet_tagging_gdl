@@ -281,7 +281,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--inv-metric",
         default=None,
-        help="Invariance metric shown as the delta column ('wasserstein', 'flip'). "
+        help="Invariance metric shown as the delta column ('tv', 'flip'). "
         "Read off the '<group>_<metric>_folds' columns when omitted.",
     )
     return parser.parse_args()

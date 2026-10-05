@@ -17,6 +17,7 @@ from src.utils.omegaconf import register_resolvers
 # Before Hydra composes: the configs interpolate ${len:} and ${short_hash:}.
 register_resolvers()
 
+from src.callbacks.invariance import InvarianceMetricCallback
 from src.callbacks.plotting import PlottingCallback
 from src.utils import (
     RankedLogger,
@@ -31,6 +32,9 @@ from src.utils.checkpoints import ManifestRun, merge_manifests, read_manifest
 from src.utils.results_table import write_results_row
 
 log = RankedLogger(__name__, rank_zero_only=True)
+
+# The callbacks that write per checkpoint, each under a subdirectory of its label.
+_LABELLED = (PlottingCallback, InvarianceMetricCallback)
 
 
 def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
@@ -65,11 +69,11 @@ def _aggregated_labels(runs: list[ManifestRun]) -> set[str]:
 
 
 def _callbacks(cfg: DictConfig, label: str) -> list[Callback]:
-    """Build the callbacks that run per checkpoint evaluation, drawing into *label*'s
-    own plots."""
+    """Build the callbacks that run per checkpoint evaluation, writing *label*'s own
+    plots and per-jet outputs."""
     callbacks = instantiate_callbacks(cfg.get("callbacks"))
     for callback in callbacks:
-        if isinstance(callback, PlottingCallback):
+        if isinstance(callback, _LABELLED):
             callback.subdir = label
     return callbacks
 
@@ -80,7 +84,9 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     The folds are summarised into one results row once the last of them has been tested;
     the main run is left out of it whenever folds exist, so no jet is counted twice. The
-    k-fold runs are nested underneath the main run in MLFlow.
+    k-fold runs are nested underneath the main run in MLFlow. Every checkpoint, the main
+    run's included, leaves its per-jet logits, labels and transform draws in
+    ``<output_dir>/outputs/<fold_label>.npz``.
 
     :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``, and the shared
         objects.
@@ -122,9 +128,10 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
             {f"{run.fold_label}/{key}": value for key, value in metrics.items()}
         )
         if run.fold_label in aggregated:
-            # flops_total is an attribute of the module rather than a logged metric, and the row
+            # The costs are attributes of the module rather than logged metrics; the row
             # reads every number of a fold from one dict.
-            folds.append(dict(metrics) | {"flops_total": algorithm.flops_total})
+            flops, ebops = algorithm.flops_total, algorithm.ebops_total
+            folds.append(dict(metrics, flops_total=flops, ebops_total=ebops))
 
     write_results_row(cfg, folds)
     return metric_dict, {"cfg": cfg, "datamodule": datamodule}

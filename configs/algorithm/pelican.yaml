@@ -13,7 +13,6 @@ output_dim: 5
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
-symm_loss_metric: l2
 transform_kwargs: ${data.transform_kwargs}
 
 # The paper's 25/15 widths (its 11k point, which factorises the aggregation weights; unfactorised

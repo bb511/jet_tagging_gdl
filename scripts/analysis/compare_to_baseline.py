@@ -14,9 +14,12 @@ on the number of folds is refused for the same reason. The difference series is 
 columns.
 
 **Positive always means the run is the better model.** The difference is the run minus its baseline
-for ``accuracy_transformed``, ``flip_recover``, ``flip_stable`` and ``test_acc``, and the baseline
-minus the run for ``flip`` and the invariance metric (``wasserstein``), both being quantities
-where less is better.
+for ``accuracy_transformed``, ``flip_recover``, ``flip_stable``, ``test_acc``, the clean working
+points (``rejection_es30``, ``tpr_eb1``, ``tpr_eb10``), the ``auc`` and the retention of each
+working point under each group. It is the baseline minus the run for ``flip`` and the invariance
+metric (``tv``), both being quantities where less is better. The diagnostics
+(``efficiency_transformed_*``, ``fpr_transformed_*``) have no better direction and are never
+compared.
 
 The output is long, one row per (run row, group, metric)::
 
@@ -24,9 +27,10 @@ The output is long, one row per (run row, group, metric)::
     delta_mean, delta_std, delta_pm, delta_folds,
     ci_lower, ci_upper, bootstrap_pvalue, significant_boot_005
 
-The ``test_acc`` row leaves the group empty, being a property of the run and not of a group. The
-metrics are read off the ``{group}_{metric}_folds`` columns the tables carry, so a table written
-under another ``invariance_metric`` is covered without an edit here.
+The groupless rows (``test_acc``, the clean working points and the ``auc``) leave the group empty,
+being properties of the run and not of a group. The per-group metrics are read off the
+``{group}_{metric}_folds`` columns the tables carry, so a table written under another
+``invariance_metric`` is covered without an edit here.
 
 Unlike the results tables it reads, which are appended to, the deltas table is rewritten from its
 two inputs on every run::
@@ -50,12 +54,31 @@ from pathlib import Path
 import common
 
 # common puts the repository root on the import path, which the two src imports below need.
-from src.symmetry import FLIP_FAMILIES, TABULATED_GROUPS
+from src.symmetry import (
+    FLIP_FAMILIES,
+    PERFORMANCE_FAMILIES,
+    RETENTION_FAMILIES,
+    TABULATED_GROUPS,
+)
 from src.utils.bootstrap import bootstrap_ci, bootstrap_pvalue
 
 # The metrics whose difference is the run minus its baseline; every other one is read the other way
 # round, so that positive is the better model throughout.
-HIGHER_IS_BETTER = ("accuracy_transformed", "flip_recover", "flip_stable", "test_acc")
+HIGHER_IS_BETTER = (
+    "accuracy_transformed",
+    "flip_recover",
+    "flip_stable",
+    "test_acc",
+    *RETENTION_FAMILIES,
+    *PERFORMANCE_FAMILIES,
+)
+
+# Compared once per run, with the group left empty: properties of the clean predictions.
+GROUPLESS = ("test_acc", *PERFORMANCE_FAMILIES)
+
+# The per-group families with a better direction. The diagnostics of src.symmetry have none
+# and are never compared.
+SIGNED_FAMILIES = FLIP_FAMILIES + RETENTION_FAMILIES
 
 # The columns naming the run, copied from its results row onto every one of its deltas rows.
 HEAD = ("model", "nconstituents", "method", "augmentation_scheme")
@@ -150,24 +173,24 @@ def _delta_columns(deltas: list[float]) -> dict[str, object]:
 
 
 def metrics_covered(rows: list[dict[str, str]]) -> tuple[str, ...]:
-    """The per-group metrics a deltas table covers: the flip families and the invariance
-    one.
+    """The per-group metrics a deltas table covers: the flip families, the retentions
+    and the invariance one.
 
     The invariance metric is read off the columns rather than assumed. A table written
     with ``invariance_metric=flip`` names none, that family being tabulated for every
     group already.
     """
     metric = common.detect_inv_metric_suffix(rows)
-    return tuple(dict.fromkeys(FLIP_FAMILIES + ((metric,) if metric else ())))
+    return tuple(dict.fromkeys(SIGNED_FAMILIES + ((metric,) if metric else ())))
 
 
 def delta_rows(
     run: dict[str, str], baseline: dict[str, str], metrics: tuple[str, ...]
 ) -> list[dict[str, object]]:
-    """Every long-format row of one pair: the run's own accuracy, then each group and
-    metric."""
+    """Every long-format row of one pair: the run's groupless metrics, then each group
+    and metric."""
     head = {name: run.get(name, "") for name in HEAD}
-    wanted = [("", "test_acc")] + [
+    wanted = [("", m) for m in GROUPLESS] + [
         (group, m) for group in TABULATED_GROUPS for m in metrics
     ]
     rows: list[dict[str, object]] = []

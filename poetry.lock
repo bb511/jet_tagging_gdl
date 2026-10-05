@@ -3237,23 +3237,6 @@ test = ["hypothesis (>=6.46.1)", "pytest (>=7.3.2)", "pytest-xdist (>=2.2.0)"]
 xml = ["lxml (>=4.9.2)"]
 
 [[package]]
-name = "pathvalidate"
-version = "3.3.1"
-description = "pathvalidate is a Python library to sanitize/validate a string such as filenames/file-paths/etc."
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f"},
-    {file = "pathvalidate-3.3.1.tar.gz", hash = "sha256:b18c07212bfead624345bb8e1d6141cdcf15a39736994ea0b94035ad2b1ba177"},
-]
-
-[package.extras]
-docs = ["Sphinx (>=2.4)", "sphinx_rtd_theme (>=1.2.2)", "urllib3 (<2)"]
-readme = ["path (>=13,<18)", "readmemaker (>=1.2.0)"]
-test = ["Faker (>=1.0.8)", "allpairspy (>=2)", "click (>=6.2)", "pytest (>=6.0.1)", "pytest-md-report (>=0.6.2)"]
-
-[[package]]
 name = "pelican-lite"
 version = "1.1.4"
 description = "Efficient reimplementation of PELICAN (Permutation-Equivariant and Lorentz-Invariant or Covariant Aggregator Network for Particle Physics)"
@@ -5313,4 +5296,4 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.13"
-content-hash = "f8fca5813d299ec592c6efead150c392620b336992053b265883833642d5914c"
+content-hash = "4121b7623093fb4736a69f7b736d7199603f3f7a8f2c5072fbd190bd2dc7c3d3"

@@ -133,7 +133,8 @@ repos:
       - id: codespell
         args:
           - --skip=logs/**,data/**,*.ipynb
-          # - --ignore-words-list=abc,def
+          # fpr: the false-positive-rate families of src/symmetry.py.
+          - --ignore-words-list=fpr
 
   # jupyter notebook cell output clearing
   - repo: https://github.com/kynan/nbstripout

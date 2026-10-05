@@ -9,7 +9,6 @@ defaults:
   - util@rich_progress_bar: rich_progress_bar
   - main@invariance_metric: invariance_metric
   - main@plotting: plotting
-  - main@throughput: throughput
   - _self_
 
 model_checkpoint:

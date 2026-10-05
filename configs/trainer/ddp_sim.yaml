@@ -1,7 +1,0 @@
-defaults:
-  - default
-
-# DDP on CPU, for debugging the distributed code path without a GPU.
-accelerator: cpu
-devices: 2
-strategy: ddp_spawn

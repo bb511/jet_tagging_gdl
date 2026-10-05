@@ -36,7 +36,7 @@
 #     algorithm.optimizer.lr=0.000912675916897903 \
 #     algorithm.optimizer.weight_decay=0.01 \
 #     checkpoint_manifest_path=logs/train/hls4ml/lloca_so2/nconst16/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/lloca_so2/nconst16/baseline
@@ -64,7 +64,7 @@
 #     algorithm.optimizer.lr=0.0020318303088929894 \
 #     algorithm.optimizer.weight_decay=0.05 \
 #     checkpoint_manifest_path=logs/train/hls4ml/lloca_so2/nconst50/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/lloca_so2/nconst50/baseline
@@ -92,7 +92,7 @@
 #     algorithm.optimizer.lr=0.002534228975688298 \
 #     algorithm.optimizer.weight_decay=0.0 \
 #     checkpoint_manifest_path=logs/train/hls4ml/lloca_so2/nconst150/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/lloca_so2/nconst150/baseline

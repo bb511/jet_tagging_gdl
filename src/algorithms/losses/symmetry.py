@@ -4,10 +4,9 @@ The training objective is
 
 L = L_\\mathrm{cls} + w \\, d\\bigl(f(x), f(T x)\\bigr),
 
-with `T` drawn independently per jet from one of `src.symmetry.GROUPS`, and `d` a distance
-between the logits (``components/distance.py``) or a divergence between the class
-distributions (``components/divergence.py``).
-The transforms come from `src.data.components.augmentation`.
+with `T` drawn independently per jet from one of `src.symmetry.GROUPS`, and `d` the L2
+distance between the logits, averaged over the jets. The transforms come from
+`src.data.components.augmentation`.
 """
 
 from collections.abc import Sequence
@@ -15,12 +14,8 @@ from collections.abc import Sequence
 import torch
 from torch import nn
 
-from src.algorithms.losses.components.distance import LogitDistance
-from src.algorithms.losses.components.divergence import SoftmaxDivergence
 from src.data.components.augmentation import make_transform
 from src.symmetry import GROUPS
-
-SUPPORTED_METRICS = LogitDistance.METRICS + SoftmaxDivergence.METRICS
 
 
 class SymmetryConsistencyLoss(nn.Module):
@@ -29,17 +24,9 @@ class SymmetryConsistencyLoss(nn.Module):
     :param group: the group `T` is drawn from, one of `src.symmetry.GROUPS`. It follows
         ``data.augmentation_scheme``.
     :param weight: the coefficient `w` multiplying the symmetry term.
-    :param metric: one of `SUPPORTED_METRICS`.
-    :param eps: floor on the probabilities of the divergence metrics.
     """
 
-    def __init__(
-        self,
-        group: str | None,
-        weight: float = 0.1,
-        metric: str = "l2",
-        eps: float = 1e-8,
-    ) -> None:
+    def __init__(self, group: str | None, weight: float = 0.1) -> None:
         super().__init__()
         if group is None or str(group).lower() not in GROUPS:
             raise ValueError(
@@ -49,15 +36,6 @@ class SymmetryConsistencyLoss(nn.Module):
             )
         self.group = str(group).lower()
         self.weight = float(weight)
-        metric = metric.lower()
-        if metric in SoftmaxDivergence.METRICS:
-            self.distance = SoftmaxDivergence(metric, eps)
-        elif metric in LogitDistance.METRICS:
-            self.distance = LogitDistance(metric)
-        else:
-            raise ValueError(
-                f"metric must be one of {list(SUPPORTED_METRICS)}, got {metric!r}."
-            )
 
     def transform(
         self,
@@ -90,5 +68,5 @@ class SymmetryConsistencyLoss(nn.Module):
                 "logits and logits_sym must have identical shape, got "
                 f"{tuple(logits.shape)} vs {tuple(logits_sym.shape)}."
             )
-        sym = self.distance(logits, logits_sym)
+        sym = (logits - logits_sym).norm(dim=1).mean()
         return cls_loss + self.weight * sym, sym

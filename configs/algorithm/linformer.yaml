@@ -14,7 +14,6 @@ output_dim: 5
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
-symm_loss_metric: l2
 transform_kwargs: ${data.transform_kwargs}
 
 # The float point of the reference example (get_llformer in calad0i/HGQ2-examples, jsc150/model.py),

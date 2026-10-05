@@ -1,16 +1,37 @@
 """Forward-FLOP counting for jet-tagging models."""
 
 import torch
+from torch.utils.flop_counter import FlopCounterMode, sdpa_flop_count
 
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+def _cpu_attention_flop(
+    query_shape: torch.Size,
+    key_shape: torch.Size,
+    value_shape: torch.Size,
+    *args,
+    out_shape: tuple | None = None,
+    **kwargs,
+) -> int:
+    """FLOPs of the CPU flash-attention kernel, by the formula of its CUDA siblings."""
+    return sdpa_flop_count(query_shape, key_shape, value_shape)
+
+
+# The count runs on the CPU at construction, where F.scaled_dot_product_attention dispatches
+# this kernel, and torch's flop_registry holds the CUDA kernels alone. The formula goes in
+# unwrapped: FlopCounterMode wraps a custom formula to receive shapes itself.
+_CPU_ATTENTION = {
+    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu: _cpu_attention_flop
+}
+
+
 def count_flops(model: torch.nn.Module, example_input: torch.Tensor) -> float:
     """Total forward FLOPs for one pass of *model* over *example_input*."""
     was_training = model.training
-    buffers = _snapshot_buffers(model)
+    buffers = snapshot_buffers(model)
     model.train(True)
     try:
         return _counted_forward(model, example_input)
@@ -18,7 +39,7 @@ def count_flops(model: torch.nn.Module, example_input: torch.Tensor) -> float:
         log.warning(f"FLOP counting failed for {type(model).__name__}: {exc}")
         return float("nan")
     finally:
-        _restore_state(model, was_training, buffers)
+        restore_state(model, was_training, buffers)
 
 
 def count_flops_per_jet(
@@ -37,9 +58,7 @@ def record_flops(model: torch.nn.Module, nconstituents: int, nbr_feats: int) -> 
 
 def _counted_forward(model: torch.nn.Module, example_input: torch.Tensor) -> float:
     """Total FLOPs of one traced forward pass."""
-    from torch.utils.flop_counter import FlopCounterMode
-
-    counter = FlopCounterMode(display=False)
+    counter = FlopCounterMode(display=False, custom_mapping=_CPU_ATTENTION)
     with counter, torch.no_grad():
         model(example_input)
     total = float(counter.get_total_flops())
@@ -58,12 +77,12 @@ def _warn_if_unrecognised(model: torch.nn.Module, total: float) -> None:
     )
 
 
-def _snapshot_buffers(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+def snapshot_buffers(model: torch.nn.Module) -> dict[str, torch.Tensor]:
     """Copy every buffer, so the counted pass can be undone."""
     return {name: value.clone() for name, value in model.named_buffers()}
 
 
-def _restore_state(
+def restore_state(
     model: torch.nn.Module, was_training: bool, buffers: dict[str, torch.Tensor]
 ) -> None:
     """Put the train/eval mode and the buffer values back to what they were."""

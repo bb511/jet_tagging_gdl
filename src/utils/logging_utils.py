@@ -27,8 +27,8 @@ def nest_under(loggers: list[Logger], parent_run_id: str | None) -> None:
 
 @rank_zero_only
 def log_hyperparameters(object_dict: dict[str, Any]) -> None:
-    """Send the config, the parameter counts and the FLOP count to every attached
-    logger.
+    """Send the config, the parameter counts and the FLOP and eBOP counts to every
+    attached logger.
 
     :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``; an evaluation adds
         the runtime-only ``fold_idx`` and ``run_stage``, which a training reads off the
@@ -68,9 +68,10 @@ def _config_hparams(cfg: dict[str, Any], object_dict: dict[str, Any]) -> dict[st
 def _algorithm_hparams(
     cfg: dict[str, Any], algorithm: LightningModule
 ) -> dict[str, Any]:
-    """The algorithm's config, its parameter counts and its per-jet FLOP count.
+    """The algorithm's config, its parameter counts and its per-jet FLOP and eBOP
+    counts.
 
-    The FLOP count is computed at construction, so it is read off the module, not the
+    The counts are computed at construction, so they are read off the module, not the
     config.
     """
     parameters = list(algorithm.parameters())
@@ -84,5 +85,7 @@ def _algorithm_hparams(
         "algorithm/params/non_trainable": sum(
             p.numel() for p in parameters if not p.requires_grad
         ),
-        "algorithm/flops": getattr(algorithm, "flops_total", None),
+        "algorithm/flops": algorithm.flops_total,
+        "algorithm/ebops": algorithm.ebops_total,
+        "algorithm/ebops_unpriced": algorithm.ebops_unpriced,
     }

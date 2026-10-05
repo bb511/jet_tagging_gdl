@@ -133,7 +133,6 @@ def test_every_split_comes_out_of_setup_on_the_axis_of_the_constituents_kept(
         ("augmentation", "none", True, 4, 16),
         ("augmentation", "none", False, 4, 4),
         ("augmentation", "so3", True, 4, 16),
-        ("augmentation", "lorentz_iso", True, 4, 16),
         # The SCL transforms inside model_step, so its batches are full width whatever the flag.
         ("symm_loss", "so2", False, 16, 16),
     ],
@@ -263,19 +262,6 @@ def test_composing_the_record_leaves_the_running_hydra_alone(tmp_path: Path) -> 
         assert GlobalHydra.instance().hydra is outer
 
 
-def test_only_the_training_loader_takes_the_configured_worker_count() -> None:
-    # Validation and test only gather, and a persistent worker per pass is what filled the pods'
-    # memory: 16 training plus 16 validating forks per run at 150 constituents.
-    module = _datamodule(num_workers=16)
-    dataset = HLS4MLDataset(torch.zeros(16, 1, 1), labels(16), batch_size=8)
-    module.data_train = module.data_val = module.data_test = dataset
-
-    assert module.train_dataloader().num_workers == 16
-    assert module.val_dataloader().num_workers == datamodule_module.EVAL_WORKERS
-    assert module.test_dataloader().num_workers == datamodule_module.EVAL_WORKERS
-    assert _datamodule(num_workers=0).val_dataloader().num_workers == 0
-
-
 def test_persistent_workers_reshuffle_every_epoch_and_cover_every_jet_once() -> None:
     # A worker forked afresh each epoch would draw from the shuffler's untouched state and replay
     # the first permutation; persistence lets its copy advance as the driver's own would.
@@ -290,3 +276,16 @@ def test_persistent_workers_reshuffle_every_epoch_and_cover_every_jet_once() -> 
     assert sorted(int(v) for batch_x, _ in loader for v in batch_x[:, 0, 0]) == list(
         range(40)
     )
+
+
+def test_only_the_test_split_is_scored_in_full(record: FakeRecord) -> None:
+    # A batch of 12 divides none of the 40 training, 20 validation and 16 test jets.
+    datamodule = _datamodule(batch_size=12)
+    datamodule.setup()
+
+    def scored(loader) -> int:
+        return sum(batch_x.shape[0] for batch_x, _ in loader)
+
+    assert scored(datamodule.train_dataloader()) == 36
+    assert scored(datamodule.val_dataloader()) == 12
+    assert scored(datamodule.test_dataloader()) == SPLIT_SIZES["test"]

@@ -270,7 +270,8 @@ class HLS4MLDataModule(LightningDataModule):
         x_test, y_test = self._load(record, "test")
         keep_full = self._keeps_full_width or self.keep_full_features_at_test
         x_test = _reduce(x_test, indices, keep_full)
-        self.data_test = self._dataset(x_test, y_test)
+        # Every test jet is scored, so that each row of the results counts the same jets.
+        self.data_test = self._dataset(x_test, y_test, drop_last=False)
         log.info(f"Test: x_test {tuple(x_test.shape)}, y_test {tuple(y_test.shape)}")
 
     @property

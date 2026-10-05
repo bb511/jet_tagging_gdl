@@ -12,15 +12,12 @@ output_dim: 5
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
-symm_loss_metric: l2
 transform_kwargs: ${data.transform_kwargs}
 
 phi_layers: [64, 64, 32]
 rho_layers: [32, 32, 16]
-activation: relu
 aggregation: sum
 dropout: 0.0
-mask: true
 
 optimizer:
   _target_: torch.optim.Adam

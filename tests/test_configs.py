@@ -56,7 +56,8 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     module = hydra.utils.instantiate(cfg.algorithm)
     assert module.hparams.name == model
     assert module.hparams.nconstituents == int(nconstituents)
-    assert module.flops_total > 0
+    # Every MAC the FLOP counter prices at 2 the eBOP counter prices at 8 x 8.
+    assert module.ebops_total >= 32 * module.flops_total > 0
     assert cfg.results_table.subdir == ("embedded" if model in EMBEDDED else None)
 
 
@@ -175,7 +176,7 @@ def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
     )
     assert (deepsets["name"], jedi["name"]) == ("deepsets", "jedi_linear")
     architectures = (
-        (deepsets, "phi_layers rho_layers aggregation dropout mask"),
+        (deepsets, "phi_layers rho_layers aggregation dropout"),
         (jedi, "hidden head_layers aggregation"),
     )
     for cfg, keys in architectures:
@@ -207,7 +208,7 @@ def test_jedi_linear_searches_the_pooling_and_training_choices_of_deepsets() -> 
 @pytest.mark.parametrize("row", ["deepsets", "jedi_linear"])
 def test_the_search_offers_relu_and_the_fpga_cheap_pools_alone(row: str) -> None:
     # tanh costs an FPGA a lookup table and the mean a per-jet division. With no
-    # activation in the space, every trial takes the config's ReLU; sum_over_n divides
+    # activation in the space, every trial takes the network's ReLU; sum_over_n divides
     # by the constant N.
     params = OmegaConf.load(
         ROOT / "configs" / "hparams_search" / "hls4ml" / f"{row}_optuna.yaml"
@@ -216,11 +217,13 @@ def test_the_search_offers_relu_and_the_fpga_cheap_pools_alone(row: str) -> None
 
     assert "algorithm.activation" not in params
     assert params["algorithm.aggregation"] == "choice(sum, max, sum_over_n)"
-    assert (algorithm.activation, algorithm.aggregation) == ("relu", "sum")
+    assert algorithm.aggregation == "sum"
 
 
 @pytest.mark.parametrize("experiment", [f"vn_{n}" for n in NCONSTITUENTS])
-def test_the_vn_experiments_keep_full_float32_matmuls(experiment: str) -> None:
+def test_the_vn_experiments_keep_full_float32_matmuls_and_their_own_columns(
+    experiment: str,
+) -> None:
     # TF32 rounds the inputs of every float32 matmul to about 5e-4, and this network's
     # linear layers act on the vector components themselves, so a transformed jet would
     # be rounded differently and the embedded group would hold to that precision only.
@@ -229,13 +232,6 @@ def test_the_vn_experiments_keep_full_float32_matmuls(experiment: str) -> None:
     )
     assert cfg.trainer.precision == 32
     assert "matmul_precision" not in (cfg.get("extras") or {})
-
-
-@pytest.mark.parametrize("experiment", [f"vn_{n}" for n in NCONSTITUENTS])
-def test_the_vn_experiments_hand_the_network_its_own_columns(experiment: str) -> None:
     # The one embedded row that reads pt, eta and phi rather than the four-momentum of
     # configs/data/hls4ml.yaml, which its setup() would refuse.
-    cfg = OmegaConf.load(
-        ROOT / "configs" / "experiment" / "hls4ml" / f"{experiment}.yaml"
-    )
     assert list(cfg.data.features) == VectorNeurons.required_features

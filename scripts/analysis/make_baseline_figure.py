@@ -9,7 +9,7 @@ SO(2), SO(3) and Lorentz bars, and measures the model against its own clean pred
     accuracy (transformed)  pp, transformed minus clean, paired per fold, read off the table's
                             own accuracy_transformed columns; the clean accuracy is printed on
                             the panel
-    <invariance metric>     the results table's own value (Wasserstein distance), absolute
+    <invariance metric>     the results table's own value (total variation), absolute
     self-consistency        the unconditional flip rate FR (%), the recover rate overlaid as a
                             band
     FLOPs                   a text footer, one number per (model, N)

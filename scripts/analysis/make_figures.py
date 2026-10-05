@@ -7,8 +7,8 @@ constituent count, so positive is better in every row::
 
     accuracy (clean)        pp, the deltas table's test_acc rows
     accuracy (transformed)  pp, its accuracy_transformed rows
-    <invariance metric>     its wasserstein rows, the distance between the clean and the
-                            transformed logits
+    <invariance metric>     its tv rows, the paired total variation between the clean and the
+                            transformed softmax outputs
     self-consistency        pp, its flip rows, the unconditional flip rate, positive being
                             fewer flips; the recover rate overlaid as a band
     FLOPs                   a text footer, one regime-independent number per (model, N)
@@ -67,7 +67,7 @@ from matplotlib import patheffects
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from src.symmetry import TABULATED_GROUPS
+from src.symmetry import TABULATED_GROUPS, TOTAL_VARIATION
 
 # Match the thesis body font: Latin Modern Roman is Computer Modern.
 mpl.rcParams.update(
@@ -243,7 +243,7 @@ def build_dataset(results_dir: Path, features: str, deltas: dict):
             "    python3 src/eval.py checkpoint_manifest_path=<baseline>/checkpoint_manifest.json"
         )
     every_row = baselines + [row for rows in regime_rows.values() for row in rows]
-    metric = detect_inv_metric_suffix(every_row) or "wasserstein"
+    metric = detect_inv_metric_suffix(every_row) or TOTAL_VARIATION
     index = _index_rows(regime_rows, baselines, deltas, metric)
     # MODEL_ORDER first, then whatever else the tables held, alphabetically.
     seen = {model for _, model, _, _ in index}

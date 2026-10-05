@@ -33,7 +33,7 @@
 #     algorithm.optimizer.lr=0.0021494989913238053 \
 #     algorithm.optimizer.weight_decay=0.001 \
 #     checkpoint_manifest_path=logs/train/hls4ml/pelican/nconst16/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/pelican/nconst16/baseline
@@ -58,7 +58,7 @@
 #     algorithm.optimizer.lr=0.0016749912106198838 \
 #     algorithm.optimizer.weight_decay=0.005 \
 #     checkpoint_manifest_path=logs/train/hls4ml/pelican/nconst50/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/pelican/nconst50/baseline
@@ -83,7 +83,7 @@
 #     algorithm.optimizer.lr=0.0004672189427263489 \
 #     algorithm.optimizer.weight_decay=1e-05 \
 #     checkpoint_manifest_path=logs/train/hls4ml/pelican/nconst150/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/pelican/nconst150/baseline

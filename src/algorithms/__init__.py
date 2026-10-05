@@ -11,12 +11,11 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification import MulticlassAccuracy
 
 from src.algorithms.losses.symmetry import SymmetryConsistencyLoss
+from src.algorithms.utils.bitops import record_ebops
 from src.algorithms.utils.flops import record_flops
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
-
-SUPPORTED_METHODS = ("augmentation", "symm_loss")
 
 
 def resolve_feature_indices(
@@ -62,7 +61,6 @@ class JetTaggingModule(LightningModule):
         method: str = "augmentation",
         group: str = "none",
         symm_loss_weight: float = 0.1,
-        symm_loss_metric: str = "l2",
         transform_kwargs: dict[str, float | bool] | None = None,
         optimizer: Callable | None = None,
         scheduler: dict | None = None,
@@ -72,8 +70,6 @@ class JetTaggingModule(LightningModule):
         """
         :param nconstituents: constituents per jet.
         :param group: symmetry group of the SCL, read only under ``method="symm_loss"``.
-        :param symm_loss_metric: metric that the symmetry loss component uses;
-            the default is the L2 distance between the basic and transformed logits.
         :param transform_kwargs: additional arguments for the symmetry transformation
             that is applied to the data.
         :param optimizer: optimiser used to train the network, Hydra object.
@@ -84,10 +80,6 @@ class JetTaggingModule(LightningModule):
         super().__init__()
         # Optimiser and scheduler partials out of hparams.
         self.save_hyperparameters(logger=False, ignore=["optimizer", "scheduler"])
-        if method not in SUPPORTED_METHODS:
-            raise ValueError(
-                f"method must be one of {list(SUPPORTED_METHODS)}, got {method!r}."
-            )
         self.transform_kwargs = dict(transform_kwargs or {})
 
         self._optimizer = optimizer
@@ -96,14 +88,13 @@ class JetTaggingModule(LightningModule):
         # The SCL term, which checks its group at construction; nothing penalises augmentation.
         self.symm_loss = None
         if method == "symm_loss":
-            self.symm_loss = SymmetryConsistencyLoss(
-                group, symm_loss_weight, symm_loss_metric
-            )
+            self.symm_loss = SymmetryConsistencyLoss(group, symm_loss_weight)
         self._build_metrics(output_dim, method)
 
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
-        # Count the FLOPs of the model.
+        # FLOPs and eBOPs of the model, per jet.
         record_flops(self, nconstituents, nbr_feats)
+        record_ebops(self, nconstituents, nbr_feats)
 
     def _build_metrics(self, output_dim: int, method: str) -> None:
         """Register the metric objects; the SCL trackers exist only under
@@ -152,8 +143,7 @@ class JetTaggingModule(LightningModule):
             cross entropy term.
         """
         x, y = batch
-        if y.ndim > 1 and y.shape[1] > 1:
-            y = y.argmax(dim=1)
+        y = y.argmax(dim=1)
 
         logits = self(x)
         cls_loss = F.cross_entropy(logits, y)
@@ -329,8 +319,6 @@ class JetTaggingModule(LightningModule):
     def configure_optimizers(self) -> dict:
         """Build the optimiser, and the scheduler dict Lightning expects beside it."""
         optimizer = self._optimizer(params=self.parameters())
-        if not self._scheduler:
-            return {"optimizer": optimizer}
         return {
             "optimizer": optimizer,
             "lr_scheduler": self._set_up_scheduler(optimizer),
@@ -348,7 +336,5 @@ class JetTaggingModule(LightningModule):
         kwargs = {}
         if "total_steps" in params:
             kwargs["total_steps"] = int(self.trainer.estimated_stepping_batches)
-        elif "T_max" in params:
-            kwargs["T_max"] = int(self.trainer.estimated_stepping_batches)
         scheduler_cfg["scheduler"] = scheduler_fn(optimizer=optimizer, **kwargs)
         return scheduler_cfg

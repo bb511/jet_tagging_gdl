@@ -2,7 +2,8 @@
 
 One row per training with the following columns per run:
 * the test accuracy
-* FLOP count
+* the clean working points and the one-vs-rest AUC, as macro means over the classes
+* the FLOP and eBOP counts per jet
 * invariance metrics
 
 These quantities are averaged over the folds. The per-fold values are also saved.
@@ -28,11 +29,37 @@ from pathlib import Path
 
 from omegaconf import DictConfig
 
-from src.symmetry import FLIP_FAMILIES, TABULATED_GROUPS, key
+from src.symmetry import (
+    PERFORMANCE_FAMILIES,
+    TABULATED_FAMILIES,
+    TABULATED_GROUPS,
+    TOTAL_VARIATION,
+    key,
+)
 from src.utils.bootstrap import bootstrap_ci
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
+
+
+def _fold_values(folds: list[dict[str, object]], name: str) -> list[float]:
+    return [_to_float(fold.get(name)) for fold in folds]
+
+
+def _performance_columns(folds: list[dict[str, object]]) -> dict[str, object]:
+    """The groupless families: the clean working points and the AUC, as macro means."""
+    columns: dict[str, object] = {}
+    for family in PERFORMANCE_FAMILIES:
+        columns |= _family(family, _fold_values(folds, key(None, family)))
+    return columns
+
+
+def _cost_columns(folds: list[dict[str, object]]) -> dict[str, object]:
+    """The FLOPs and the eBOPs per jet, means over the folds that report them."""
+    return {
+        f"{cost}_mean": round(_mean(_fold_values(folds, f"{cost}_total")), 3)
+        for cost in ("flops", "ebops")
+    }
 
 
 class ResultsTable:
@@ -41,13 +68,13 @@ class ResultsTable:
     :param output_path: base name of the table; `_table_path` weaves the regime and the
         subdirectory into it.
     :param model_name: short architecture label, ``algorithm.name``.
+    :param augmentation_scheme: the group the run was trained on and is judged on; a run
+        trained on none of `src.symmetry.TABULATED_GROUPS` is judged on the mean over
+        the three.
     :param features: the input feature list, labels the subdirectory unless ``subdir``.
     :param subdir: directory under the table's parent in place of the feature list.
-    :param selected_metric_mode: with ``scheme`` the run is judged on the group it was
-        trained on, and on the mean over the three groups when it was trained on none;
-        ``mean_all`` always reports that mean.
     :param invariance_metric: which invariance family fills the selected and per-group
-        columns, e.g., ``wasserstein`` reads ``invariance/so2_wasserstein``.
+        columns, e.g., ``tv`` reads ``invariance/so2_tv``.
     """
 
     def __init__(
@@ -59,25 +86,22 @@ class ResultsTable:
         nconstituents: int = 0,
         features: Sequence[str] | None = None,
         subdir: str | None = None,
-        selected_metric_mode: str = "scheme",
-        invariance_metric: str = "wasserstein",
+        invariance_metric: str = TOTAL_VARIATION,
     ) -> None:
         self.model_name = model_name
         self.augmentation_scheme = str(augmentation_scheme).lower()
         self.nconstituents = int(nconstituents)
         self.invariance_metric = invariance_metric
-        self.judged_group = _judged_group(
-            selected_metric_mode, self.augmentation_scheme
-        )
+        self.judged_group = _judged_group(self.augmentation_scheme)
         # A selected metric that is itself tabulated would fill two identical column families.
-        self.suffixes = tuple(s for s in FLIP_FAMILIES if s != invariance_metric)
+        self.suffixes = tuple(s for s in TABULATED_FAMILIES if s != invariance_metric)
         self.display_method = _display_regime(method, self.augmentation_scheme)
         label = subdir or ("_".join(str(f) for f in features) if features else None)
         self.output_path = _table_path(Path(output_path), label, self.display_method)
 
     def write(self, folds: list[dict[str, object]]) -> None:
-        """Append one row summarising *folds*, each one fold's metrics and its
-        ``flops_total``."""
+        """Append one row summarising *folds*, each one fold's metrics with its
+        ``flops_total`` and ``ebops_total``."""
         if not folds:
             log.warning("No fold was evaluated, so no results row is written.")
             return
@@ -95,7 +119,7 @@ class ResultsTable:
         """
         group = group or self.judged_group
         if group:
-            return [_to_float(fold.get(key(group, suffix))) for fold in folds]
+            return _fold_values(folds, key(group, suffix))
         per_group = [self._values(folds, suffix, other) for other in TABULATED_GROUPS]
         return [_mean(fold_values) for fold_values in zip(*per_group)]
 
@@ -115,12 +139,9 @@ class ResultsTable:
                 )
         return columns
 
-    def _row(self, folds: list[dict[str, object]]) -> dict[str, object]:
-        """Assemble the row, in the column order the tables on disk carry."""
-        metric = self.invariance_metric
-        test_acc = [_to_float(fold.get("test/acc")) for fold in folds]
-        selected = self._values(folds, metric)
-        flops = _mean([_to_float(fold.get("flops_total")) for fold in folds])
+    def _head(self, folds: list[dict[str, object]]) -> dict[str, object]:
+        """The columns naming the run, then its test accuracy."""
+        test_acc = _fold_values(folds, "test/acc")
         row: dict[str, object] = {
             "method": self.display_method,
             "model": self.model_name,
@@ -128,11 +149,17 @@ class ResultsTable:
             "nconstituents": self.nconstituents,
             "folds_used": len(folds),
         }
-        row |= _summary("test_acc", test_acc) | _ci("test_acc", test_acc)
+        return row | _summary("test_acc", test_acc) | _ci("test_acc", test_acc)
+
+    def _row(self, folds: list[dict[str, object]]) -> dict[str, object]:
+        """Assemble the row, in the column order the tables on disk carry."""
+        metric = self.invariance_metric
+        selected = self._values(folds, metric)
+        row = self._head(folds) | _performance_columns(folds)
         row["selected_inv_key"] = key(self.judged_group or "mean", metric)
         row |= _summary("selected_inv", selected) | self._metric_columns(folds)
-        row["flops_mean"] = round(flops, 3) if not math.isnan(flops) else float("nan")
-        row["test_acc_folds"] = _join(test_acc)
+        row |= _cost_columns(folds)
+        row["test_acc_folds"] = _join(_fold_values(folds, "test/acc"))
         row["selected_inv_folds"] = _join(selected)
         return row
 
@@ -144,7 +171,8 @@ class ResultsTable:
             f"model={self.model_name}, group={self.augmentation_scheme}, "
             f"nconst={self.nconstituents}, folds={row['folds_used']}, "
             f"test/acc={row['test_acc_pm']}, {row['selected_inv_key']}="
-            f"{row['selected_inv_pm']}, flops={row['flops_mean']}"
+            f"{row['selected_inv_pm']}, flops={row['flops_mean']}, "
+            f"ebops={row['ebops_mean']}"
         )
 
 
@@ -165,18 +193,14 @@ def write_results_row(cfg: DictConfig, folds: list[dict[str, object]]) -> None:
         nconstituents=cfg.data.nconstituents,
         features=cfg.data.features,
         subdir=cfg.results_table.subdir,
-        selected_metric_mode=cfg.results_table.selected_metric_mode,
         invariance_metric=cfg.results_table.invariance_metric,
     ).write(folds)
 
 
-def _judged_group(selected_metric_mode: str, augmentation_scheme: str) -> str | None:
+def _judged_group(augmentation_scheme: str) -> str | None:
     """The group the run is judged on, None when it belongs to none and the three are
     averaged."""
-    judged = (
-        selected_metric_mode == "scheme" and augmentation_scheme in TABULATED_GROUPS
-    )
-    return augmentation_scheme if judged else None
+    return augmentation_scheme if augmentation_scheme in TABULATED_GROUPS else None
 
 
 def _display_regime(method: str, augmentation_scheme: str) -> str:

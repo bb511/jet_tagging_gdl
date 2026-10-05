@@ -66,35 +66,19 @@ def task_wrapper(task_func: Callable) -> Callable:
     return wrap
 
 
-def _require_metric(metric_dict: dict[str, Any], metric_name: str) -> None:
-    """Fail on a metric the run never logged, which a study would otherwise optimise
-    blindly.
-
-    :raises Exception: naming both places the name has to match, the module and the
-        search config.
-    """
-    if metric_name in metric_dict:
-        return
-    raise Exception(
-        f"Metric value not found! <metric_name={metric_name}>\n"
-        "Make sure metric name logged in LightningModule is correct!\n"
-        "Make sure `optimized_metric` name in `hparams_search` config is correct!"
-    )
-
-
-def get_metric_value(
-    metric_dict: dict[str, Any], metric_name: str | None
-) -> float | None:
+def get_metric_value(metric_dict: dict[str, Any], metric_name: str) -> float:
     """Read one scalar metric out of a finished run's metrics.
 
-    :param metric_name: the metric to read, ``None`` outside a hyperparameter search.
+    :raises Exception: when the run never logged *metric_name*, which a study would
+        otherwise optimise blindly; the message names both places the name has to match,
+        the module and the search config.
     """
-    if not metric_name:
-        log.info("Metric name is None! Skipping metric value retrieval...")
-        return None
-
-    _require_metric(metric_dict, metric_name)
+    if metric_name not in metric_dict:
+        raise Exception(
+            f"Metric value not found! <metric_name={metric_name}>\n"
+            "Make sure metric name logged in LightningModule is correct!\n"
+            "Make sure `optimized_metric` name in `hparams_search` config is correct!"
+        )
     metric_value = metric_dict[metric_name].item()
     log.info(f"Retrieved metric value! <{metric_name}={metric_value}>")
-
     return metric_value

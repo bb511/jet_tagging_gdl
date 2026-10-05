@@ -22,7 +22,7 @@ for _path in (REPO_ROOT, Path(__file__).resolve().parent):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from src.symmetry import FLIP_FAMILIES, TABULATED_GROUPS
+from src.symmetry import TABULATED_FAMILIES, TABULATED_GROUPS
 
 # augmentation_scheme -> the label the figures and tables print for it. The labels are
 # presentation; which groups are drawn, and in what order, is TABULATED_GROUPS, so a group the
@@ -57,7 +57,7 @@ MODEL_DISPLAY = {
 }
 
 METRIC_DISPLAY = {
-    "wasserstein": "Wasserstein",
+    "tv": "Total variation",
     "flip": "Flip rate",
     "accuracy_transformed": "Accuracy (transformed)",
 }
@@ -175,18 +175,18 @@ def shorten(path: Path) -> Path:
 
 
 def detect_inv_metric_suffix(rows: list[dict[str, str]]) -> str | None:
-    """Infer the invariance metric (``wasserstein``, ``flip``) from a
-    ``so2_<metric>_folds`` column.
+    """Infer the invariance metric (``tv``, ``flip``) from a ``so2_<metric>_folds``
+    column.
 
-    None when every per-group column is a flip family, which is what a table written
-    with ``invariance_metric=flip`` looks like: the family is then written once, not
-    twice.
+    None when every per-group column is a tabulated family, which is what a table
+    written with ``invariance_metric=flip`` looks like: the family is then written once,
+    not twice.
     """
     for row in rows:
         for column in row:
             if column.startswith("so2_") and column.endswith("_folds"):
                 metric = column[len("so2_") : -len("_folds")]
-                if metric not in FLIP_FAMILIES:
+                if metric not in TABULATED_FAMILIES:
                     return metric
     return None
 

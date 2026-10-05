@@ -11,5 +11,3 @@ log_dir: ${paths.root_dir}/logs
 output_dir: ${hydra:runtime.output_dir}
 
 results_dir: ${paths.root_dir}/results
-
-work_dir: ${hydra:runtime.cwd}

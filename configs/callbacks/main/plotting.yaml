@@ -2,4 +2,5 @@
 # per-epoch metrics are in MLflow.
 
 _target_: src.callbacks.plotting.PlottingCallback
+# In logit-column order, kept in step with src.symmetry.CLASS_NAMES.
 class_names: ["g", "q", "W", "Z", "t"]

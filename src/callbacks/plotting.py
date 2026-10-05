@@ -15,21 +15,6 @@ from src.utils.pylogger import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-@torch.no_grad()
-def _step_logits(
-    pl_module: LightningModule, outputs: Any, x: torch.Tensor
-) -> torch.Tensor:
-    """Return the logits for a batch, reusing the step's own when it hands them over.
-
-    :param pl_module:`~src.algorithms.JetTaggingModule` returns its ``model_step`` dict
-        and hence the logits can be extracted from there; for a model that does not have
-        logits in its output, compute the forward pass here.
-    """
-    if isinstance(outputs, dict) and "logits" in outputs:
-        return outputs["logits"]
-    return pl_module(x)
-
-
 class _Predictions:
     """Logits and true classes of one pass, accumulated on the CPU."""
 
@@ -45,9 +30,7 @@ class _Predictions:
     def add(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
         """Accumulate one batch; labels arrive one-hot and are stored as class idxs."""
         self.logits.append(logits.detach().cpu())
-        if labels.ndim > 1 and labels.shape[1] > 1:
-            labels = labels.argmax(dim=1)
-        self.labels.append(labels.detach().cpu())
+        self.labels.append(labels.argmax(dim=1).detach().cpu())
 
     def as_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return the true classes, the class probabilities and the predictions."""
@@ -119,8 +102,8 @@ class PlottingCallback(Callback):
         """Accumulate the validation predictions of one batch."""
         if trainer.sanity_checking:
             return
-        x, y = batch
-        self._val.add(_step_logits(pl_module, outputs, x), y)
+        _, y = batch
+        self._val.add(outputs["logits"], y)
 
     def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Draw the plots of the last validation epoch."""
@@ -140,8 +123,8 @@ class PlottingCallback(Callback):
         dataloader_idx: int = 0,
     ) -> None:
         """Accumulate the test predictions of one batch."""
-        x, y = batch
-        self._test.add(_step_logits(pl_module, outputs, x), y)
+        _, y = batch
+        self._test.add(outputs["logits"], y)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Draw the ROC curves and the confusion matrix of the test pass."""

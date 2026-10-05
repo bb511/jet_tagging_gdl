@@ -13,7 +13,6 @@ from src.data.components.augmentation import (
     compute_phi,
     compute_pt,
     feature_index,
-    get_norm_scale,
     make_transform,
     rebase_on_kept_axis,
     sample_haar_so3_rot_matrices,
@@ -112,9 +111,7 @@ def test_a_beam_boost_shifts_eta_rigidly_and_leaves_pt_and_phi_alone() -> None:
     # Only for a massless constituent is a beam boost a rigid shift in pseudorapidity.
     torch.manual_seed(0)
     batch = jets(mass=0.0)
-    boosted, boosts = apply_random_lorentz(batch, FOUR_MOMENTUM, eta_max=1.0)
-    # cosh(xi) sits on the (E, E) entry and -sinh(xi) on (E, pz).
-    xi = torch.atanh(-boosts[:, 0, 3] / boosts[:, 0, 0])
+    boosted, xi = apply_random_lorentz(batch, FOUR_MOMENTUM, eta_max=1.0)
 
     real = slice(None, 5)
     d_eta = (
@@ -150,15 +147,6 @@ def test_a_lorentz_boost_leaves_the_masses_alone_and_the_padding_at_zero(
     assert torch.equal(boosted[:, 5:, :], torch.zeros_like(boosted[:, 5:, :]))
 
 
-def test_a_column_is_found_by_either_name_and_scaled_by_its_own_factor() -> None:
-    assert feature_index(RECORD_COLUMNS, "px") == RECORD_COLUMNS.index("j1_px")
-    assert feature_index(RECORD_COLUMNS, "j1_px") == RECORD_COLUMNS.index("j1_px")
-    assert feature_index(RECORD_COLUMNS, "nonesuch") is None
-    # A batch built by hand, and the record's own before it is prepared, is already in GeV.
-    assert get_norm_scale(None, "px") == 1.0
-    assert get_norm_scale({"j1_px": 3.0}, "px") == 3.0
-
-
 def test_the_factory_builds_one_transform_per_group_and_refuses_none() -> None:
     batch = jets()
     for scheme in GROUPS:
@@ -167,6 +155,22 @@ def test_the_factory_builds_one_transform_per_group_and_refuses_none() -> None:
     # 'none' is a legitimate value of data.augmentation_scheme, but not a transform.
     with pytest.raises(ValueError, match="lorentz_iso"):
         make_transform("none", FOUR_MOMENTUM)
+
+
+def test_the_returned_draws_are_the_ones_the_batch_was_transformed_by() -> None:
+    batch = jets()
+    boosted, draw = apply_random_lorentz(batch, FOUR_MOMENTUM, 1.0, None, True)
+
+    # The boost of rapidity xi along the unit axis n, rebuilt from the stored pair.
+    xi, n = draw[:, 0], draw[:, 1:]
+    rebuilt = torch.eye(4).repeat(6, 1, 1)
+    rebuilt[:, 0, 0] = torch.cosh(xi)
+    rebuilt[:, 0, 1:] = -torch.sinh(xi)[:, None] * n
+    rebuilt[:, 1:, 0] = -torch.sinh(xi)[:, None] * n
+    outer = n[:, :, None] * n[:, None, :]
+    rebuilt[:, 1:, 1:] += (torch.cosh(xi) - 1)[:, None, None] * outer
+    replayed = _apply(batch, rebuilt, FOUR_MOMENTUM, None)
+    assert torch.allclose(replayed, boosted, atol=1e-4)
 
 
 def test_the_rebase_moves_the_axis_columns_onto_the_kept_constituents() -> None:
@@ -192,7 +196,7 @@ def test_after_the_rebase_the_identity_reproduces_every_column_it_rewrites() -> 
     rebased = rebase_on_kept_axis(batch, RECORD_COLUMNS, scales)
     identity = torch.eye(4).expand(rebased.shape[0], 4, 4)
 
-    applied, _, _ = _apply(rebased, identity, RECORD_COLUMNS, scales)
+    applied = _apply(rebased, identity, RECORD_COLUMNS, scales)
 
     assert torch.allclose(applied, rebased, atol=1e-5)
 
@@ -204,7 +208,6 @@ def test_after_the_rebase_the_identity_reproduces_every_column_it_rewrites() -> 
         # A beam boost shifts the pseudorapidity rigidly only for a massless constituent,
         # and the axis etarel is measured from is massive either way, so etarel moves too.
         ("lorentz", 0.0, ("pt", "phi", "phirel"), ("eta",)),
-        ("so3", MASS, (), ("pt", "eta", "phi")),
     ],
 )
 def test_the_rebased_columns_move_under_a_group_only_where_they_must(

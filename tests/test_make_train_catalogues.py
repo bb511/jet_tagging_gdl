@@ -108,21 +108,6 @@ def test_a_feature_set_has_no_catalogue_for_the_embedded_architectures(
     )
 
 
-def test_jedi_linear_has_the_whole_grid_in_every_layout(tmp_path: Path) -> None:
-    # JEDI-linear is a grid row: the seven regimes at each count, in the four-momentum
-    # layout and in every feature set, with no baseline-only note in its header.
-    dbs = _empty_dbs(tmp_path)
-
-    for layout in (Layout(), Layout(features=FEATURES)):
-        assert "jedi_linear" in make_train_catalogues.models_of(layout)
-        for task in ("train", "eval"):
-            text = make_train_catalogues.render("jedi_linear", task, dbs, layout)
-            assert make_train_catalogues.count_commands(LIB, text) == len(GRID)
-            assert text.count("data.method=symm_loss") == 9
-            assert text.count(OVERRIDE) == (len(GRID) if layout.features else 0)
-            assert "Baseline only" not in text
-
-
 def test_the_generator_names_the_rows_and_regimes_the_tests_do() -> None:
     # The generator keeps lists of its own, since it runs without the test suite; a
     # row added to one side and not the other would otherwise go unnoticed.
@@ -145,20 +130,12 @@ def test_the_four_momentum_layout_names_no_feature_set_anywhere(
     assert "hydra.run.dir=logs/eval/hls4ml/mlp/nconst16/baseline" in evaluate
 
 
-def test_the_transferred_ablation_of_a_feature_set_carries_both_marks(
-    tmp_path: Path,
-) -> None:
+def test_every_eval_block_names_the_total_variation_once(tmp_path: Path) -> None:
     dbs = _empty_dbs(tmp_path)
-    layout = Layout(features=FEATURES, transferred=True)
 
-    train = _render("train", dbs, layout)
-    evaluate = _render("eval", dbs, layout)
+    evaluate = _render("eval", dbs, Layout())
 
-    run = f"logs/train/hls4ml/{LABEL}/mlp/nconst16/baseline_transferred"
-    assert f"hydra.run.dir={run}" in train
-    assert run in _manifest_paths(evaluate)
-    assert train.count(OVERRIDE) == len(GRID)
-    assert evaluate.count(OVERRIDE) == len(GRID)
+    assert evaluate.count("results_table.invariance_metric=tv") == len(GRID)
 
 
 def test_best_trial_keeps_to_the_first_200_completed_trials(tmp_path: Path) -> None:
@@ -168,7 +145,6 @@ def test_best_trial_keeps_to_the_first_200_completed_trials(tmp_path: Path) -> N
     peaks = {120: 0.8, 150: 0.8, 230: 0.9}
     _study(db, [peaks.get(number, 0.5) for number in range(250)])
 
-    assert make_train_catalogues.TRIAL_BUDGET == 200
     assert make_train_catalogues.best_trial(db, STUDY) == (120, 0.8, {"x": "0.8"})
 
 

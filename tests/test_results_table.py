@@ -3,18 +3,32 @@ from pathlib import Path
 
 import pytest
 
-from src.symmetry import FLIP_FAMILIES, TABULATED_GROUPS, key
+from src.symmetry import TABULATED_FAMILIES, TABULATED_GROUPS, key
 from src.utils.results_table import ResultsTable
 
 SUMMARY = ("mean", "std", "pm", "folds")
 MEAN_OF_THREE = (0.3 + 0.6 + 0.9) / 3
+# The groupless families and the value every fold below reports for each.
+CLEAN = {"rejection_es30": 20.0, "tpr_eb1": 0.3, "tpr_eb10": 0.6, "auc": 0.9}
 
 
 def _expected_header() -> list[str]:
     # Spelled out rather than read off the table or off src.symmetry: the tables on disk are
     # appended to, so the column order is part of the interface.
     groups = ("so2", "so3", "lorentz")
-    tabulated = ("flip", "flip_recover", "flip_stable", "accuracy_transformed")
+    performance = ("rejection_es30", "tpr_eb1", "tpr_eb10", "auc")
+    tabulated = (
+        "flip",
+        "flip_recover",
+        "flip_stable",
+        "accuracy_transformed",
+        "rejection_retention_es30",
+        "tpr_retention_eb1",
+        "tpr_retention_eb10",
+        "efficiency_transformed_es30",
+        "fpr_transformed_eb1",
+        "fpr_transformed_eb10",
+    )
     return [
         "method",
         "model",
@@ -22,12 +36,14 @@ def _expected_header() -> list[str]:
         "nconstituents",
         "folds_used",
         *(f"test_acc_{c}" for c in ("mean", "std", "pm", "ci_lower", "ci_upper")),
+        *(f"{p}_{c}" for p in performance for c in SUMMARY),
         "selected_inv_key",
         *(f"selected_inv_{c}" for c in ("mean", "std", "pm")),
-        *(f"{g}_wasserstein_{c}" for g in groups for c in SUMMARY),
+        *(f"{g}_tv_{c}" for g in groups for c in SUMMARY),
         *(f"{s}_{c}" for s in tabulated for c in SUMMARY),
         *(f"{g}_{s}_{c}" for s in tabulated for g in groups for c in SUMMARY),
         "flops_mean",
+        "ebops_mean",
         "test_acc_folds",
         "selected_inv_folds",
     ]
@@ -40,7 +56,7 @@ def _table(tmp_path: Path, **overrides) -> ResultsTable:
         "model_name": "mlp",
         "augmentation_scheme": "so2",
         "nconstituents": 8,
-        "invariance_metric": "wasserstein",
+        "invariance_metric": "tv",
     }
     return ResultsTable(**(defaults | overrides))
 
@@ -55,18 +71,16 @@ def _header(path: Path) -> list[str]:
         return next(csv.reader(table))
 
 
-def _wasserstein_fold(
-    so2: float, so3: float, lorentz: float, **rest
-) -> dict[str, object]:
-    fold = {
-        key(g, "wasserstein"): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))
-    }
-    return fold | {"test/acc": 0.9, "flops_total": 1000.0} | rest
+def _tv_fold(so2: float, so3: float, lorentz: float, **rest) -> dict[str, object]:
+    fold = {key(g, "tv"): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))}
+    fold |= {key(None, family): value for family, value in CLEAN.items()}
+    costs = {"flops_total": 1000.0, "ebops_total": 64000.0}
+    return fold | {"test/acc": 0.9} | costs | rest
 
 
 def _fold(so2: float, so3: float, lorentz: float, **rest) -> dict[str, object]:
-    fold = _wasserstein_fold(0.0, 0.0, 0.0)
-    for suffix in FLIP_FAMILIES:
+    fold = _tv_fold(0.0, 0.0, 0.0)
+    for suffix in TABULATED_FAMILIES:
         fold |= {
             key(g, suffix): v for g, v in zip(TABULATED_GROUPS, (so2, so3, lorentz))
         }
@@ -75,42 +89,47 @@ def _fold(so2: float, so3: float, lorentz: float, **rest) -> dict[str, object]:
 
 def test_every_group_keeps_its_per_fold_values_beside_the_mean(tmp_path: Path) -> None:
     table = _table(tmp_path)
-    table.write(
-        [
-            _wasserstein_fold(0.1, 0.2, 0.3, **{"test/acc": 0.90}),
-            _wasserstein_fold(0.15, 0.25, 0.35, **{"test/acc": 0.91}),
-            _wasserstein_fold(0.2, 0.3, 0.4, **{"test/acc": 0.92}),
-            _wasserstein_fold(float("nan"), 0.25, 0.35, **{"test/acc": 0.93}),
-        ]
-    )
+    folds = [
+        _tv_fold(0.1, 0.2, 0.3, **{"test/acc": 0.90}),
+        _tv_fold(0.15, 0.25, 0.35, **{"test/acc": 0.91}, ebops_total=32000.0),
+        _tv_fold(0.2, 0.3, 0.4, **{"test/acc": 0.92}),
+        _tv_fold(float("nan"), 0.25, 0.35, **{"test/acc": 0.93}),
+    ]
+    # A fold whose module could not be counted reports no eBOPs at all.
+    del folds[3]["ebops_total"]
+    table.write(folds)
     row = _rows(table.output_path)[0]
 
-    assert row["so2_wasserstein_folds"] == "0.100000;0.150000;0.200000;nan"
-    assert row["so3_wasserstein_folds"] == "0.200000;0.250000;0.300000;0.250000"
-    assert row["lorentz_wasserstein_folds"] == "0.300000;0.350000;0.400000;0.350000"
+    assert row["so2_tv_folds"] == "0.100000;0.150000;0.200000;nan"
+    assert row["so3_tv_folds"] == "0.200000;0.250000;0.300000;0.250000"
+    assert row["lorentz_tv_folds"] == "0.300000;0.350000;0.400000;0.350000"
     # The NaN fold is left out of the mean, not averaged in.
-    assert float(row["so2_wasserstein_mean"]) == pytest.approx((0.1 + 0.15 + 0.2) / 3)
+    assert float(row["so2_tv_mean"]) == pytest.approx((0.1 + 0.15 + 0.2) / 3)
     assert float(row["test_acc_ci_lower"]) < 0.915 < float(row["test_acc_ci_upper"])
     assert float(row["test_acc_ci_lower"]) >= 0.90
     assert row["folds_used"] == "4"
     assert row["model"] == "mlp"
     assert row["flops_mean"] == "1000.0"
+    # And so is the fold without eBOPs: (64000 + 32000 + 64000) / 3.
+    assert row["ebops_mean"] == "53333.333"
+    for family, value in CLEAN.items():
+        assert float(row[f"{family}_mean"]) == pytest.approx(value)
+        assert row[f"{family}_folds"] == ";".join([f"{value:.6f}"] * 4)
     assert _header(table.output_path) == _expected_header()
 
 
 @pytest.mark.parametrize(
-    "scheme, mode, expected, expected_key",
+    "scheme, expected, expected_key",
     [
-        ("so2", "scheme", 0.3, "invariance/so2_wasserstein"),
-        # A run trained on no group belongs to none, so all three are averaged, as under mean_all.
-        ("none", "scheme", MEAN_OF_THREE, "invariance/mean_wasserstein"),
-        ("so2", "mean_all", MEAN_OF_THREE, "invariance/mean_wasserstein"),
+        ("so2", 0.3, "invariance/so2_tv"),
+        # A run trained on no group belongs to none, so all three are averaged.
+        ("none", MEAN_OF_THREE, "invariance/mean_tv"),
     ],
 )
 def test_the_selected_columns_follow_the_regime_or_average_over_it(
-    tmp_path: Path, scheme: str, mode: str, expected: float, expected_key: str
+    tmp_path: Path, scheme: str, expected: float, expected_key: str
 ) -> None:
-    table = _table(tmp_path, augmentation_scheme=scheme, selected_metric_mode=mode)
+    table = _table(tmp_path, augmentation_scheme=scheme)
     table.write([_fold(0.3, 0.6, 0.9)])
     row = _rows(table.output_path)[0]
 
@@ -123,7 +142,7 @@ def test_every_tabulated_suffix_carries_a_family_per_group(tmp_path: Path) -> No
     table.write([_fold(0.3, 0.6, 0.9), _fold(0.5, 0.6, 0.9)])
     row = _rows(table.output_path)[0]
 
-    for suffix in FLIP_FAMILIES:
+    for suffix in TABULATED_FAMILIES:
         assert float(row[f"so2_{suffix}_mean"]) == pytest.approx(0.4)
         assert row[f"so3_{suffix}_folds"] == "0.600000;0.600000"
         assert row[f"lorentz_{suffix}_pm"] == "0.9000 +/- 0.0000"

@@ -27,7 +27,7 @@ hydra:
     # The published point (hidden 64, head [64, 32, 16], ReLU, sum) lies inside the space. The
     # pooling, lr and weight_decay are searched over the choices of the DeepSets search, whose
     # optimiser block this is, and the head choices are the DeepSets rho choices plus the published
-    # head. As there, no activation is searched, so every trial takes the config's ReLU, and the
+    # head. As there, no activation is searched, so every trial takes the network's ReLU, and the
     # pools are those an FPGA computes without a per-jet division: the sum, the maximum and
     # sum_over_n, the masked sum divided by the constant N. A first campaign with the pooling fixed
     # to the sum (2026-09-30, stopped and removed) fell 8 to 14 points behind DeepSets on [px, py,

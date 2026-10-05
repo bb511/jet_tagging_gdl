@@ -20,18 +20,8 @@ The slots are read in the record's order; there's no sort in the record.
 import torch
 from torch import nn
 
-from src.algorithms.components.deepsets import _masked_pool
+from src.algorithms.components.deepsets import _check_choices, _masked_pool
 from src.algorithms.components.jetformer import SeqNorm
-
-AGGREGATIONS = ("sum", "max", "sum_over_n")
-
-
-def _check_aggregation(aggregation: str) -> None:
-    """Refuse a readout pool this module does not provide."""
-    if aggregation not in AGGREGATIONS:
-        raise ValueError(
-            f"aggregation must be one of {list(AGGREGATIONS)}, got {aggregation!r}."
-        )
 
 
 def _pool(h: torch.Tensor, real: torch.Tensor, aggregation: str) -> torch.Tensor:
@@ -134,7 +124,7 @@ class LinformerNet(nn.Module):
         batchnorm: bool = True,
     ) -> None:
         super().__init__()
-        _check_aggregation(aggregation)
+        _check_choices(aggregation)
         self.aggregation = aggregation
         self.embed = _token_dense(in_dim, embed_dim, batchnorm)
         self.attention = LinformerAttention(embed_dim, nconstituents, kv_proj_dim)

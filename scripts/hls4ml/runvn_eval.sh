@@ -37,7 +37,7 @@
 #     algorithm.tensor_invariants=4 \
 #     algorithm.vector_channels=16 \
 #     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline
@@ -66,7 +66,7 @@
 #     algorithm.tensor_invariants=4 \
 #     algorithm.vector_channels=32 \
 #     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst50/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn/nconst50/baseline
@@ -95,7 +95,7 @@
 #     algorithm.tensor_invariants=2 \
 #     algorithm.vector_channels=32 \
 #     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst150/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn/nconst150/baseline

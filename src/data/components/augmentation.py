@@ -97,13 +97,16 @@ def sample_haar_so3_rot_matrices(
 
 def _sample_boosts(
     nbr_rot: int, eta_max: float, isotropic: bool, device: torch.device | None
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Draw one boost per jet, shape (nbr_rot, 4, 4), acting on [E, px, py, pz].
 
     The rapidity is drawn uniform on [-eta_max, eta_max]. Along the beam this is the
     symmetry of a pp collision. We also draw isotropic Lorentz rotations, which are not
     a symmetry of the data but are used later to test models that claim to be fully
     Lorentz invariant or equivariant.
+
+    :return: the boosts, their rapidities, shape (nbr_rot,), and their unit axes, shape
+        (nbr_rot, 3).
     """
     beam = torch.eye(3, device=device)[2].expand(nbr_rot, 3)
     axis = torch.randn(nbr_rot, 3, device=device) if isotropic else beam
@@ -119,7 +122,7 @@ def _sample_boosts(
         (torch.cosh(xi) - 1)[:, None, None] * axis[:, :, None] * axis[:, None, :]
     )
 
-    return boosts
+    return boosts, xi, axis
 
 
 def _read_four_momenta(
@@ -183,14 +186,13 @@ def _apply(
     mats: torch.Tensor,
     names: Sequence[str],
     norm_scales: dict[str, float] | None,
-) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+) -> torch.Tensor:
     """Act on every jet with its own matrix and rewrite the columns that follow from it.
 
     :param mats: shape (jets, 4, 4) on [E, px, py, pz], or (jets, 3, 3) on the momenta
         alone.
-    :return: the new batch, the physical columns it was written from and the real-
-        constituent mask. A padded slot keeps its zeros, and so does a constituent left
-        with no positive energy.
+    :return: the new batch. A padded slot keeps its zeros, and so does a constituent
+        left with no positive energy.
     """
     if mats.shape[-1] == 3:
         # A rotation leaves the energy alone: pad it to the block-diagonal 4 x 4 form.
@@ -201,7 +203,7 @@ def _apply(
     columns = {"e": e, "px": px, "py": py, "pz": pz} | _derived_columns(
         px, py, pz, active
     )
-    return _write(x, names, norm_scales, columns, active & (e > 0)), columns, active
+    return _write(x, names, norm_scales, columns, active & (e > 0))
 
 
 def rebase_on_kept_axis(
@@ -231,7 +233,7 @@ def apply_random_so2(
     """Rotate every jet about the beam by its own angle; return the batch and the
     angles."""
     mats, thetas = sample_so2_rot_matrices(x.shape[0], x.device)
-    return _apply(x, mats, feature_names, norm_scales)[0], thetas
+    return _apply(x, mats, feature_names, norm_scales), thetas
 
 
 def apply_random_so3(
@@ -248,7 +250,7 @@ def apply_random_so3(
     :return: the rotated batch and the matrices it was rotated by, shape (jets, 3, 3).
     """
     mats = sample_haar_so3_rot_matrices(x.shape[0], x.device)
-    return _apply(x, mats, feature_names, norm_scales)[0], mats
+    return _apply(x, mats, feature_names, norm_scales), mats
 
 
 def apply_random_lorentz(
@@ -264,10 +266,38 @@ def apply_random_lorentz(
     without caring about the detector bounds creates 0.2% jets that would not be seen by
     the detector normally.
 
-    :return: the batch and the boosts, shape (jets, 4, 4).
+    :return: the batch and the draw: the rapidity, shape (jets,), or under *isotropic*
+        the rapidity followed by the unit axis, shape (jets, 4).
     """
-    boosts = _sample_boosts(x.shape[0], eta_max, isotropic, x.device)
-    return _apply(x, boosts, feature_names, norm_scales)[0], boosts
+    boosts, xi, axis = _sample_boosts(x.shape[0], eta_max, isotropic, x.device)
+    draw = torch.cat([xi[:, None], axis], dim=1) if isotropic else xi
+    return _apply(x, boosts, feature_names, norm_scales), draw
+
+
+def make_drawing_transform(
+    scheme: str,
+    feature_names: Sequence[str],
+    norm_scales: dict[str, float] | None = None,
+    lorentz_eta_max: float = 1.0,
+) -> Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
+    """Build the transform named by *scheme*, returning its draws beside the batch.
+
+    The invariance probe calls this, so that every transformed jet can be traced back to
+    its draw: the angle about the beam on [0, 2 pi), shape (jets,), for ``so2``; the
+    rotation matrix, shape (jets, 3, 3), for ``so3``; the rapidity, shape (jets,), for
+    ``lorentz``; the rapidity and the unit axis, shape (jets, 4), for ``lorentz_iso``.
+    The arguments are those of `make_transform`, which draws the same numbers.
+    """
+    names, iso, eta_max = list(feature_names), scheme == "lorentz_iso", lorentz_eta_max
+    if scheme == "so2":
+        return lambda x: apply_random_so2(x, names, norm_scales)
+    if scheme == "so3":
+        return lambda x: apply_random_so3(x, names, norm_scales)
+    if scheme in ("lorentz", "lorentz_iso"):
+        return lambda x: apply_random_lorentz(x, names, eta_max, norm_scales, iso)
+    raise ValueError(
+        f"Transformation scheme must be one of {list(GROUPS)}, got {scheme!r}..."
+    )
 
 
 def make_transform(
@@ -278,8 +308,9 @@ def make_transform(
 ) -> Transform:
     """Build the online transform named by *scheme*.
 
-    The datamodule, the invariance probe, and the symmetry-consistency loss all call
-    this method for applying transformations.
+    The datamodule and the symmetry-consistency loss call this method for applying
+    transformations; the invariance probe calls `make_drawing_transform`, which draws
+    the same numbers and returns them too.
 
     :param scheme: one of `src.symmetry.GROUPS`, the boosts being along the beam
         (``lorentz``) or in a random direction (``lorentz_iso``). ``none`` is rejected.
@@ -287,15 +318,7 @@ def make_transform(
     :return: a callable from a ``(jets, constituents, features)`` tensor to its
         transformed batch of the same shape and normalisation.
     """
-    names, isotropic = list(feature_names), scheme == "lorentz_iso"
-    if scheme == "so2":
-        return lambda x: apply_random_so2(x, names, norm_scales)[0]
-    if scheme == "so3":
-        return lambda x: apply_random_so3(x, names, norm_scales)[0]
-    if scheme in ("lorentz", "lorentz_iso"):
-        return lambda x: apply_random_lorentz(
-            x, names, lorentz_eta_max, norm_scales, isotropic
-        )[0]
-    raise ValueError(
-        f"Transformation scheme must be one of {list(GROUPS)}, got {scheme!r}..."
+    drawing = make_drawing_transform(
+        scheme, feature_names, norm_scales, lorentz_eta_max
     )
+    return lambda x: drawing(x)[0]

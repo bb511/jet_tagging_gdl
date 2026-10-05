@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 
+import numpy as np
 import pytest
 from hydra.core.hydra_config import HydraConfig
 from mlflow import MlflowClient
@@ -51,6 +52,14 @@ def test_the_folds_of_one_training_become_one_results_row(
     assert row["model"] == cfg_eval.algorithm.name
     assert 0.0 <= float(row["test_acc_mean"]) <= 1.0
     assert float(row["flops_mean"]) > 0.0
+    assert float(row["ebops_mean"]) > 0.0
+    # Every checkpoint leaves its outputs, the main run's included, over the same jets.
+    outputs = Path(cfg_eval.paths.output_dir) / "outputs"
+    jets = set()
+    for label in ("main", "fold_1", "fold_2"):
+        with np.load(outputs / f"{label}.npz") as stored:
+            jets |= {array.shape[0] for array in stored.values()}
+    assert len(jets) == 1 and jets.pop() > 0
 
 
 @pytest.mark.slow
@@ -117,8 +126,6 @@ def test_a_fold_less_training_is_evaluated_from_its_manifest_or_from_one_checkpo
     assert metric_dict["main/test/acc"] > 0.0
 
 
-@pytest.mark.slow
-@needs_record
 def test_an_evaluation_with_nothing_to_test_is_refused(cfg_eval: DictConfig) -> None:
     HydraConfig().set_config(cfg_eval)
     with open_dict(cfg_eval):

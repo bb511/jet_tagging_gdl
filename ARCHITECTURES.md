@@ -37,9 +37,9 @@ is the network.
 ## Putting one back
 
 The base class owns `forward`, `model_step`, the metrics, the optimiser and scheduler
-construction, the feature resolution in `setup()` and the FLOP count. A subclass supplies
-`build_net(**net_kwargs) -> nn.Module` and, where the architecture is picky about its inputs,
-two hooks. The steps:
+construction, the feature resolution in `setup()` and the FLOP and eBOP counts. A subclass
+supplies `build_net(**net_kwargs) -> nn.Module` and, where the architecture is picky about its
+inputs, two hooks. The steps:
 
 - Write the network as an `nn.Module` under `src/algorithms/components/<name>.py`. It takes
   `(B, N, F)` float32, with padded constituents as all-zero rows, and returns `(B, 5)`
@@ -191,7 +191,12 @@ size m²/(2p²), below 1e-4 for every constituent above 0.35 GeV. The frames-net
 constituents in float64, as the references feed it: in float32 the mass floor sits below the
 rounding of |p|^2 and the massless constituents' pair masses fall to zero, where the frames-net's
 sqrt has no finite gradient, which turned the first smoke run's logits to NaN. The backbone and
-the experiments run in fp32, as the references train without mixed precision.
+the experiments run in fp32, as the references train without mixed precision. Both cost counters
+run the network on the CPU at construction, where the LLoCa-Transformer's
+`F.scaled_dot_product_attention` dispatches `aten._scaled_dot_product_flash_attention_for_cpu`, a
+kernel torch's FLOP counter does not know. `utils/flops.py` prices it through a custom mapping,
+which restores the attention's 524 288 multiply-adds per jet at N = 16 (about 3 % of the row's
+FLOPs), and `utils/bitops.py` prices it as the math path would compute it.
 
 The frames class sets the exact group, and the switch `frames` picks the class, one per row.
 `LearnedPDFrames`, the class of the `lloca_lorentz` row, predicts a general Lorentz
@@ -474,8 +479,8 @@ comparison fair. Its two pools use one aggregation over the real constituents, w
 picks among the sum, the maximum and the sum divided by the constant N (`sum_over_n`), the DeepSets
 choices; the published point is the sum. A padded slot is an all-zero row but embeds to the
 activation of the first bias, so the mask (`x.abs().sum(-1) > 0`, the convention of the other
-components) keeps it out of both pools; for the maximum it enters as minus infinity, since a tanh
-embedding, which the network still accepts, can be negative. The sum and `sum_over_n` carry the
+components) keeps it out of both pools; for the maximum it enters as minus infinity. The sum and
+`sum_over_n` carry the
 multiplicity to the head, which then reads it from the real constituents rather than from the
 padded rows. A constant scale in front of a dense
 layer is absorbed by its weights, so dropping it changes nothing the network can express. And the
@@ -495,8 +500,7 @@ and JetFormer do. As a row of the grid that reads `data.features`
 `scripts/optuna/make_train_catalogues.py` and `tests/conftest.py` but in neither `EMBEDDED` nor
 `BASELINE_ONLY`, so its results land in `results/<label>/results_table_<regime>.csv` and
 `results_table.subdir` stays null. Until 2026-10-02 it ran the baseline alone and was the one row
-of `BASELINE_ONLY` outside `EMBEDDED`; the set now equals the embedded class, and the generator's
-comparator note for catalogue headers is used by no row.
+of `BASELINE_ONLY` outside `EMBEDDED`; the set now equals the embedded class.
 
 The search, `jedi_linear_optuna.yaml`, runs one study per constituent count and regime,
 `jedi_linear_nconst<N>_<method>_<scheme>`, in `logs/optuna/hls4ml/jedi_linear.db` on the
@@ -506,7 +510,7 @@ consistency-loss weight over the range of `deepsets_scl_optuna.yaml`. It draws `
 32, 64, 128}, the head from the `rho_layers` choices of DeepSets plus [64, 32, 16], the pooling from
 {sum, max, sum_over_n}, the learning rate log-uniformly from 1e-4 to 1e-2 and the weight decay from
 {0, 1e-7, 1e-6, 1e-5, 1e-4}, so the published point lies inside the space. No activation is
-searched, so every trial takes the config's ReLU. The pooling, the learning rate and the weight
+searched, so every trial takes the network's ReLU. The pooling, the learning rate and the weight
 decay are searched over the values of the DeepSets search, which `tests/test_configs.py` checks, so
 that the two rows differ in the network alone. Both spaces hold only operations an FPGA computes
 without a lookup table or a per-jet division, the rule set on 2026-10-01: tanh needs a lookup table
@@ -538,19 +542,16 @@ pre-flight at the corner, with batches of 2048 under fp16 autocast, reserved 0.1
 0.77 GiB and took 3.3, 3.9 and 6.3 ms per step at 16, 50 and 150 constituents, so every study
 fits a 1g MIG slice. These figures were measured on olgpu on 2026-09-30.
 
-`tests/test_algorithms.py` checks, for every pooling on offer under ReLU and for tanh with the
-maximum, that the logits are invariant, to 1e-10 in float64, under a permutation of the constituents
-and under padding; it calls the network directly, because `forward` casts every batch to float32.
-Padding is tested by a hole among a jet's slots for every pool, and by a zero slot appended to a
-full jet for every pool but `sum_over_n`, whose divisor is the slot count. The appended slot is the
-jet's only padded one, so a maximum that let it in as zero fails under tanh, which was checked by
-substituting such a pool. At the published point it also checks that both pools are sums: on jets
-made of k copies of one constituent, the pooled vector divided by k is the same for every k with the
-context silenced and moves with k with the context live, which a mean in either pool would break.
+`tests/test_algorithms.py` checks, with the maximum, that the logits are invariant under padding,
+to 1e-10 in float64; it calls the network directly, because `forward` casts every batch to float32.
+Padding is tested by a hole among a jet's slots and by a zero slot appended to a full jet. The
+appended slot is the jet's only padded one, so a maximum that let its embedding in unmasked would
+fail wherever that embedding exceeds the real values.
 Last, it checks the parameter count. `tests/test_configs.py` keeps `jedi_linear.yaml` a copy of
 `deepsets.yaml`, the shared search choices, the SCL weight included, equal to those of DeepSets and
-both spaces free of an activation, and `tests/test_make_train_catalogues.py` checks the 21 blocks in
-every layout and that the generator's registries equal those of the tests.
+both spaces free of an activation, and `tests/test_make_train_catalogues.py` checks that the
+generator's registries equal those of the tests and that a feature-set layout writes catalogues for
+`jedi_linear` beside the other grid rows and none for the embedded rows.
 
 ## Linformer
 
@@ -710,12 +711,11 @@ with the results rows written to a scratch directory, not to `results/`.
 
 `tests/test_algorithms.py` calls the network directly, in float64 and in eval mode, since `forward`
 casts every batch to float32 and BatchNorm in training mode would couple the jets of a batch. With
-k = N, identity projections and every slot real, the attention must reduce to plain single-head
-scaled dot-product attention, to 1e-10. For every pool and both BatchNorm settings, overwriting
+`sum_over_n` and BatchNorm on, overwriting
 the rows of E_k and E_v that belong to padded slots must leave the logits unchanged, while a change
 to a real slot's row must move them, so that the check cannot pass vacuously. The pool must read
-the real constituents alone, with `sum_over_n` equal to the sum divided by the slot count; the
-parameter count must match the formula above; and an unknown aggregation must be refused by name.
+the real constituents alone, with `sum_over_n` equal to the sum divided by the slot count, and the
+parameter count must match the formula above.
 In `tests/test_make_train_catalogues.py`, a feature-set layout must generate train and eval
 catalogues for the row.
 
@@ -844,5 +844,6 @@ far the logits moved, run as `data.method=equivariance` with
 `configs/experiment/permutation/*.yaml`. Every architecture in the study is permutation
 invariant or equivariant by construction except the MLP, where the answer is known, so the
 check confirmed what the code already guaranteed. Reviving it means adding a scheme to
-`src/data/components/augmentation.py::make_transform` and a method to `SUPPORTED_METHODS`;
+`src/data/components/augmentation.py::make_transform` and a method to the datamodule's
+`SUPPORTED_METHODS`, which `_validate_run` alone checks;
 the invariance callback would then report it beside the three physical groups.

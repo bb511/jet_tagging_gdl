@@ -33,7 +33,7 @@
 #     algorithm.optimizer.lr=0.0035038960298257225 \
 #     algorithm.optimizer.weight_decay=0.005 \
 #     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst16/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/pelican_lorentz/nconst16/baseline
@@ -58,7 +58,7 @@
 #     algorithm.optimizer.lr=0.0025294648648246003 \
 #     algorithm.optimizer.weight_decay=0.005 \
 #     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst50/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/pelican_lorentz/nconst50/baseline
@@ -77,7 +77,7 @@
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
 #     checkpoint_manifest_path=logs/train/hls4ml/pelican_lorentz/nconst150/baseline \
-#     results_table.invariance_metric=wasserstein \
+#     results_table.invariance_metric=tv \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/pelican_lorentz/nconst150/baseline

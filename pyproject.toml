@@ -9,12 +9,12 @@ license = {text = "MIT"}
 readme = "README.md"
 
 requires-python = ">=3.11,<3.13"
-# Four of these are imported by nothing in this repository and so are easy to prune by
-# mistake: sqlalchemy holds optuna 2.10's storage layer below the 2.x that breaks it, pandas
-# backs optuna's trials_dataframe() (fetch_best_params.py --csv), pyarrow is what the record's
-# own loader reads its parquet shards with, and mlflow is the backend of MLFlowLogger. optuna
-# and pyyaml arrive through the sweeper and omegaconf anyway, but scripts/optuna imports both
-# directly, so they are declared.
+# sqlalchemy, pandas, pyarrow, mlflow and pyyaml are imported by no module under src/ or
+# scripts/ and so are easy to prune by mistake: sqlalchemy holds optuna 2.10's storage
+# layer below the 2.x that breaks it, pandas backs optuna's trials_dataframe(), pyarrow is
+# what the record's own loader reads its parquet shards with, mlflow is the backend of
+# MLFlowLogger, and pyyaml comes with omegaconf. optuna comes with the sweeper too, but
+# scripts/optuna imports it directly, so it is declared.
 dependencies = [
     "torch (==2.9.1+cu126)",
     "lightning (>=2.6,<3)",
@@ -28,7 +28,6 @@ dependencies = [
     "rootutils (>=1.0.7,<2)",
     "rich (>=13)",
     "numpy (<2.5)",
-    "scipy (<1.18)",
     "pandas (<3)",
     "pyarrow (>=21,<26)",
     "omegaconf (>=2.3)",
@@ -36,7 +35,6 @@ dependencies = [
     "scikit-learn (>=1.4,<2)",
     "matplotlib (>=3.8)",
     "mplhep (>=0.4)",
-    "pathvalidate (>=3.3,<4)",
     "mlflow (>=3.2,<4)",
     "huggingface-hub (>=1.0)",
     # The L-GATr-slim network itself (src/algorithms/components/lgatr_slim.py wraps it);

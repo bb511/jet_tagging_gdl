@@ -100,7 +100,6 @@ opentelemetry-semantic-conventions==0.65b0 ; python_version >= "3.11" and python
 optuna==2.10.1 ; python_version >= "3.11" and python_version < "3.13"
 packaging==26.3 ; python_version >= "3.11" and python_version < "3.13"
 pandas==2.3.3 ; python_version >= "3.11" and python_version < "3.13"
-pathvalidate==3.3.1 ; python_version >= "3.11" and python_version < "3.13"
 pelican-lite==1.1.4 ; python_version >= "3.11" and python_version < "3.13"
 pillow==12.3.0 ; python_version >= "3.11" and python_version < "3.13"
 prettytable==3.18.0 ; python_version >= "3.11" and python_version < "3.13"

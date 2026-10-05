@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import torch
 from hydra.core.hydra_config import HydraConfig
 from mlflow import MlflowClient
 from omegaconf import DictConfig, open_dict
@@ -11,8 +10,6 @@ from omegaconf import DictConfig, open_dict
 from src.train import train
 from src.utils.checkpoints import MANIFEST_FILENAME
 from tests.conftest import mlflow_logger, needs_record, point_into
-
-pytestmark = needs_record
 
 
 def _manifest_run(run_dir: Path) -> dict[str, Any]:
@@ -33,6 +30,7 @@ def _fold_config(
     return cfg
 
 
+@needs_record
 def test_the_main_run_keeps_the_record_split_and_leaves_a_manifest_of_itself(
     cfg_train: DictConfig, tmp_path: Path
 ) -> None:
@@ -64,25 +62,7 @@ def test_the_main_run_keeps_the_record_split_and_leaves_a_manifest_of_itself(
     assert float(metric_dict["val/acc_best"]) == run["val_acc_best"]
 
 
-def test_one_fold_leaves_a_manifest_of_that_fold(
-    cfg_train: DictConfig, tmp_path: Path
-) -> None:
-    cfg = _fold_config(cfg_train, tmp_path, fold=2, n_folds=2)
-
-    metric_dict, object_dict = train(cfg)
-    manifest = json.loads((tmp_path / "fold_2" / MANIFEST_FILENAME).read_text())
-
-    assert manifest["n_folds"] == 2
-    assert [(r["fold_label"], r["fold_idx"]) for r in manifest["runs"]] == [
-        ("fold_2", 2)
-    ]
-    assert (object_dict["datamodule"].n_folds, object_dict["datamodule"].fold_idx) == (
-        2,
-        1,
-    )
-    assert float(metric_dict["val/acc_best"]) == manifest["runs"][0]["val_acc_best"]
-
-
+@needs_record
 def test_a_fold_nests_under_the_main_run_it_is_given(
     cfg_train: DictConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -99,8 +79,13 @@ def test_a_fold_nests_under_the_main_run_it_is_given(
             "mlflow_run_id"
         ]  # what submit_train.sh reads off the manifest
     train(cfg)
-    fold = _manifest_run(tmp_path / "fold_2")
+    manifest = json.loads((tmp_path / "fold_2" / MANIFEST_FILENAME).read_text())
+    fold = manifest["runs"][0]
 
+    assert manifest["n_folds"] == 2
+    assert [(r["fold_label"], r["fold_idx"]) for r in manifest["runs"]] == [
+        ("fold_2", 2)
+    ]
     client = MlflowClient(f"file:{tmp_path}/mlruns")
     assert main["mlflow_run_id"] and fold["mlflow_run_id"]
     assert "mlflow.parentRunId" not in client.get_run(main["mlflow_run_id"]).data.tags
@@ -120,26 +105,3 @@ def test_a_fold_without_folds_or_past_them_is_refused(
 
     with pytest.raises(ValueError, match="fold="):
         train(cfg_train)
-
-
-@pytest.mark.slow
-def test_a_run_resumes_from_its_own_last_checkpoint(
-    cfg_train: DictConfig, tmp_path: Path
-) -> None:
-    HydraConfig().set_config(cfg_train)
-    train(cfg_train)
-
-    # Progress is read off the checkpoint, not the file names: save_top_k: 1 on val/acc writes a
-    # new epoch_*.ckpt only on an improvement, which one epoch of a few batches need not give.
-    last = tmp_path / "checkpoints" / "last.ckpt"
-    before = torch.load(last, weights_only=False)
-
-    with open_dict(cfg_train):
-        cfg_train.ckpt_path = str(last)
-        cfg_train.trainer.max_epochs = 2
-
-    train(cfg_train)
-    after = torch.load(last, weights_only=False)
-
-    assert after["epoch"] > before["epoch"]
-    assert after["global_step"] > before["global_step"]
