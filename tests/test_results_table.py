@@ -5,48 +5,11 @@ import pytest
 
 from src.symmetry import TABULATED_FAMILIES, TABULATED_GROUPS, key
 from src.utils.results_table import ResultsTable
+from tests.conftest import results_header
 
-SUMMARY = ("mean", "std", "pm", "folds")
 MEAN_OF_THREE = (0.3 + 0.6 + 0.9) / 3
 # The groupless families and the value every fold below reports for each.
 CLEAN = {"rejection_es30": 20.0, "tpr_eb1": 0.3, "tpr_eb10": 0.6, "auc": 0.9}
-
-
-def _expected_header() -> list[str]:
-    # Spelled out rather than read off the table or off src.symmetry: the tables on disk are
-    # appended to, so the column order is part of the interface.
-    groups = ("so2", "so3", "lorentz")
-    performance = ("rejection_es30", "tpr_eb1", "tpr_eb10", "auc")
-    tabulated = (
-        "flip",
-        "flip_recover",
-        "flip_stable",
-        "accuracy_transformed",
-        "rejection_retention_es30",
-        "tpr_retention_eb1",
-        "tpr_retention_eb10",
-        "efficiency_transformed_es30",
-        "fpr_transformed_eb1",
-        "fpr_transformed_eb10",
-    )
-    return [
-        "method",
-        "model",
-        "augmentation_scheme",
-        "nconstituents",
-        "folds_used",
-        *(f"test_acc_{c}" for c in ("mean", "std", "pm", "ci_lower", "ci_upper")),
-        *(f"{p}_{c}" for p in performance for c in SUMMARY),
-        "selected_inv_key",
-        *(f"selected_inv_{c}" for c in ("mean", "std", "pm")),
-        *(f"{g}_tv_{c}" for g in groups for c in SUMMARY),
-        *(f"{s}_{c}" for s in tabulated for c in SUMMARY),
-        *(f"{g}_{s}_{c}" for s in tabulated for g in groups for c in SUMMARY),
-        "flops_mean",
-        "ebops_mean",
-        "test_acc_folds",
-        "selected_inv_folds",
-    ]
 
 
 def _table(tmp_path: Path, **overrides) -> ResultsTable:
@@ -115,7 +78,7 @@ def test_every_group_keeps_its_per_fold_values_beside_the_mean(tmp_path: Path) -
     for family, value in CLEAN.items():
         assert float(row[f"{family}_mean"]) == pytest.approx(value)
         assert row[f"{family}_folds"] == ";".join([f"{value:.6f}"] * 4)
-    assert _header(table.output_path) == _expected_header()
+    assert _header(table.output_path) == results_header()
 
 
 @pytest.mark.parametrize(

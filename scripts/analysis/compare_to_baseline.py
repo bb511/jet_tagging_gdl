@@ -4,7 +4,9 @@
 A results table row holds one run's own numbers and nothing else, so the run a regime is measured
 against is chosen here, when the tables are joined, rather than at evaluation time. Rows are paired
 on ``model`` and ``nconstituents``; a run row with no baseline row of that pair is reported and
-left out rather than dropped in silence.
+left out rather than dropped in silence. ``--baseline-model`` pairs every run row with that one
+model's row at the same constituent count instead, so that every architecture is measured against
+a single reference, such as the jet-level ceiling of ``scripts/jet_level/ceiling.py``.
 
 The per-fold difference is the unit. ``kfold_seed`` fixes the splits and the test split itself
 never moves, so fold i of two regimes is fitted on the same jets and scored on the same jets, and
@@ -224,16 +226,23 @@ def compare(
     run_rows: list[dict[str, str]],
     baseline_rows: list[dict[str, str]],
     metrics: tuple[str, ...],
+    baseline_model: str | None = None,
 ) -> list[dict[str, object]]:
     """The deltas rows of every run row that has a baseline row; the others are
-    reported."""
+    reported.
+
+    :param baseline_model: the baseline rows' model every run row is paired with; None
+        pairs each with its own model.
+    """
     baselines = index_baselines(baseline_rows)
     rows: list[dict[str, object]] = []
     for run in run_rows:
-        baseline = baselines.get(_pair_key(run))
+        model, nconstituents = _pair_key(run)
+        baseline = baselines.get((baseline_model or model, nconstituents))
         if baseline is None:
             print(
-                f"[skip] {_label(run)}: no baseline row of that model and constituent count"
+                f"[skip] {_label(run)}: no baseline row of model "
+                f"{baseline_model or model} at that constituent count"
             )
             continue
         rows += delta_rows(run, baseline, metrics)
@@ -257,11 +266,14 @@ def _trimmed_stem(path: Path) -> str:
     return path.stem[len(prefix) :] if path.stem.startswith(prefix) else path.stem
 
 
-def default_output(run_table: Path, baseline_table: Path) -> Path:
-    """``deltas_<run>_vs_<baseline>.csv`` beside the run table, named after both
-    inputs."""
-    name = f"deltas_{_trimmed_stem(run_table)}_vs_{_trimmed_stem(baseline_table)}.csv"
-    return run_table.parent / name
+def default_output(
+    run_table: Path, baseline_table: Path, baseline_model: str | None = None
+) -> Path:
+    """``deltas_<run>_vs_<baseline>.csv`` beside the run table, named after both inputs,
+    with ``_<baseline_model>`` before the suffix when one is named."""
+    name = f"deltas_{_trimmed_stem(run_table)}_vs_{_trimmed_stem(baseline_table)}"
+    suffix = f"_{baseline_model}" if baseline_model else ""
+    return run_table.parent / f"{name}{suffix}.csv"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -283,6 +295,12 @@ def _parse_args() -> argparse.Namespace:
         help="Where the deltas table goes (default: deltas_<run>_vs_<baseline>.csv beside the run "
         "table).",
     )
+    parser.add_argument(
+        "--baseline-model",
+        default=None,
+        help="Pair every run row with this model's baseline row at the same constituent count "
+        "(default: each run row's own model). Appended to the default output name.",
+    )
     return parser.parse_args()
 
 
@@ -295,12 +313,15 @@ def main() -> None:
         sys.exit(
             f"nothing to compare: {args.run_table} or {args.baseline_table} holds no rows"
         )
-    rows = compare(run_rows, baseline_rows, metrics_covered(run_rows + baseline_rows))
+    metrics = metrics_covered(run_rows + baseline_rows)
+    rows = compare(run_rows, baseline_rows, metrics, args.baseline_model)
     if not rows:
         sys.exit(
             "no run row could be paired with a baseline row, so nothing was written"
         )
-    output_path = args.out or default_output(args.run_table, args.baseline_table)
+    output_path = args.out or default_output(
+        args.run_table, args.baseline_table, args.baseline_model
+    )
     write_deltas(rows, output_path)
     print(f"[write] {len(rows)} delta rows -> {output_path}")
 

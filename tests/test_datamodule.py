@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from hydra import initialize_config_dir
@@ -9,7 +10,11 @@ from hydra.core.global_hydra import GlobalHydra
 from src.data import hls4ml_datamodule as datamodule_module
 from src.data.components.augmentation import compute_eta
 from src.data.components.dataset import HLS4MLDataset
-from src.data.hls4ml_datamodule import HLS4MLDataModule, compose_record_config
+from src.data.hls4ml_datamodule import (
+    HLS4MLDataModule,
+    compose_record_config,
+    fold_indices,
+)
 from tests.conftest import RECORD_COLUMNS, ROOT, labels
 
 SPLIT_SIZES = {"train": 40, "validation": 20, "test": 16}
@@ -229,6 +234,37 @@ def test_the_folds_pool_the_two_splits_and_a_fold_is_selected_within_range(
     single = _datamodule(n_folds=1)
     single.set_fold(4)
     assert single.fold_idx == 0
+
+
+def test_fold_indices_partition_the_pool() -> None:
+    folds = [fold_indices(23, 5, 7, fold_idx) for fold_idx in range(5)]
+
+    # Every jet is validated in exactly one fold and trained on in the other four.
+    validated = np.concatenate([val_idx for _, val_idx in folds])
+    assert sorted(validated) == list(range(23))
+    for train_idx, val_idx in folds:
+        assert sorted(np.concatenate([train_idx, val_idx])) == list(range(23))
+    # The pool's length and the seed fix the split.
+    assert np.array_equal(fold_indices(23, 5, 7, 2)[1], folds[2][1])
+    assert not np.array_equal(fold_indices(23, 5, 8, 2)[1], folds[2][1])
+
+
+def test_the_served_fold_is_fold_indices_of_the_pooled_jets(
+    record: FakeRecord,
+) -> None:
+    datamodule = _datamodule(n_folds=3, kfold_seed=7, features=RECORD_COLUMNS)
+    datamodule.set_fold(2)
+    datamodule.setup(stage="fit")
+    # Training then validation: the order a script must pool them in to select the same jets.
+    splits = [datamodule._load(record, split) for split in ("train", "validation")]
+    x_all, y_all = (torch.cat(tensors) for tensors in zip(*splits))
+
+    train_idx, val_idx = fold_indices(len(x_all), 3, 7, 2)
+
+    assert torch.equal(datamodule.data_train.X, x_all[train_idx])
+    assert torch.equal(datamodule.data_train.y, y_all[train_idx])
+    assert torch.equal(datamodule.data_val.X, x_all[val_idx])
+    assert torch.equal(datamodule.data_val.y, y_all[val_idx])
 
 
 def test_the_record_is_told_the_cache_and_the_constituent_count(

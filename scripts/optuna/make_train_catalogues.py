@@ -42,6 +42,9 @@ MODELS = [
     "vn",
     "jedi_linear",
     "linformer",
+    "deepsets_moments",
+    "jedi_linear_moments",
+    "moments_only",
 ]
 NCONSTITUENTS = [16, 50, 150]
 
@@ -60,7 +63,10 @@ VARIANTS = [
 # LorentzNet, PELICAN (with and without the beams), L-GATr-slim (with and without the spurion
 # tokens), LLoCa (with the Lorentz, SO(2)xSO(1,1), SO(2) and SO(3) frames) and the vector neurons
 # (on the lifts of (pt, eta, phi)) embed the symmetry rather than acquiring it, so they are the
-# architectures trained at baseline alone, never under augmentation or the SCL.
+# architectures trained at baseline alone, never under augmentation or the SCL. The three moment
+# rows (DeepSets and JEDI-linear with the jet moments, and the moments-only control) are pinned to
+# [pt, etarel, phirel], whose columns a rotation about the beam leaves unchanged, and are filed
+# with them.
 EMBEDDED = {
     "lorentznet",
     "pelican",
@@ -72,6 +78,9 @@ EMBEDDED = {
     "lloca_so2",
     "lloca_so3",
     "vn",
+    "deepsets_moments",
+    "jedi_linear_moments",
+    "moments_only",
 }
 # The rows trained at baseline alone, which today are the embedded class. A row that reads
 # data.features but runs the baseline alone would join this set and not EMBEDDED, so that every
@@ -407,7 +416,8 @@ def models_of(layout: Layout) -> list[str]:
 
     Each embedded architecture pins its own columns through ``required_features``, the
     four-momentum for all but ``vn``, whose experiment configs set ``[pt, eta, phi]``,
-    so only the default layout has catalogues for them.
+    and the three moment rows, whose experiment configs set ``[pt, etarel, phirel]``, so
+    only the default layout has catalogues for them.
     """
     if layout.features is None:
         return MODELS

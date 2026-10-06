@@ -11,6 +11,7 @@ from src.callbacks.invariance import (
     FlipCounts,
     FlipProbe,
     InvarianceMetricCallback,
+    clean_metrics,
     output_metrics,
 )
 from src.symmetry import (
@@ -265,6 +266,27 @@ def test_the_auc_of_each_class_is_sklearn_s_and_the_macro_is_their_mean() -> Non
     for name, auc in zip(CLASS_NAMES, expected):
         assert metrics[key(None, "auc", name)] == pytest.approx(auc)
     assert metrics[key(None, "auc")] == pytest.approx(np.mean(expected))
+
+
+def test_clean_metrics_are_the_groupless_keys_output_metrics_logs() -> None:
+    rng = np.random.default_rng(2)
+    truth = rng.integers(0, 5, size=400)
+    clean = (rng.normal(size=(400, 5)) + np.eye(5)[truth]).astype(np.float32)
+    transformed = clean + rng.normal(scale=0.5, size=clean.shape)
+    logged = output_metrics(_arrays(clean, truth, so2=transformed))
+    groupless = {
+        name: v for name, v in logged.items() if name.startswith("performance/")
+    }
+
+    metrics = clean_metrics(clean, truth)
+
+    classes = (None, *CLASS_NAMES)
+    assert set(metrics) == {
+        key(None, f, c) for f in PERFORMANCE_FAMILIES for c in classes
+    }
+    assert len(metrics) == 24
+    assert metrics == groupless
+    assert clean_metrics(np.full((4, 5), np.nan), np.arange(4)) == {}
 
 
 def test_only_a_named_pass_writes_its_outputs_in_loader_order(tmp_path: Path) -> None:

@@ -50,6 +50,19 @@ warnings.filterwarnings(
 )
 
 
+def fold_indices(
+    n_jets: int, n_folds: int, seed: int, fold_idx: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """The training and validation indices of fold *fold_idx*, counted from zero, of
+    *n_jets* pooled jets.
+
+    The split depends on the pool's length and the seed alone, so a script that pools
+    the same jets in the same order selects the same folds as the datamodule.
+    """
+    folds = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    return list(folds.split(np.arange(n_jets)))[fold_idx]
+
+
 class HLS4MLDataModule(LightningDataModule):
     """Load the HF dataset, optionally augmented online and optionally k-folded.
 
@@ -312,8 +325,9 @@ class HLS4MLDataModule(LightningDataModule):
         self, x_all: torch.Tensor, y_all: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Slice the pooled jets into the training and validation halves of fold_idx."""
-        folds = KFold(n_splits=self.n_folds, shuffle=True, random_state=self.kfold_seed)
-        train_idx, val_idx = list(folds.split(np.arange(len(x_all))))[self.fold_idx]
+        train_idx, val_idx = fold_indices(
+            len(x_all), self.n_folds, self.kfold_seed, self.fold_idx
+        )
         log.info(
             f"Fold {self.fold_idx + 1}/{self.n_folds}: "
             f"{len(train_idx)} train, {len(val_idx)} val jets"

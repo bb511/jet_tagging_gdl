@@ -10,7 +10,10 @@ which on 2026-10-03 replaced their two rows on the four-momentum, `vn_z` and `vn
 architecture, JEDI-linear, joined on 2026-09-30 as a second class in the DeepSets module; it runs in
 one row, `jedi_linear`, the comparator from the FPGA literature, which since 2026-10-02 also runs
 the seven regimes of the grid. A tenth architecture, the Linformer, joined on 2026-10-01 in a module
-of its own, the ninth, and runs in one row, `linformer`, over the seven regimes. PELICAN, a plain
+of its own, the ninth, and runs in one row, `linformer`, over the seven regimes. Three rows joined
+on 2026-10-05 in the DeepSets module, with no architecture or module of their own: DeepSets and
+JEDI-linear reading the jet moments of the vector neurons, `deepsets_moments` and
+`jedi_linear_moments`, and the control on the moments alone, `moments_only`. PELICAN, a plain
 Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the
 refactor; nano-PELICAN, which existed as configuration only, went with them, and so did the
 permutation check. The two four-momentum rows of the vector neurons went on 2026-10-03. This file
@@ -70,7 +73,11 @@ inputs, two hooks. The steps:
   feature-set directory, `scripts/hls4ml/pt_eta_phi/` and `scripts/hls4ml/pt_etarel_phirel/` as
   well as `scripts/hls4ml/`.
   A row of the grid that reads `data.features`, as the Linformer does, needs both search configs
-  and a 21-block search catalogue under every feature-set directory.
+  and a 21-block search catalogue under every feature-set directory. A variant of a grid row pinned
+  to columns of its own, as the moment rows are, gets a subclass of its own that sets
+  `required_features`, so that the grid row keeps reading `data.features`, and an algorithm config
+  that sets `nbr_feats` to a number, since `tests/test_algorithms.py` builds every row with the
+  four-momentum as `data.features`.
 - Extend `tests/test_algorithms.py`, which exercises every algorithm config under both
   methods.
 
@@ -718,6 +725,174 @@ the real constituents alone, with `sum_over_n` equal to the sum divided by the s
 parameter count must match the formula above.
 In `tests/test_make_train_catalogues.py`, a feature-set layout must generate train and eval
 catalogues for the row.
+
+## Jet moments
+
+Added on 2026-10-05 in three rows, after a scratch test of the same day, to find where the
+advantage of the vector neurons over DeepSets and JEDI-linear comes from. The vector neurons
+multiply the shift-invariant angular moments of a jet, sums of p_T products weighted by powers of
+ΔR², inside their first block (the tensor invariants of "Vector neurons" above). `deepsets_moments`
+and `jedi_linear_moments` hand those moments to the head of DeepSets and of JEDI-linear as
+jet-level inputs beside the pooled vector, and the control, `moments_only`, reads the moments and
+the multiplicity alone, with no per-constituent network. All three read `[pt, etarel, phirel]`,
+the feature set of the scratch test, and are filed with the embedded rows: the baseline regime
+alone, results in `results/embedded/` and catalogues in the default layout alone. Our code is
+`JetMoments` beside the two networks in `src/algorithms/components/deepsets.py`, which reuses
+`_form_matrix`, `_sort_by_pt` and `_unit_lift` of the vector neurons, and the subclasses
+`DeepSetsMoments` and `JEDILinearMoments` of `_MomentsRow` in `src/algorithms/deepsets.py`. Around
+them sit
+`configs/algorithm/{deepsets_moments,jedi_linear_moments,moments_only}.yaml`, the nine experiment
+configs `configs/experiment/hls4ml/<row>_{16,50,150}.yaml`, the three search configs
+`configs/hparams_search/hls4ml/<row>_optuna.yaml`, the hand-written search catalogues
+`scripts/hls4ml/run<row>_search.sh` and the generated `scripts/hls4ml/run<row>_{train,eval}.sh`.
+
+The scratch test ran on olgpu on 2026-10-05, with the moments behind environment switches in a
+copy of the repository; its records are in
+`~/Research/local/claude/scratchpad/jet_tagging_gdl/moments_2026-10-05/` on the Mac. Each parent was
+trained at the best of the first 200 trials of its baseline study on `[pt, etarel, phirel]`, and
+the control at the DeepSets one without phi and the pooling, for 50 epochs on the record's own
+split, with two seeds per cell. The table gives the best validation accuracy as the mean ± the
+half-range of the two seeds, without the moments (`none`), with the five uniform moments and with
+the 25 rank-cut ones (defined below).
+
+| row         | moments | N = 16          | N = 50          | N = 150         |
+| ----------- | ------- | --------------- | --------------- | --------------- |
+| DeepSets    | none    | 0.7019 ± 0.0012 | 0.7991 ± 0.0010 | 0.8090 ± 0.0001 |
+| DeepSets    | uniform | 0.7126 ± 0.0000 | 0.8108 ± 0.0009 | 0.8197 ± 0.0004 |
+| DeepSets    | rankcut | 0.7039 ± 0.0007 | 0.8065 ± 0.0004 | 0.8204 ± 0.0005 |
+| JEDI-linear | none    | 0.7088 ± 0.0004 | 0.8073 ± 0.0010 | 0.8147 ± 0.0010 |
+| JEDI-linear | uniform | 0.7140 ± 0.0008 | 0.8168 ± 0.0008 | 0.8221 ± 0.0003 |
+| JEDI-linear | rankcut | 0.7062 ± 0.0004 | 0.8165 ± 0.0002 | 0.8227 ± 0.0002 |
+| control     | uniform | 0.6669 ± 0.0002 | 0.7891 ± 0.0001 | 0.8107 ± 0.0001 |
+| control     | rankcut | 0.7015 ± 0.0002 | 0.8025 ± 0.0001 | 0.8173 ± 0.0002 |
+
+The uniform moments raised DeepSets by 1.1, 1.2 and 1.1 points and JEDI-linear by 0.5, 1.0 and
+0.7 points at N = 16, 50 and 150. The rank-cut moments did as much at N = 50 and 150 and less at
+N = 16, where they added nothing to JEDI-linear; why is not understood. The control matched
+DeepSets at N = 16 with the rank-cut moments (−0.04 points) and beat it at N = 50 and 150 (+0.3
+and +0.8). The vector neurons' study bests are 0.7217, 0.8229 and 0.8269, so the moments close 40
+to 66 % of the gap to them; the study bests carry a selection bias that the re-runs do not, of the
+size by which the re-runs without moments sit below their own rows' study bests, 0.27 to 0.41
+points. The inference, not a measurement, is that the vector neurons' advantage over the set
+networks is carried by the moment products and that a set network handed them recovers most of
+it; the studies and the 200-epoch finals of these rows test it on the pipeline every other row
+uses.
+
+With the rows of a jet sorted by decreasing p_T, p_i = p_T,i / 20 GeV, the lift of its `etarel`
+and `phirel` n_i = (1, η_i, φ_i, η_i² + φ_i²), u_i = p_i n_i and G the form of the vector neurons,
+so that n_iᵀ G n_j = ΔR_ij², each weighting w of the ranks forms U = Σ_i w_i u_i and
+M = Σ_i w_i u_i n_iᵀ and from them five moments in O(N):
+
+```
+sum_p     Σ_i w_i p_i
+pair      Uᵀ G U          = Σ_ij  w_i w_j p_i p_j ΔR_ij²
+chain     Uᵀ G M G U      = Σ_ijl w_i w_j w_l p_i p_j p_l ΔR_ij² ΔR_jl²
+pair4     tr(G M G M)     = Σ_ij  w_i w_j p_i p_j ΔR_ij⁴
+triangle  tr(G M G M G M) = Σ_ijl w_i w_j w_l p_i p_j p_l ΔR_ij² ΔR_jl² ΔR_li²
+```
+
+each invariant under shifts and rotations of the (η, φ) plane and under permutations of the
+constituents. They are the tensor invariants of the vector neurons with fixed weights in place of
+learned ones, and the uniform weights give the unnormalised β = 2 energy flow polynomials
+(arXiv:1712.07124) of the edge, the two-edge path, the doubled edge and the triangle. The
+`uniform` set weighs every real constituent by one, five moments; the `rankcut` set adds the
+moments of the leading 1, 2, 4 and 8 constituents by p_T, 25 in all. Five of the 25 vanish
+identically, every moment but sum_p under the top-1 cut and the triangle under the top-2 cut, and
+are masked to exact zeros, because in float32 they come out as roundoff of terms of order p³,
+which the batch normalisation would scale up to unit variance. A BatchNorm1d normalises the
+moments before the head reads them and folds into the head's first layer at inference. The batch
+arrives normalised; `_MomentsRow._on_features_resolved` fills
+`JetMoments.denorm_scales` from the datamodule's `norm_scales`, as the vector neurons fill theirs.
+The control's head reads the moments and the number of real constituents over the constant slot
+count N.
+
+`DeepSetsNet` and `JEDILinearNet` take `moments` in {none, uniform, rankcut}, and `DeepSetsNet`
+also `moments_only`, under which it builds no phi and requires `phi_layers=None`. Under `none`,
+which the parents' modules pass by default, `self.moments` is a plain attribute set to None: the
+networks register no module, draw no random number and keep their state-dict keys, so the DeepSets
+and JEDI-linear studies, finals and checkpoints are untouched and `eval.py` still loads the finals.
+The parent modules `DeepSets` and `JEDILinear` are unchanged and keep `required_features = None`;
+the pin to `[pt, etarel, phirel]` is a class attribute of `_MomentsRow`, whose subclasses refuse
+`moments="none"`, and `JEDILinearMoments` has no `moments_only`, so Hydra refuses the key.
+
+The algorithm configs are standalone copies of `deepsets.yaml` and `jedi_linear.yaml` that differ
+in `_target_`, `name`, `nbr_feats` and `moments`, the control also in `moments_only: true` and in
+having no `phi_layers` or `aggregation`; `tests/test_configs.py` keeps the rest in step. As in
+`vn.yaml`, `nbr_feats` is 3 rather than `${len:${data.features}}`, because
+`tests/test_algorithms.py` builds every row with the four-momentum as `data.features`. The default
+set is `uniform`. The experiments train for 200 epochs on batches of 2048 with five folds at the
+algorithm defaults and set `data.features: [pt, etarel, phirel]`. Each search config is its
+parent's space plus
+`algorithm.moments: choice(uniform, rankcut)`, the control's being the DeepSets space without
+`phi_layers` and `aggregation`, so every space holds only the FPGA-cheap pools and ReLU. They run
+one study per constituent count, `<row>_nconst<N>_augmentation_none` in
+`logs/optuna/hls4ml/<row>.db`: nine studies of 200 trials of 50 epochs, none launched yet
+(2026-10-05). The scratch runs took 1.9 to 3.1 minutes each on a V100, which puts a study at 6 to
+10 V100-hours. The train and eval catalogues hold three blocks each, all "transferred from
+experiment config (no study yet)".
+
+The experiments keep the `16-mixed` precision of the parents and leave `extras.matmul_precision`
+unset. `JetMoments.raw` leaves autocast and computes the moments in float32: they are cubic in p,
+which reaches about 50, so fp16 would overflow, and pair, chain and triangle cancel between large
+terms, which bf16, or TF32's rounding of the matmul inputs to about 5e-4, would not resolve. The
+normalised moments are of order one, and the head reads them under autocast like its other inputs.
+
+The rows embed SO(2) through their columns: a rotation about the beam leaves `pt`, `etarel` and
+`phirel` unchanged. A boost along the beam shifts the η of every massless constituent by its
+rapidity and that of the massive jet axis by another amount, so it moves every `etarel` of a jet by
+one amount, which the moments, built from differences, do not see and the per-constituent networks
+do. `so2` is therefore exact for all three rows and `lorentz` for the control alone, for massless
+constituents as for `vn`; `so3` and `lorentz_iso` change every p_T and are measured. Through the
+probe on massless record jets, with the networks in float64, the `so2` shift of the logits is
+1.6e-8 to 2.5e-8 of the largest logit and the control's `lorentz` shift 2.0e-8, the float32
+rounding of the transform matrices, while the broken groups move the logits by 7e-3 to 1.6 of it
+(2026-10-05). Evaluated on 4096 test jets, smoke models trained on five batches at N = 16, with
+either moment set, flipped no jet under `so2` for any row and none under `lorentz` for the control.
+
+At the defaults (DeepSets' phi [64, 64, 32] and rho [32, 32, 16], JEDI-linear's published point,
+the control's rho [32, 32, 16], all with the uniform moments) and at the corner of each search
+space (phi [128, 64, 32] and rho [64, 32]; hidden 128 and head [64, 32, 16]; rho [64, 32]; all
+with the rank-cut moments), the rows have these parameters and costs per jet at N = 16, 50 and
+150, measured on olgpu on 2026-10-05:
+
+| row                   | point   | parameters | MFLOP                | M eBOPs             |
+| --------------------- | ------- | ---------- | -------------------- | ------------------- |
+| `deepsets_moments`    | default | 9391       | 0.209, 0.642, 1.913  | 6.80, 20.8, 62.1    |
+| `deepsets_moments`    | corner  | 16 855     | 0.357, 1.086, 3.231  | 11.5, 35.2, 104.6   |
+| `jedi_linear_moments` | default | 19 919     | 0.292, 0.863, 2.544  | 9.56, 28.3, 83.5    |
+| `jedi_linear_moments` | corner  | 62 647     | 1.124, 3.385, 10.035 | 36.4, 109.7, 325.3  |
+| `moments_only`        | default | 1903       | 0.005, 0.006, 0.010  | 0.166, 0.242, 0.466 |
+| `moments_only`        | corner  | 4023       | 0.013, 0.020, 0.040  | 0.449, 0.734, 1.573 |
+
+The moments add w inputs to the head's first layer and 2w parameters in their batch
+normalisation, w = 5 or 25, and cost 749, 1905 and 5305 multiplications per jet at N = 16, 50 and
+150 for the uniform set and 3105, 7525 and 20 525 for the rank-cut one. The FLOP counter prices
+matrix products alone and misses the elementwise products among them, which matters only for the
+control: its eBOPs exceed 32 × FLOPs by 12, 26 and 46 % at the defaults, where every other row
+sits within 5 %. The unpriced share, the sort and the batch normalisation of the moments, is
+0.02 %, 0.01 % and 0.8 % at N = 16. A V100 pre-flight at the corner, with batches of 2048 record
+jets under fp16 autocast and a gradient scaler, reserved 0.10, 0.21 and 0.43 GiB and took 4.3,
+4.4 and 4.9 ms per step for `deepsets_moments`, 0.12, 0.28 and 0.57 GiB and 5.1, 5.4 and 7.9 ms
+for `jedi_linear_moments` and 0.05, 0.06 and 0.11 GiB and 3.1 ms for the control at N = 16, 50 and
+150 (olgpu, 2026-10-05), so every study fits a 1g MIG slice.
+
+`tests/test_moments.py` checks the moments against their explicit sums over pairs and triples, the
+exact zeros of the rank cuts, their invariance under shifts and rotations of the plane and under
+permutations, the rank cuts against moments of the leading constituents alone, their dtype and
+accuracy under bf16 autocast on the CPU and fp16 autocast on a GPU (both fail without the guard),
+the widths of the heads, that a DeepSets without phi reads the moments and the multiplicity alone
+and refuses inconsistent options, and that the moment rows refuse `none`. Against literal lists of
+the committed state-dict keys and stacks rebuilt from the same seed in the committed order, it
+checks that the two networks without moments draw the same weights and compute the same logits,
+bit for bit, under every pooling. `tests/test_algorithms.py` builds the three rows with the other
+algorithms, checks that each fills its scales and refuses a reordered or a longer column list,
+that the moments widen the head and add their batch normalisation alone, that padded slots change
+nothing, and holds the rows to their exact groups at 1e-6 and to a thousand times the
+`so2` shift under the others, calling the network directly in float64 with its batch normalisation
+calibrated on the test jets, since at its initial statistics the raw moments, about 1e10 there,
+would drown every other input of the head. `tests/test_configs.py` keeps the configs copies of
+their parents, the search spaces the parents' plus the moment set, and the experiments pinned to
+their columns with mixed precision and no `matmul_precision`.
 
 ## Vector neurons on the four-momentum
 

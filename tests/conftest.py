@@ -43,8 +43,14 @@ MODELS = (
     "vn",
     "jedi_linear",
     "linformer",
+    "deepsets_moments",
+    "jedi_linear_moments",
+    "moments_only",
 )
-# The symmetry-embedded class, trained in the baseline regime alone and never under the SCL.
+# The rows that read the jet moments, pinned to [pt, etarel, phirel].
+MOMENT_ROWS = ("deepsets_moments", "jedi_linear_moments", "moments_only")
+# The symmetry-embedded class, trained in the baseline regime alone and never under the SCL;
+# the moment rows are filed with it.
 EMBEDDED = (
     "lorentznet",
     "pelican",
@@ -56,6 +62,7 @@ EMBEDDED = (
     "lloca_so2",
     "lloca_so3",
     "vn",
+    *MOMENT_ROWS,
 )
 # Trained in the baseline regime alone, never under augmentation or the SCL; today the
 # embedded class, though a row that reads data.features could join it without EMBEDDED.
@@ -67,6 +74,7 @@ RECORD_COLUMNS = (
     "j1_phirel j1_phirot j1_deltaR j1_costheta j1_costhetarel"
 ).split()
 FOUR_MOMENTUM = ["px", "py", "pz", "e"]
+PT_ETAREL_PHIREL = ["pt", "etarel", "phirel"]
 # In GeV. A massless constituent puts m^2 = E^2 - |p|^2 at the float32 rounding of E^2, and the
 # boost tests would then measure the arithmetic rather than the transform.
 MOMENTUM_SCALE = 20.0
@@ -187,3 +195,41 @@ def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> DictConfig:
 @pytest.fixture
 def cfg_eval(cfg_eval_global: DictConfig, tmp_path: Path) -> DictConfig:
     return point_into(cfg_eval_global.copy(), tmp_path)
+
+
+def results_header() -> list[str]:
+    # Spelled out rather than read off the table or off src.symmetry: the tables on disk are
+    # appended to, so the column order is part of the interface, which every writer shares.
+    summary = ("mean", "std", "pm", "folds")
+    groups = ("so2", "so3", "lorentz")
+    performance = ("rejection_es30", "tpr_eb1", "tpr_eb10", "auc")
+    tabulated = (
+        "flip",
+        "flip_recover",
+        "flip_stable",
+        "accuracy_transformed",
+        "rejection_retention_es30",
+        "tpr_retention_eb1",
+        "tpr_retention_eb10",
+        "efficiency_transformed_es30",
+        "fpr_transformed_eb1",
+        "fpr_transformed_eb10",
+    )
+    return [
+        "method",
+        "model",
+        "augmentation_scheme",
+        "nconstituents",
+        "folds_used",
+        *(f"test_acc_{c}" for c in ("mean", "std", "pm", "ci_lower", "ci_upper")),
+        *(f"{p}_{c}" for p in performance for c in summary),
+        "selected_inv_key",
+        *(f"selected_inv_{c}" for c in ("mean", "std", "pm")),
+        *(f"{g}_tv_{c}" for g in groups for c in summary),
+        *(f"{s}_{c}" for s in tabulated for c in summary),
+        *(f"{g}_{s}_{c}" for s in tabulated for g in groups for c in summary),
+        "flops_mean",
+        "ebops_mean",
+        "test_acc_folds",
+        "selected_inv_folds",
+    ]

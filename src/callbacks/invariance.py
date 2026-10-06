@@ -258,6 +258,29 @@ def _finite(logits: np.ndarray, name: str) -> np.ndarray | None:
     return None
 
 
+def _clean_reading(
+    clean: np.ndarray, labels: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, list[FrozenPoint], Counts]:
+    """What the groupless and the per-group metrics share, read off the float64 clean
+    logits: the one-vs-rest scores, the signal mask (jets, classes), the working points
+    frozen on the scores, and the per-class totals."""
+    signal = labels[:, None] == np.arange(clean.shape[1])
+    scores = _one_vs_rest(clean)
+    return scores, signal, _frozen_points(scores, signal), _totals(signal)
+
+
+def clean_metrics(logits: np.ndarray, labels: np.ndarray) -> dict[str, float]:
+    """The groupless ``performance/`` keys of one set of logits, as `output_metrics`
+    reads them off the clean ones; empty if a logit is not finite.
+
+    :param logits: shape (jets, classes), the columns in the order of
+        `src.symmetry.CLASS_NAMES`.
+    :param labels: the class index of each jet, shape (jets,).
+    """
+    clean = _finite(logits, "clean")
+    return {} if clean is None else _clean_metrics(*_clean_reading(clean, labels))
+
+
 def _point_metrics(
     group: str, frozen: FrozenPoint, transformed: Counts, totals: Counts
 ) -> dict[str, float]:
@@ -301,9 +324,7 @@ def output_metrics(arrays: dict[str, np.ndarray]) -> dict[str, float]:
     clean = _finite(arrays["logits_clean"], "clean")
     if clean is None:
         return {}
-    signal = arrays["labels"][:, None] == np.arange(clean.shape[1])
-    scores, totals = _one_vs_rest(clean), _totals(signal)
-    points = _frozen_points(scores, signal)
+    scores, signal, points, totals = _clean_reading(clean, arrays["labels"])
     results, p_clean = _clean_metrics(scores, signal, points, totals), _softmax(clean)
     for group in GROUPS:
         logits = arrays[f"logits_{group}"]

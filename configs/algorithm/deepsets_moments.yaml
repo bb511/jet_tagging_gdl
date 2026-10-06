@@ -1,0 +1,46 @@
+# DeepSets on [pt, etarel, phirel] whose rho also reads the jet moments, the shift-invariant
+# angular moments the vector-neuron row multiplies. Pinned to those columns and filed with the
+# embedded rows, so scripted in the baseline regime alone. This file is a copy of deepsets.yaml
+# differing in _target_, name, nbr_feats and moments (tests/test_configs.py keeps the rest in step).
+_target_: src.algorithms.deepsets.DeepSetsMoments
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: deepsets_moments
+
+nconstituents: ${data.nconstituents}
+nbr_feats: 3 # not ${len:...}: the net reads pt, etarel and phirel alone, so features must be those
+output_dim: 5
+
+# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
+# Scripted in the baseline regime alone, so both resolve to augmentation/none.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+transform_kwargs: ${data.transform_kwargs}
+
+phi_layers: [64, 64, 32]
+rho_layers: [32, 32, 16]
+aggregation: sum
+dropout: 0.0
+# uniform: the five moments of every real constituent; rankcut: those and the moments of the
+# leading 1, 2, 4 and 8 by p_T, 25 in all.
+moments: uniform
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 1.0e-3
+  weight_decay: 1.0e-7
+
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 1.0e-4
+  monitor: val/acc
+  interval: epoch
+  frequency: 1
+
+compile: false

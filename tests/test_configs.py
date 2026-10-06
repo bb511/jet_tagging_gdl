@@ -5,12 +5,20 @@ import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
+from src.algorithms.deepsets import (
+    DeepSets,
+    DeepSetsMoments,
+    JEDILinear,
+    JEDILinearMoments,
+)
 from src.algorithms.vector_neurons import VectorNeurons
 from tests.conftest import (
     BASELINE_ONLY,
     EMBEDDED,
     MODELS,
+    MOMENT_ROWS,
     NCONSTITUENTS,
+    PT_ETAREL_PHIREL,
     ROOT,
     compose_root,
     point_into,
@@ -33,6 +41,12 @@ def _names(group: str) -> list[str]:
 
 EXPERIMENTS = _names("experiment/hls4ml")
 SEARCHES = _names("hparams_search/hls4ml")
+# Each moment row's parent, its class and the parent's keys it does not have.
+MOMENT_PARENTS = {
+    "deepsets_moments": ("deepsets", "DeepSetsMoments", ()),
+    "jedi_linear_moments": ("jedi_linear", "JEDILinearMoments", ()),
+    "moments_only": ("deepsets", "DeepSetsMoments", ("phi_layers", "aggregation")),
+}
 
 
 def _composed(tmp_path: Path, *overrides: str) -> DictConfig:
@@ -205,7 +219,9 @@ def test_jedi_linear_searches_the_pooling_and_training_choices_of_deepsets() -> 
     assert dict(jedi_scl) == dict(deepsets_scl)
 
 
-@pytest.mark.parametrize("row", ["deepsets", "jedi_linear"])
+@pytest.mark.parametrize(
+    "row", ["deepsets", "jedi_linear", "deepsets_moments", "jedi_linear_moments"]
+)
 def test_the_search_offers_relu_and_the_fpga_cheap_pools_alone(row: str) -> None:
     # tanh costs an FPGA a lookup table and the mean a per-jet division. With no
     # activation in the space, every trial takes the network's ReLU; sum_over_n divides
@@ -235,3 +251,75 @@ def test_the_vn_experiments_keep_full_float32_matmuls_and_their_own_columns(
     # The one embedded row that reads pt, eta and phi rather than the four-momentum of
     # configs/data/hls4ml.yaml, which its setup() would refuse.
     assert list(cfg.data.features) == VectorNeurons.required_features
+
+
+def _algorithm_yaml(name: str) -> dict:
+    return OmegaConf.to_container(
+        OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
+    )
+
+
+def _search_params(name: str) -> dict[str, str]:
+    path = ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}_optuna.yaml"
+    return dict(OmegaConf.load(path).hydra.sweeper.params)
+
+
+@pytest.mark.parametrize("row", MOMENT_ROWS)
+def test_each_moment_row_differs_from_its_parent_in_the_moments_alone(row: str) -> None:
+    # Standalone copies, as jedi_linear.yaml is of deepsets.yaml, read against their
+    # parents: the training recipe is held fixed and only the moments move. nbr_feats is
+    # 3 rather than ${len:...}, since tests/test_algorithms.py builds every row on the
+    # four-momentum.
+    parent, target, dropped = MOMENT_PARENTS[row]
+    moments, reference = _algorithm_yaml(row), _algorithm_yaml(parent)
+
+    assert moments["_target_"] == f"src.algorithms.deepsets.{target}"
+    assert (moments["name"], moments["nbr_feats"]) == (row, 3)
+    assert moments["moments"] == "uniform"
+    assert moments.pop("moments_only", False) == (row == "moments_only")
+    for key in ("_target_", "name", "nbr_feats", "moments"):
+        moments.pop(key)
+        reference.pop(key, None)
+    for key in dropped:
+        reference.pop(key)
+    assert moments == reference
+
+
+@pytest.mark.parametrize("row", MOMENT_ROWS)
+def test_each_moment_row_searches_its_parents_space_and_the_moment_set(
+    row: str, tmp_path: Path
+) -> None:
+    parent, _, dropped = MOMENT_PARENTS[row]
+    params, reference = _search_params(row), _search_params(parent)
+    cfg = _composed(
+        tmp_path, f"experiment=hls4ml/{row}_16", f"hparams_search=hls4ml/{row}_optuna"
+    )
+    sweeper = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
+
+    assert params.pop("algorithm.moments") == "choice(uniform, rankcut)"
+    for key in dropped:
+        reference.pop(f"algorithm.{key}")
+    assert params == reference
+    assert sweeper["storage"] == f"sqlite:///logs/optuna/hls4ml/{row}.db?timeout=600"
+    assert sweeper["study_name"] == f"{row}_nconst16_augmentation_none"
+
+
+@pytest.mark.parametrize(
+    "experiment", [f"{row}_{n}" for row in MOMENT_ROWS for n in NCONSTITUENTS]
+)
+def test_the_moment_experiments_pin_their_columns_and_keep_mixed_precision(
+    experiment: str,
+) -> None:
+    # The moments leave autocast for float32 themselves, so the trainer's 16-mixed stays,
+    # and TF32 would round the inputs of their products while pair, chain and triangle
+    # cancel between large terms.
+    cfg = OmegaConf.load(
+        ROOT / "configs" / "experiment" / "hls4ml" / f"{experiment}.yaml"
+    )
+    assert "precision" not in cfg.trainer
+    assert "matmul_precision" not in (cfg.get("extras") or {})
+    assert list(cfg.data.features) == PT_ETAREL_PHIREL
+    assert DeepSetsMoments.required_features == PT_ETAREL_PHIREL
+    assert JEDILinearMoments.required_features == PT_ETAREL_PHIREL
+    # The parents read whatever data.features names, as every grid row does.
+    assert DeepSets.required_features is None and JEDILinear.required_features is None

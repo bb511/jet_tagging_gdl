@@ -53,6 +53,11 @@ MODEL_DISPLAY = {
     "vn": "Vector neurons",
     "jedi_linear": "JEDI-linear",
     "linformer": "Linformer",
+    "deepsets_moments": "DeepSets + moments",
+    "jedi_linear_moments": "JEDI-linear + moments",
+    "moments_only": "Moments only",
+    "jet_level_all53": "Jet observables (53)",
+    "jet_level_noeta52": "Jet observables w/o eta (52)",
     "transformer": "JetFormer",
 }
 

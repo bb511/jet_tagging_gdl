@@ -235,3 +235,59 @@ def test_the_default_output_is_named_after_both_tables(
         rows = list(csv.DictReader(table))
     assert list(rows[0]) == compare_to_baseline.COLUMNS
     assert [row["metric"] for row in rows if row["group"] == ""] == GROUPLESS
+
+
+def test_a_named_baseline_model_pairs_every_run_row_with_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch
+) -> None:
+    run_rows = [
+        _row("deepsets_moments", acc=0.82, tv=0.0, stable=1.0, nconstituents=150),
+        _row("vn", acc=0.825, tv=0.0, stable=1.0, nconstituents=150),
+        _row("vn", acc=0.80, tv=0.0, stable=1.0, nconstituents=16),
+    ]
+    # The jet-level rows are never transformed: five NaNs in every per-group cell.
+    ceiling = _row(
+        "jet_level_noeta52", acc=0.831, tv=0.0, stable=1.0, nconstituents=150
+    )
+    nan = ";".join(["nan"] * FOLDS)
+    ceiling |= {name: nan for name in COLUMNS if name.startswith("so2_")}
+    # A row of the run's own model, which the named baseline overrides.
+    own = _row("vn", acc=0.70, tv=0.0, stable=1.0, nconstituents=150)
+    run = _table(tmp_path / "results_table_embedded.csv", run_rows)
+    baseline = _table(tmp_path / "results_table_baseline.csv", [ceiling, own])
+
+    rows = compare_to_baseline.compare(
+        read_csv(run),
+        read_csv(baseline),
+        compare_to_baseline.metrics_covered(read_csv(run) + read_csv(baseline)),
+        baseline_model="jet_level_noeta52",
+    )
+
+    assert {(row["model"], row["nconstituents"]) for row in rows} == {
+        ("deepsets_moments", "150"),
+        ("vn", "150"),
+    }
+    # The NaN cells pass the fold-count check and drop out, leaving the groupless rows.
+    assert {(row["group"], row["metric"]) for row in rows} == {
+        ("", metric) for metric in GROUPLESS
+    }
+    vn = _cell(rows, "test_acc", group="", model="vn")
+    assert float(vn["delta_mean"]) == pytest.approx(0.825 - 0.831)
+    reported = capsys.readouterr().out
+    assert "[skip]" in reported and "nconstituents=16" in reported
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compare_to_baseline.py",
+            str(run),
+            str(baseline),
+            "--baseline-model",
+            "jet_level_noeta52",
+        ],
+    )
+    compare_to_baseline.main()
+
+    written = tmp_path / "deltas_embedded_vs_baseline_jet_level_noeta52.csv"
+    assert len(read_csv(written)) == len(rows)

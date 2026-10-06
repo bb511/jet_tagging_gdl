@@ -1,0 +1,36 @@
+# @package _global_
+# JEDI-linear with the jet moments of [pt, etarel, phirel] at 150 constituents, at the algorithm
+# defaults: a starting point, not tuned values. Pinned to its columns and filed with the embedded
+# rows, so it runs the baseline regime only.
+defaults:
+  - override /data: hls4ml
+  - override /algorithm: jedi_linear_moments
+  - override /callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+seed: 12345
+tags: ["hls4ml", "jedi_linear_moments", "nconst-150"]
+
+experiment_name: hls4ml_jedi_linear_moments_nconst150
+
+# Set by a V100 pre-flight at the corner of the search space (hidden 128, head [64, 32, 16], the
+# 25 rankcut moments, 62 647 parameters; 2026-10-05, reserved memory, record jets under fp16
+# autocast): 0.57 GiB and 7.9 ms/step at 2048 jets, which fits a 1g MIG slice.
+data:
+  nconstituents: 150
+  # The network's own columns; required_features makes setup() refuse any other list.
+  features: [pt, etarel, phirel]
+  batch_size: 2048
+  n_folds: 5
+
+# The trainer's 16-mixed, as for DeepSets and JEDI-linear, and no extras.matmul_precision: the
+# moments are computed in float32 with autocast off, since they are cubic in p_T, and TF32 would
+# round the inputs of their products to about 5e-4 while pair, chain and triangle cancel between
+# large terms. tests/test_configs.py keeps both keys unset.
+trainer:
+  max_epochs: 200
+
+# Filed with the embedded rows, so its rows skip the <features>/ directory.
+results_table:
+  subdir: embedded

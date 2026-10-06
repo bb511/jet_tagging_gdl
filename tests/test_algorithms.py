@@ -1,4 +1,5 @@
 import math
+from collections.abc import Callable
 from functools import partial
 from types import SimpleNamespace
 
@@ -24,11 +25,14 @@ from src.data.components.augmentation import (
     compute_phi,
     compute_pt,
     make_transform,
+    rebase_on_kept_axis,
 )
 from src.symmetry import GROUPS
 from tests.conftest import (
     FOUR_MOMENTUM,
     MODELS,
+    MOMENT_ROWS,
+    PT_ETAREL_PHIREL,
     RECORD_COLUMNS,
     ROOT,
     StubDataModule,
@@ -106,6 +110,15 @@ ARCHITECTURE_KEYS = {
         "aggregation",
         "batchnorm",
     },
+    "deepsets_moments": {
+        "phi_layers",
+        "rho_layers",
+        "aggregation",
+        "dropout",
+        "moments",
+    },
+    "jedi_linear_moments": {"hidden", "head_layers", "aggregation", "moments"},
+    "moments_only": {"rho_layers", "dropout", "moments", "moments_only"},
 }
 # The same network with the beams switched off, so the same keys.
 ARCHITECTURE_KEYS["pelican_lorentz"] = ARCHITECTURE_KEYS["pelican"]
@@ -118,7 +131,7 @@ ARCHITECTURE_KEYS["lloca_so3"] = ARCHITECTURE_KEYS["lloca_lorentz"]
 PT_ETA_PHI = ["pt", "eta", "phi"]
 # The rows whose required_features are not the four-momentum, which their experiments
 # set as data.features.
-READS = {"vn": PT_ETA_PHI}
+READS = {"vn": PT_ETA_PHI, **dict.fromkeys(MOMENT_ROWS, PT_ETAREL_PHIREL)}
 
 
 def _algorithm(
@@ -508,7 +521,9 @@ def _with_random_gates(module: torch.nn.Module) -> torch.nn.Module:
 def _record_jets(n_jets: int = 8, n_slots: int = 16, n_real: int = 11) -> torch.Tensor:
     # The record's 16 columns in float64, pt, eta and phi written from massless momenta:
     # a beam boost then shifts every eta by the same rapidity, and E = |p| holds to
-    # 1e-16 rather than to the float32 rounding of E^2. No test reads the other columns.
+    # 1e-16 rather than to the float32 rounding of E^2. etarel, phirel, deltaR and ptrel
+    # are measured from the kept constituents, as the datamodule does; no test reads the
+    # other columns.
     momenta = jets(n_jets, n_slots, n_real).double()[..., :3] * 10.0
     px, py, pz = momenta.unbind(dim=-1)
     columns = {
@@ -523,7 +538,7 @@ def _record_jets(n_jets: int = 8, n_slots: int = 16, n_real: int = 11) -> torch.
     batch = torch.zeros(n_jets, n_slots, len(RECORD_COLUMNS), dtype=torch.float64)
     for name, values in columns.items():
         batch[..., RECORD_COLUMNS.index(f"j1_{name}")] = values
-    return batch
+    return rebase_on_kept_axis(batch, RECORD_COLUMNS)
 
 
 def _vn() -> JetTaggingModule:
@@ -542,6 +557,29 @@ def _record_shift_under(module: JetTaggingModule, scheme: str) -> float:
     transformed = make_transform(scheme, RECORD_COLUMNS, None, 2.0)(batch)
     with torch.no_grad():
         return _relative_shift(module(batch), module(transformed))
+
+
+def _calibrated(net: torch.nn.Module, batch: torch.Tensor) -> torch.nn.Module:
+    # One training pass at momentum 1 sets the running statistics of the moments' batch
+    # normalisation to those of the batch. At their initial (0, 1) the raw moments, about
+    # 1e10 on the record jets, would reach the head unscaled and drown every other input.
+    net.moments.norm.momentum = 1.0
+    with torch.no_grad():
+        net.train()(batch)
+    return net.eval()
+
+
+def _moments_row(name: str) -> Callable[[torch.Tensor], torch.Tensor]:
+    # The network alone, in float64, on the three columns that forward() reduces a
+    # full-width batch to: forward() casts every batch to float32, and the first Linear
+    # reads it before any float64 buffer could promote it, as the de-normalisation does
+    # in the other rows.
+    torch.manual_seed(0)
+    module = _algorithm(name, nconstituents=16)
+    _attach(module, StubDataModule(PT_ETAREL_PHIREL, keep_full_features_at_test=True))
+    columns = module.model_feature_indices
+    net = _calibrated(module.net.double(), _record_jets()[..., columns])
+    return lambda batch: net(batch[..., columns])
 
 
 # Each embedded row's float64 builder, the probe groups it makes exact (the table of
@@ -585,6 +623,20 @@ EXACT = {
     # momenta, and forward() rounds them to float32, which sets the floor: 9e-8 under
     # so2 and 2e-8 under the beam boost.
     "vn": (_vn, ("so2", "lorentz"), 1e-6),
+    # The moment rows read [pt, etarel, phirel]. A rotation about the beam leaves pt and
+    # the relative angles alone. A boost along it shifts the eta of every massless
+    # constituent by its rapidity and that of the massive jet axis by another amount, so
+    # every etarel moves by one amount: the moments, built from differences, do not see
+    # it, while the per-constituent networks of DeepSets and JEDI-linear do. The network
+    # runs in float64, so the floor is the float32 rounding of the transform matrices
+    # and, under the boost, the regulator of compute_eta.
+    "deepsets_moments": (partial(_moments_row, "deepsets_moments"), ("so2",), 1e-6),
+    "jedi_linear_moments": (
+        partial(_moments_row, "jedi_linear_moments"),
+        ("so2",),
+        1e-6,
+    ),
+    "moments_only": (partial(_moments_row, "moments_only"), ("so2", "lorentz"), 1e-6),
 }
 
 
@@ -596,7 +648,7 @@ def test_each_embedded_row_is_invariant_under_its_exact_groups(
     row: str, scheme: str
 ) -> None:
     build, _, tolerance = EXACT[row]
-    shift_under = _record_shift_under if row == "vn" else _shift_under
+    shift_under = _record_shift_under if row in READS else _shift_under
     assert shift_under(build(), scheme) < tolerance
 
 
@@ -613,12 +665,85 @@ def test_each_embedded_row_breaks_every_other_group(row: str, scheme: str) -> No
     # Each embedded row measures these groups at test time as the augmented models do.
     # Read against the SO(2) shift of the same network rather than an absolute bar: at
     # initialisation the broken groups of PELICAN and L-GATr-slim shift the logits by
-    # only 1e-5 to 1e-3, some of it below the 1e-4 the exact groups are held to, and
-    # those of LLoCa and the vector neurons by 0.1 to 4 times the largest logit, while
-    # SO(2) sits at the float32 floor of the cast in forward(), 1e-8 to 1e-7.
+    # only 1e-5 to 1e-3, some of it below the 1e-4 the exact groups are held to, those
+    # of LLoCa and the vector neurons by 0.1 to 4 times the largest logit and those of
+    # the moment rows by 7e-3 to 1.6 times, while SO(2) sits at the float32 floor of the
+    # cast in forward() or of the transform matrices, 1e-8 to 1e-7.
     module = EXACT[row][0]()
-    shift_under = _record_shift_under if row == "vn" else _shift_under
+    shift_under = _record_shift_under if row in READS else _shift_under
     assert shift_under(module, scheme) > 1000 * shift_under(module, "so2")
+
+
+@pytest.mark.parametrize("row", MOMENT_ROWS)
+def test_a_moment_row_fills_its_scales_and_refuses_any_other_columns(row: str) -> None:
+    module = _algorithm(row)
+    datamodule = StubDataModule(PT_ETAREL_PHIREL, keep_full_features_at_test=True)
+    datamodule.norm_scales = {"j1_pt": 1559.0, "j1_etarel": 1.25, "j1_phirel": 0.5}
+    _attach(module, datamodule)
+
+    # pt, etarel and phirel sit at 5, 8 and 11 of the record's 16 columns.
+    assert module.model_feature_indices == [5, 8, 11]
+    assert module.net.moments.denorm_scales.tolist() == [1559.0, 1.25, 0.5]
+    for features in (["pt", "phirel", "etarel"], [*PT_ETAREL_PHIREL, "eta"]):
+        datamodule = StubDataModule(features, keep_full_features_at_test=True)
+        with pytest.raises(ValueError, match="exactly"):
+            _attach(_algorithm(row), datamodule)
+
+
+# The row each moment row adds its moments to, and the input width of its parent's head
+# at the config defaults.
+MOMENT_PARENTS = {
+    "deepsets_moments": ("deepsets", 32),
+    "jedi_linear_moments": ("jedi_linear", 64),
+}
+
+
+@pytest.mark.parametrize("moments, width", [("uniform", 5), ("rankcut", 25)])
+@pytest.mark.parametrize("row", MOMENT_ROWS)
+def test_the_moments_widen_the_head_and_add_their_batch_norm_alone(
+    row: str, moments: str, width: int
+) -> None:
+    # The moments add `width` inputs to the first layer of the head and a weight and a
+    # bias per moment in their batch normalisation, and nothing else. The control has
+    # no phi, so its head reads the moments and the multiplicity alone.
+    module = _algorithm(row, moments=moments)
+    total = sum(p.numel() for p in module.parameters())
+
+    if row == "moments_only":
+        head = module.net.rho
+        assert not hasattr(module.net, "phi")
+        assert head[0].in_features == width + 1
+        assert total == sum(p.numel() for p in head.parameters()) + 2 * width
+        return
+    parent, first = MOMENT_PARENTS[row]
+    reference = _algorithm(parent, features=PT_ETAREL_PHIREL)
+    added = total - sum(p.numel() for p in reference.parameters())
+    assert added == width * first + 2 * width
+
+
+@pytest.mark.parametrize("row", MOMENT_ROWS)
+def test_a_moment_row_ignores_its_padded_slots(row: str) -> None:
+    # The moments sort the rows by p_T and weigh the real ones alone, and with the
+    # maximum the embedding of a padded slot, a function of the first bias, would win
+    # every channel in which it exceeds the real values. A hole among the real slots
+    # must give the logits of the compacted jet, and an appended padded slot must leave
+    # the moments alone and, but for the control, which reads n / N, the logits too.
+    torch.manual_seed(0)
+    overrides = {} if row == "moments_only" else {"aggregation": "max"}
+    batch = _record_jets(4, 8, 8)[..., [5, 8, 11]]
+    net = _calibrated(_algorithm(row, **overrides).net.double(), batch)
+    zero_slot = torch.zeros(4, 1, 3, dtype=torch.float64)
+    holed = batch.clone()
+    holed[:, 3] = 0.0
+    compacted = torch.cat([holed[:, [0, 1, 2, 4, 5, 6, 7]], zero_slot], dim=1)
+    padded = torch.cat([batch, zero_slot], dim=1)
+
+    with torch.no_grad():
+        assert torch.allclose(net(holed), net(compacted), atol=1e-10)
+        moments = net.moments.raw(batch)
+        assert torch.allclose(net.moments.raw(padded), moments, rtol=1e-12)
+        if row != "moments_only":
+            assert torch.allclose(net(padded), net(batch), atol=1e-10)
 
 
 def _vn_net(nconstituents: int = 8) -> VectorNeuronsClassifier:
