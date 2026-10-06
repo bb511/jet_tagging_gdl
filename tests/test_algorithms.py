@@ -12,7 +12,7 @@ from src.algorithms import JetTaggingModule
 from src.algorithms.components.deepsets import AGGREGATIONS, _masked_pool
 from src.algorithms.components.pelican import LinEq2to2
 from src.algorithms.components.vector_neurons import (
-    SplitGate,
+    ChannelGate,
     TensorInvariants,
     VectorNeuronsClassifier,
     _form,
@@ -512,7 +512,7 @@ def _with_random_gates(module: torch.nn.Module) -> torch.nn.Module:
     # the scalars.
     with torch.no_grad():
         for gate in module.modules():
-            if isinstance(gate, SplitGate):
+            if isinstance(gate, ChannelGate):
                 gate.linear.weight.normal_()
                 gate.linear.bias.normal_()
     return module

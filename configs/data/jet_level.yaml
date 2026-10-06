@@ -1,0 +1,31 @@
+# The record's 53 jet-level observables (the j_* columns of its parquet shards), standardised with
+# the moments of its training split and served as jets of one slot, for the jet-level ceiling.
+_target_: src.data.jet_level_datamodule.JetLevelDataModule
+
+# The networks' pin in configs/data/hls4ml.yaml, so that both read one record; tests/test_configs.py
+# keeps the two equal.
+revision: fc7104f60a45d528ab597b220d5a7cd8e31cfff8
+
+# The directory of the {train,validation,test}-*.parquet shards; null reads the hub snapshot of the
+# revision above, which HF_HUB_CACHE places.
+shards_dir: null
+
+# Observables the row leaves out: jet_level_noeta52 sets [j_eta].
+exclude: []
+
+# Interpolated by the algorithm and callback configs. Nothing transforms the observables, so the
+# datamodule refuses every regime but the baseline.
+method: augmentation
+augmentation_scheme: none
+transform_kwargs: {}
+
+# The rows' label in the results tables: the observables are computed from the whole jet, which
+# N = 150 never truncates, so the rows pair with the networks' N = 150 rows.
+nconstituents: 150
+
+batch_size: 2048
+
+# 1: the record's split; k >= 2: pool train+val and re-split (experiments set 5). The seed is that
+# of configs/data/hls4ml.yaml, so that fold i holds the networks' jets.
+n_folds: 1
+kfold_seed: 42

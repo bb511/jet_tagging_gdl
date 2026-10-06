@@ -9,8 +9,11 @@ from src.data.components.augmentation import get_norm_scale
 
 
 class VectorNeurons(JetTaggingModule):
-    """Jet tagger built on vector neurons (arXiv:2104.12229) over the lifts of (p_T,
-    eta, phi), exact under the Euclidean group of the (eta, phi) plane."""
+    """Jet tagger built on vector neurons (arXiv:2104.12229).
+
+    The inputs are lifted from (p_T, eta, phi) to own 4-vectors, exact under the
+    Euclidean group of the (eta, phi) plane.
+    """
 
     # Absolute angles: the network measures them from its leading constituent itself.
     required_features = ["pt", "eta", "phi"]
@@ -44,8 +47,7 @@ class VectorNeurons(JetTaggingModule):
         )
 
     def _on_features_resolved(self) -> None:
-        """Cache the factors returning [pt, eta, phi] to GeV and radians, in that column
-        order."""
+        """Cache the returning [pt, eta, phi] to GeV and radians, in that order."""
         scales = [
             get_norm_scale(self.norm_scales, name) for name in self.required_features
         ]

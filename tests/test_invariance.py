@@ -313,3 +313,28 @@ def test_only_a_named_pass_writes_its_outputs_in_loader_order(tmp_path: Path) ->
     assert arrays["draw_so2"].shape == arrays["draw_lorentz"].shape == (64,)
     assert arrays["draw_so3"].shape == (64, 3, 3)
     assert arrays["draw_lorentz_iso"].shape == (64, 4)
+
+
+def test_without_the_probe_the_clean_metrics_and_logits_alone_are_kept(
+    tmp_path: Path,
+) -> None:
+    # The jet-level rows: nothing is transformed, and the datamodule, here without a
+    # single attribute, is never read.
+    batches = [_batch(seed=0), _batch(seed=1)]
+    module, callback = _StubModule(), InvarianceMetricCallback(probe=False)
+    callback.subdir = "main"
+
+    logged = _probed(
+        callback, module, SimpleNamespace(), batches, default_root_dir=str(tmp_path)
+    )
+    with np.load(tmp_path / "outputs" / "main.npz") as stored:
+        arrays = dict(stored)
+
+    clean = torch.cat([module(x) for x, _ in batches]).numpy()
+    truth = torch.cat([y.argmax(dim=1) for _, y in batches]).numpy()
+    assert logged == clean_metrics(clean, truth)
+    assert not any(name.startswith("invariance/") for name in logged)
+    assert set(arrays) == {"logits_clean", "labels"}
+    np.testing.assert_array_equal(arrays["logits_clean"], clean)
+    np.testing.assert_array_equal(arrays["labels"], truth)
+    assert InvarianceMetricCallback().probe

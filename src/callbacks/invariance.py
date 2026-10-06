@@ -363,11 +363,20 @@ class InvarianceMetricCallback(Callback):
 
     :param transform_kwargs: they hyperparameters that a ``make_transform`` in the data
         module would take.
+    :param probe: False transforms nothing and logs the groupless families alone, for
+        inputs no group acts on (the jet-level observables), where a probe would report
+        an invariance that is never tested. The outputs then hold the clean logits and
+        the labels alone.
     """
 
-    def __init__(self, transform_kwargs: dict[str, float | bool] | None = None) -> None:
+    def __init__(
+        self,
+        transform_kwargs: dict[str, float | bool] | None = None,
+        probe: bool = True,
+    ) -> None:
         super().__init__()
         self.transform_kwargs = dict(transform_kwargs or {})
+        self.probe = probe
         # Set by eval.py to the checkpoint's label ("main", "fold_1"): the per-jet
         # logits, labels and draws then go to <default_root_dir>/outputs/<subdir>.npz.
         # None writes no outputs.
@@ -385,6 +394,9 @@ class InvarianceMetricCallback(Callback):
     def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Read the feature layout from the data; the probe stays off otherwise."""
         self._reset()
+        if not self.probe:
+            log.info("Invariance probe off: the clean metrics alone are logged.")
+            return
         datamodule = getattr(trainer, "datamodule", None)
         if datamodule is None or datamodule.feature_names is None:
             log.warning("The datamodule has no features; skipped.")
@@ -414,8 +426,9 @@ class InvarianceMetricCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        """Transform one test batch under each group and record how the logits move."""
-        if self._model_feature_names is None:
+        """Keep one test batch's clean logits and, under the probe, how each group's
+        transform moves them."""
+        if self.probe and self._model_feature_names is None:
             return
         x, y = batch
         targets = y.argmax(dim=1)
@@ -423,7 +436,7 @@ class InvarianceMetricCallback(Callback):
         # the trainer can have 16-mixed precision, but here we enforce fp32.
         clean = pl_module(x)
         transformed, draws = {}, {}
-        for group in GROUPS:
+        for group in GROUPS if self.probe else ():
             probed = self._probe_group(pl_module, group, x, clean, targets)
             transformed[group], draws[group] = probed
         self._store.add(clean, targets, transformed, draws)
@@ -454,16 +467,23 @@ class InvarianceMetricCallback(Callback):
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Reduce the counts and the kept outputs over the whole test set, log all, and
         write the outputs when the pass is named."""
-        if self._flip.n_jets == 0:
+        if not self._store.chunks:
             return
         arrays = self._store.arrays()
-        results = self._flip.metrics() | output_metrics(arrays)
+        results = self._results(arrays)
         pl_module.log_dict(results, prog_bar=False, on_epoch=True, sync_dist=True)
         macro = [n for n in results if n.rsplit("_", 1)[-1] not in CLASS_NAMES]
         log.info(" | ".join(f"{n}: {results[n]:.4f}" for n in macro))
         if self.subdir is not None:
             path = Path(trainer.default_root_dir) / "outputs" / f"{self.subdir}.npz"
             _save(path, arrays)
+
+    def _results(self, arrays: dict[str, np.ndarray]) -> dict[str, float]:
+        """Every metric of the pass: the groupless ones alone when nothing was
+        probed."""
+        if not self.probe:
+            return clean_metrics(arrays["logits_clean"], arrays["labels"])
+        return self._flip.metrics() | output_metrics(arrays)
 
 
 def _rates(counts: FlipCounts) -> dict[str, float]:

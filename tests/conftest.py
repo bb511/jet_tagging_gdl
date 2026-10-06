@@ -2,6 +2,9 @@ import os
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import rootutils
 import torch
@@ -64,9 +67,13 @@ EMBEDDED = (
     "vn",
     *MOMENT_ROWS,
 )
+# The MLP on the record's jet-level observables: rows of no architecture, outside MODELS,
+# which tests/test_algorithms.py builds on constituents. Run at N = 150 alone.
+JET_LEVEL = ("jet_level_all53", "jet_level_noeta52")
 # Trained in the baseline regime alone, never under augmentation or the SCL; today the
-# embedded class, though a row that reads data.features could join it without EMBEDDED.
-BASELINE_ONLY = (*EMBEDDED,)
+# embedded class and the jet-level rows, though a row that reads data.features could join
+# it without EMBEDDED.
+BASELINE_ONLY = (*EMBEDDED, *JET_LEVEL)
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.
 RECORD_COLUMNS = (
@@ -75,6 +82,11 @@ RECORD_COLUMNS = (
 ).split()
 FOUR_MOMENTUM = ["px", "py", "pz", "e"]
 PT_ETAREL_PHIREL = ["pt", "etarel", "phirel"]
+# The jet-level columns of the synthetic shards, 53 as in the record: the constant
+# j_ptfrac, which has no spread to divide by, the jet rapidity and fillers.
+JET_LEVEL_COLUMNS = ["j_ptfrac", "j_pt", "j_eta", *(f"j_obs{i}" for i in range(50))]
+# Jets per split of the synthetic shards; the test split ends in a partial batch of 16.
+JET_LEVEL_SIZES = {"train": 120, "validation": 40, "test": 50}
 # In GeV. A massless constituent puts m^2 = E^2 - |p|^2 at the float32 rounding of E^2, and the
 # boost tests would then measure the arithmetic rather than the transform.
 MOMENTUM_SCALE = 20.0
@@ -118,6 +130,32 @@ def jets(
 def labels(n_jets: int, seed: int = 1) -> torch.Tensor:
     generator = torch.Generator().manual_seed(seed)
     return torch.eye(5)[torch.randint(0, 5, (n_jets,), generator=generator)]
+
+
+def _jet_level_shard(rng: np.random.Generator, n_jets: int, loc: float) -> pa.Table:
+    # The record's layout: a constituent list column, the observables and the class index,
+    # cycling so that every class occurs. Each split sits at its own loc, so that
+    # statistics fitted on any other split differ.
+    scales = np.linspace(0.5, 50.0, len(JET_LEVEL_COLUMNS))
+    x = (rng.normal(loc, 1.0, (n_jets, len(JET_LEVEL_COLUMNS))) * scales).astype("f4")
+    x[:, 0] = 1.0
+    constituents = [rng.random(rng.integers(1, 6)).tolist() for _ in range(n_jets)]
+    columns = {"j1_pt": pa.array(constituents, type=pa.list_(pa.float32()))}
+    columns |= {name: x[:, i] for i, name in enumerate(JET_LEVEL_COLUMNS)}
+    return pa.table(columns | {"label": (np.arange(n_jets) % 5).astype(np.int8)})
+
+
+@pytest.fixture
+def jet_level_shards(tmp_path: Path) -> Path:
+    # Two shards per split, named as the record names them, so that the order of the
+    # shards matters.
+    directory, rng = tmp_path / "shards", np.random.default_rng(0)
+    directory.mkdir()
+    for loc, (split, n_jets) in enumerate(JET_LEVEL_SIZES.items()):
+        for shard, size in enumerate((n_jets // 2, n_jets - n_jets // 2)):
+            path = directory / f"{split}-{shard:05d}-of-00002.parquet"
+            pq.write_table(_jet_level_shard(rng, size, float(loc)), path)
+    return directory
 
 
 def compose_root(config_name: str, *overrides: str) -> DictConfig:

@@ -7,7 +7,7 @@ import optuna
 from optuna.distributions import CategoricalDistribution
 from optuna.trial import TrialState, create_trial
 
-from tests.conftest import BASELINE_ONLY, EMBEDDED, MODELS, ROOT
+from tests.conftest import BASELINE_ONLY, EMBEDDED, JET_LEVEL, MODELS, ROOT
 
 # scripts/ is not a package, so the generator is loaded by path, as the analysis scripts'
 # tests load theirs. It is registered before it is executed because dataclasses resolves
@@ -114,6 +114,7 @@ def test_the_generator_names_the_rows_and_regimes_the_tests_do() -> None:
     assert tuple(make_train_catalogues.MODELS) == MODELS
     assert make_train_catalogues.EMBEDDED == set(EMBEDDED)
     assert make_train_catalogues.BASELINE_ONLY == set(BASELINE_ONLY)
+    assert tuple(make_train_catalogues.JET_LEVEL) == JET_LEVEL
 
 
 def test_the_four_momentum_layout_names_no_feature_set_anywhere(
@@ -170,3 +171,29 @@ def test_best_trial_is_none_without_the_study_or_a_completed_trial(
 
     assert make_train_catalogues.best_trial(db, STUDY) is None
     assert make_train_catalogues.best_trial(db, "absent") is None
+
+
+def test_a_jet_level_row_has_one_baseline_block_at_150_in_the_default_layout(
+    tmp_path: Path,
+) -> None:
+    dbs, out = _empty_dbs(tmp_path), tmp_path / "catalogues"
+
+    make_train_catalogues._generate(dbs, out, ROOT, Layout(), False)
+    train = (out / "runjet_level_noeta52_train.sh").read_text()
+    evaluate = (out / "runjet_level_noeta52_eval.sh").read_text()
+
+    assert {
+        f"run{row}_{task}.sh" for row in JET_LEVEL for task in ("train", "eval")
+    } <= {path.name for path in out.iterdir()}
+    assert make_train_catalogues.count_commands(LIB, train) == 1
+    assert make_train_catalogues.count_commands(LIB, evaluate) == 1
+    assert "1 x 1 = 1 train runs" in train
+    assert "never\n# transformed" in train and "embeds the symmetry" not in train
+    assert "experiment=hls4ml/jet_level_noeta52_150 \\" in train
+    assert "data.method=augmentation \\\n#     data.augmentation_scheme=none" in train
+    assert (
+        "hydra.run.dir=logs/train/hls4ml/jet_level_noeta52/nconst150/baseline" in train
+    )
+    assert _manifest_paths(evaluate) == {
+        "logs/train/hls4ml/jet_level_noeta52/nconst150/baseline"
+    }

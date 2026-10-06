@@ -5,3 +5,6 @@ _target_: src.callbacks.invariance.InvarianceMetricCallback
 # The transform knobs of the data pipeline, so the probe measures the trained regime. They define
 # the probe and are therefore never tuned.
 transform_kwargs: ${data.transform_kwargs}
+# false: no transform, the clean metrics and outputs alone; the jet-level experiments set it, since
+# no group acts on their inputs.
+probe: true

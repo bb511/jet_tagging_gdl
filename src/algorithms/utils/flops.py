@@ -20,9 +20,6 @@ def _cpu_attention_flop(
     return sdpa_flop_count(query_shape, key_shape, value_shape)
 
 
-# The count runs on the CPU at construction, where F.scaled_dot_product_attention dispatches
-# this kernel, and torch's flop_registry holds the CUDA kernels alone. The formula goes in
-# unwrapped: FlopCounterMode wraps a custom formula to receive shapes itself.
 _CPU_ATTENTION = {
     torch.ops.aten._scaled_dot_product_flash_attention_for_cpu: _cpu_attention_flop
 }

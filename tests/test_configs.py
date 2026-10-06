@@ -15,6 +15,7 @@ from src.algorithms.vector_neurons import VectorNeurons
 from tests.conftest import (
     BASELINE_ONLY,
     EMBEDDED,
+    JET_LEVEL,
     MODELS,
     MOMENT_ROWS,
     NCONSTITUENTS,
@@ -24,14 +25,21 @@ from tests.conftest import (
     point_into,
 )
 
-EXPECTED_EXPERIMENTS = {f"{model}_{n}" for model in MODELS for n in NCONSTITUENTS}
-# The baseline-only models (the embedded class and the JEDI-linear comparator) are never
-# trained under the SCL, so they have no SCL space.
+# The jet-level rows run at the one constituent count that labels them.
+EXPECTED_EXPERIMENTS = {f"{model}_{n}" for model in MODELS for n in NCONSTITUENTS} | {
+    f"{row}_150" for row in JET_LEVEL
+}
+# The baseline-only rows (the embedded class and the jet-level rows) are never trained
+# under the SCL, so they have no SCL space.
 EXPECTED_SEARCHES = {
     f"{model}{variant}_optuna"
-    for model in MODELS
+    for model in (*MODELS, *JET_LEVEL)
     for variant in ("", "_scl")
     if not (model in BASELINE_ONLY and variant == "_scl")
+}
+SUBDIRS = {
+    **dict.fromkeys(EMBEDDED, "embedded"),
+    **dict.fromkeys(JET_LEVEL, "jet_level"),
 }
 
 
@@ -69,10 +77,13 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     assert hydra.utils.instantiate(cfg.trainer)
     module = hydra.utils.instantiate(cfg.algorithm)
     assert module.hparams.name == model
-    assert module.hparams.nconstituents == int(nconstituents)
+    # A jet-level row reads one slot of observables per jet, whatever labels it.
+    slots = 1 if model in JET_LEVEL else int(nconstituents)
+    assert module.hparams.nconstituents == slots
     # Every MAC the FLOP counter prices at 2 the eBOP counter prices at 8 x 8.
     assert module.ebops_total >= 32 * module.flops_total > 0
-    assert cfg.results_table.subdir == ("embedded" if model in EMBEDDED else None)
+    assert cfg.results_table.subdir == SUBDIRS.get(model)
+    assert cfg.callbacks.invariance_metric.probe == (model not in JET_LEVEL)
 
 
 @pytest.mark.parametrize("search", SEARCHES)
@@ -81,8 +92,11 @@ def test_every_search_config_offers_a_non_empty_space(
 ) -> None:
     assert set(SEARCHES) == EXPECTED_SEARCHES
     model = search.removesuffix("_optuna").removesuffix("_scl")
+    nconstituents = 150 if model in JET_LEVEL else 16
     cfg = _composed(
-        tmp_path, f"experiment=hls4ml/{model}_16", f"hparams_search=hls4ml/{search}"
+        tmp_path,
+        f"experiment=hls4ml/{model}_{nconstituents}",
+        f"hparams_search=hls4ml/{search}",
     )
     params = cfg.hydra.sweeper.params
 
@@ -323,3 +337,64 @@ def test_the_moment_experiments_pin_their_columns_and_keep_mixed_precision(
     assert JEDILinearMoments.required_features == PT_ETAREL_PHIREL
     # The parents read whatever data.features names, as every grid row does.
     assert DeepSets.required_features is None and JEDILinear.required_features is None
+
+
+@pytest.mark.parametrize(
+    "row, width", [("jet_level_all53", 53), ("jet_level_noeta52", 52)]
+)
+def test_each_jet_level_row_is_the_mlp_on_one_slot_of_observables(
+    row: str, width: int
+) -> None:
+    # Standalone copies of mlp.yaml, as the moment rows are of their parents: the
+    # training recipe is the constituent MLP's, and only the input moves.
+    jet_level, mlp = _algorithm_yaml(row), _algorithm_yaml("mlp")
+
+    assert (jet_level["name"], jet_level["nconstituents"]) == (row, 1)
+    assert jet_level["nbr_feats"] == width
+    for key in ("name", "nconstituents", "nbr_feats"):
+        jet_level.pop(key)
+        mlp.pop(key)
+    assert jet_level == mlp
+
+
+def _sweeper(tmp_path: Path, row: str) -> dict:
+    cfg = _composed(
+        tmp_path, f"experiment=hls4ml/{row}_150", f"hparams_search=hls4ml/{row}_optuna"
+    )
+    return OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
+
+
+@pytest.mark.parametrize("row", JET_LEVEL)
+def test_each_jet_level_row_searches_the_mlp_space(row: str, tmp_path: Path) -> None:
+    # The space, the budget and the sampler of the constituent MLP; only the study moves.
+    sweeper, mlp = _sweeper(tmp_path, row), _sweeper(tmp_path, "mlp")
+
+    assert (
+        sweeper.pop("storage") == f"sqlite:///logs/optuna/hls4ml/{row}.db?timeout=600"
+    )
+    assert sweeper.pop("study_name") == f"{row}_nconst150_augmentation_none"
+    for key in ("storage", "study_name"):
+        mlp.pop(key)
+    assert sweeper == mlp
+    assert sweeper["n_trials"] == 200 and sweeper["sampler"]["seed"] == 1234
+
+
+def test_the_jet_level_rows_read_the_networks_record_and_folds(tmp_path: Path) -> None:
+    # One revision and one fold seed, so that fold i of a jet-level row and of a network
+    # holds the same jets.
+    hls4ml, jet_level = (
+        OmegaConf.load(ROOT / "configs" / "data" / f"{name}.yaml")
+        for name in ("hls4ml", "jet_level")
+    )
+    noeta = _composed(tmp_path, "experiment=hls4ml/jet_level_noeta52_150")
+
+    assert (jet_level.revision, jet_level.kfold_seed) == (
+        hls4ml.revision,
+        hls4ml.kfold_seed,
+    )
+    assert list(noeta.data.exclude) == ["j_eta"]
+    assert (noeta.data.n_folds, noeta.data.batch_size, noeta.trainer.max_epochs) == (
+        5,
+        2048,
+        200,
+    )

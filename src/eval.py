@@ -83,13 +83,12 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Test every checkpoint of one training on the held-out test split.
 
     The folds are summarised into one results row once the last of them has been tested;
-    the main run is left out of it whenever folds exist, so no jet is counted twice. The
-    k-fold runs are nested underneath the main run in MLFlow. Every checkpoint, the main
-    run's included, leaves its per-jet logits, labels and transform draws in
-    ``<output_dir>/outputs/<fold_label>.npz``.
+    the main run is left out of it whenever folds exist.
+    The k-fold runs are nested underneath the main run in MLFlow.
+    Every checkpoint, the main run's included, leaves its per-jet logits, labels and
+    transform draws in ``<output_dir>/outputs/<fold_label>.npz``.
 
-    :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``, and the shared
-        objects.
+    :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``.
     """
     runs = _runs_to_evaluate(cfg)
     aggregated = _aggregated_labels(runs)
@@ -100,8 +99,7 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     metric_dict: dict[str, Any] = {}
     folds: list[dict[str, Any]] = []
     for run in runs:
-        # Re-seeded per checkpoint: the invariance probe draws its transforms from the global torch
-        # RNG, so the spread over folds would otherwise mix model and transform variation.
+        # Re-seeded per checkpoint.
         if cfg.get("seed") is not None:
             L.seed_everything(cfg.seed, workers=True)
         algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)

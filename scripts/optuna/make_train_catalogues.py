@@ -8,7 +8,8 @@ DeepSets, MLP, JetFormer, the Linformer and JEDI-linear are trained on a 3 x 7 g
     - SO(2), SO(3) and Lorentz augmentation
     - SO(2), SO(3) and Lorentz symmetry loss
 
-Symmetry-embedded architectures are trained on the baseline only.
+Symmetry-embedded architectures are trained on the baseline only, and so are the two
+rows on the record's jet-level observables, at 150 constituents alone.
 The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 ``logs/optuna/hls4ml/<label>/`` for a feature set other than the four-momentum.
 """
@@ -46,7 +47,16 @@ MODELS = [
     "jedi_linear_moments",
     "moments_only",
 ]
+# The MLP on the record's jet-level observables, all 53 and the 52 without the jet rapidity:
+# rows of no architecture, outside MODELS, which tests/test_algorithms.py builds on constituents.
+JET_LEVEL = ["jet_level_all53", "jet_level_noeta52"]
 NCONSTITUENTS = [16, 50, 150]
+# The observables are computed from the whole jet, so their rows are labelled with the one
+# constituent count that never truncates it.
+NCONSTITUENTS_OF = {
+    model: [150] if model in JET_LEVEL else NCONSTITUENTS
+    for model in [*MODELS, *JET_LEVEL]
+}
 
 # (label, data.method, data.augmentation_scheme), in the order every catalogue,
 # log directory and results table uses.
@@ -82,13 +92,14 @@ EMBEDDED = {
     "jedi_linear_moments",
     "moments_only",
 }
-# The rows trained at baseline alone, which today are the embedded class. A row that reads
-# data.features but runs the baseline alone would join this set and not EMBEDDED, so that every
-# feature set still had catalogues for it.
-BASELINE_ONLY = set(EMBEDDED)
+# The rows trained at baseline alone, which today are the embedded class and the jet-level rows.
+# A row that reads data.features but runs the baseline alone would join this set and not
+# EMBEDDED, so that every feature set still had catalogues for it.
+BASELINE_ONLY = set(EMBEDDED) | set(JET_LEVEL)
 
 VARIANTS_OF = {
-    model: VARIANTS[:1] if model in BASELINE_ONLY else VARIANTS for model in MODELS
+    model: VARIANTS[:1] if model in BASELINE_ONLY else VARIANTS
+    for model in [*MODELS, *JET_LEVEL]
 }
 
 # The searches use one fold; five is what the results table callback needs to put a confidence
@@ -286,10 +297,16 @@ BASELINE_ONLY_NOTE = [
     "# Baseline only: this architecture embeds the symmetry rather than acquiring it,",
     "# so the augmentation and SCL regimes are not run on it.",
 ]
+JET_LEVEL_NOTE = [
+    "# Baseline only: the jet-level observables are computed upstream and never",
+    "# transformed, so the augmentation and SCL regimes have nothing to act on.",
+]
 
 
 def regime_note(model: str) -> list[str]:
     """Why a catalogue covers the baseline alone; nothing for the full grid."""
+    if model in JET_LEVEL:
+        return JET_LEVEL_NOTE
     return BASELINE_ONLY_NOTE if model in EMBEDDED else []
 
 
@@ -318,8 +335,8 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
     """The banner a catalogue opens with, naming the grid it covers and where it came
     from."""
     what = "TRAINING" if task == "train" else "EVALUATION"
-    nvariants = len(VARIANTS_OF[model])
-    grid = f"{len(NCONSTITUENTS)} x {nvariants} = {len(NCONSTITUENTS) * nvariants}"
+    ncounts, nvariants = len(NCONSTITUENTS_OF[model]), len(VARIANTS_OF[model])
+    grid = f"{ncounts} x {nvariants} = {ncounts * nvariants}"
     return [
         "#!/usr/bin/env bash",
         BANNER,
@@ -341,7 +358,7 @@ def render(model: str, task: str, dbs: Path, layout: Layout) -> str:
     """The full text of one catalogue."""
     make_block = train_block if task == "train" else eval_block
     out = file_header(model, task, layout)
-    for nconst in NCONSTITUENTS:
+    for nconst in NCONSTITUENTS_OF[model]:
         out += [BANNER, f"# {model}  nconst={nconst}", BANNER, ""]
         for variant in VARIANTS_OF[model]:
             study = study_name(model, nconst, variant[1], variant[2])
@@ -380,7 +397,7 @@ def _catalogue(
     """
     text = render(model, task, dbs, layout)
     found = count_commands(lib, text)
-    expected = len(NCONSTITUENTS) * len(VARIANTS_OF[model])
+    expected = len(NCONSTITUENTS_OF[model]) * len(VARIANTS_OF[model])
     if found != expected:
         sys.exit(
             f"error: {model} {task}: lib.sh parsed {found} commands, expected {expected}"
@@ -412,15 +429,16 @@ def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
 
 
 def models_of(layout: Layout) -> list[str]:
-    """The architectures a layout has catalogues for.
+    """The rows a layout has catalogues for.
 
-    Each embedded architecture pins its own columns through ``required_features``, the
+    Each embedded architecture pins its own columns through ``required_features``: the
     four-momentum for all but ``vn``, whose experiment configs set ``[pt, eta, phi]``,
-    and the three moment rows, whose experiment configs set ``[pt, etarel, phirel]``, so
-    only the default layout has catalogues for them.
+    and the three moment rows, whose experiment configs set ``[pt, etarel, phirel]``.
+    The jet-level rows read no constituent column at all. Only the default layout has
+    catalogues for either.
     """
     if layout.features is None:
-        return MODELS
+        return [*MODELS, *JET_LEVEL]
     return [model for model in MODELS if model not in EMBEDDED]
 
 

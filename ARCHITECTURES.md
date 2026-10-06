@@ -13,7 +13,10 @@ the seven regimes of the grid. A tenth architecture, the Linformer, joined on 20
 of its own, the ninth, and runs in one row, `linformer`, over the seven regimes. Three rows joined
 on 2026-10-05 in the DeepSets module, with no architecture or module of their own: DeepSets and
 JEDI-linear reading the jet moments of the vector neurons, `deepsets_moments` and
-`jedi_linear_moments`, and the control on the moments alone, `moments_only`. PELICAN, a plain
+`jedi_linear_moments`, and the control on the moments alone, `moments_only`. Two rows joined on
+2026-10-06 with no network of their own, in place of a standalone script of the day before: the
+MLP on the record's jet-level observables, `jet_level_all53` and `jet_level_noeta52`, a ceiling
+for the networks (see "Jet-level ceiling"). PELICAN, a plain
 Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the
 refactor; nano-PELICAN, which existed as configuration only, went with them, and so did the
 permutation check. The two four-momentum rows of the vector neurons went on 2026-10-03. This file
@@ -269,7 +272,7 @@ reads the N sorted lifts as its vector channels, one weight per rank, and as its
 rank, p_i and B(u_i, U), where U = Σ_i u_i is the lift of the jet, and for the jet, Σ_i p_i and
 B(U, U), together with the stream and the tensor invariants described below. From there on the
 state belongs to the jet, and every block runs once per jet. A block mixes the vector channels with
-`SplitLinear`, one bias-free weight matrix shared by the four components of the lift. It then reads
+`ChannelLinear`, one bias-free weight matrix shared by the four components of the lift. It then reads
 the forms B(L_k u, R_k u) of pairs of learned combinations of the mixed channels (16 by default)
 and the first component of every mixed channel, a weighted sum of p, and updates the scalars with a
 BatchNorm and a two-layer ReLU MLP of the previous scalars, those invariants and the context. Last,
@@ -893,6 +896,119 @@ calibrated on the test jets, since at its initial statistics the raw moments, ab
 would drown every other input of the head. `tests/test_configs.py` keeps the configs copies of
 their parents, the search spaces the parents' plus the moment set, and the experiments pinned to
 their columns with mixed precision and no `matmul_precision`.
+
+## Jet-level ceiling
+
+Added on 2026-10-06 in two rows, after a scratch run of 2026-10-05, to measure how much the
+constituent networks know beyond fixed substructure observables. Beside its constituents, every
+jet of the record carries 53 observables computed upstream from the whole jet, the `j_*` columns
+of its parquet shards: its p_T, rapidity, mass and multiplicity, N-subjettiness, energy correlation
+functions and groomed masses. `jet_level_all53` reads all of them and `jet_level_noeta52` all but
+the jet rapidity `j_eta`, which a row exact under the beam boost cannot see; it is the ceiling for
+those rows. `j_ptfrac` is 1 on every jet, so 52 and 51 of the columns carry information. The rows
+are the MLP of `src/algorithms/mlp.py` on one slot of observables per jet, with no network or
+module of their own. Around it sit `src/data/jet_level_datamodule.py`, `configs/data/jet_level.yaml`,
+`configs/algorithm/jet_level_{all53,noeta52}.yaml`, the experiment configs
+`configs/experiment/hls4ml/jet_level_{all53,noeta52}_150.yaml`, the search configs
+`configs/hparams_search/hls4ml/jet_level_{all53,noeta52}_optuna.yaml`, the hand-written search
+catalogues `scripts/hls4ml/runjet_level_{all53,noeta52}_search.sh` and the generated
+`scripts/hls4ml/runjet_level_{all53,noeta52}_{train,eval}.sh`.
+
+The scratch run fitted an MLP and gradient-boosted trees on the record's own split, over a grid of
+eight MLP points (widths [64, 32, 32] or [256, 128, 64], dropout 0 or 0.1, learning rate 1e-3 or
+3e-4, batches of 1024, up to 100 epochs with early stopping at a patience of 12) and six tree
+points, with three seeds at the selected MLP point. Its records are in
+`~/Research/local/claude/scratchpad/jet_tagging_gdl/ceiling_2026-10-05/` on the Mac. The selected
+MLP, widths [256, 128, 64] without dropout at a learning rate of 1e-3, reached a validation and
+test accuracy of 0.8319 ± 0.0002 and 0.8316 ± 0.0004 on all 53 observables and 0.8308 ± 0.0005 and
+0.8311 ± 0.0004 without `j_eta`, the ± being the sample deviation over the seeds. The trees landed
+0.0 to 0.5 points below; the 16 groomed observables of the original hls4ml tagger gave 0.774, and
+the mass, p_T, rapidity and multiplicity alone 0.786. Against the validation accuracy of the N = 150
+finals' main runs, only L-GATr-slim and PELICAN with the beams, 0.840 and 0.838, beat the 52
+observables, by 0.9 and 0.7 points; LLoCa's SO(2) × SO(1,1) row matched them and every FPGA-oriented
+row sat below. The inference, not a measurement, is that the constituent networks carry at most
+about one point of information beyond these observables on this data set. The rows re-measure the
+ceiling under the protocol of the networks: their search space, their trial budget, their folds and
+their test-time metrics.
+
+`JetLevelDataModule` reads the `j_*` columns and the `label` of the snapshot's
+`{train,validation,test}-*.parquet` shards with pyarrow, in sorted order, which is the order in
+which the record's loader reads its jets. It splits them as `HLS4MLDataModule` does: the record's
+own split at `n_folds` 1, otherwise fold `fold_idx` of the pooled training then validation jets
+through `fold_indices`, with the `kfold_seed` of `configs/data/hls4ml.yaml`, so that fold i of a
+jet-level row is fitted and validated on the jets of fold i of every network. Every split is
+standardised with the float64 mean and standard deviation of the record's own training split, a zero
+spread replaced by one: fixed constants, the same for every fold and at test time, as the record's
+loader normalises the constituents of every fold with constants fitted on its training split.
+Per-fold statistics would be wrong at evaluation, where `eval.py` tests the checkpoints of the five
+folds with one datamodule. The batches are `(x, y)` with `x` of shape (jets, 1, F) in float32 and
+`y` one-hot, served by `HLS4MLDataset` with its pre-batching, so that the base class and the
+callbacks see the usual contract: training and validation drop the trailing partial batch and the
+test split keeps every jet. The loaders run in the main process, since the splits sit in memory and
+nothing transforms them. The datamodule exposes `features` (every observable but those of
+`data.exclude`), `feature_names` (all 53, in the shards' order), `feature_indices()`,
+`norm_scales` (None) and `keep_full_features_at_test` (false); `JetTaggingModule.setup` then reads
+the batches unreduced. The constructor reads nothing, as `tests/test_configs.py` needs when it
+instantiates every experiment's data node, and refuses every regime but augmentation/none; the
+first access to the shards refuses an `exclude` that names no column. `configs/data/jet_level.yaml`
+pins the revision of `configs/data/hls4ml.yaml` and sets `nconstituents: 150`, the label of the rows:
+the observables come from the whole jet, which N = 150 never truncates, so the rows pair with the
+networks' N = 150 rows under `scripts/analysis/compare_to_baseline.py --baseline-model`. The data
+config has no `features` key, so `write_results_row` reads it with `get`.
+
+The algorithm configs are standalone copies of `mlp.yaml` that differ in `name`, in
+`nconstituents: 1`, the one slot, and in `nbr_feats`, 53 or 52, a number because the observables
+come from the shards at run time; `tests/test_configs.py` keeps the rest in step. The MLP network
+and its state-dict layout are those of the constituent MLP, whose finals' checkpoints still load.
+The experiments train the MLP's recipe (Adam, `ReduceLROnPlateau` at a patience of 80, early
+stopping at 100) for 200 epochs on batches of 2048 with five folds under the trainer's 16-mixed,
+set `results_table.subdir: jet_level` and `callbacks.invariance_metric.probe: false`, and
+`jet_level_noeta52_150` sets `data.exclude: [j_eta]`. Each search config is the MLP's space, its 200
+trials of 50 epochs and its sampler (TPE, seed 1234, 20 start-up trials), which
+`tests/test_configs.py` keeps equal, with the study `<row>_nconst150_augmentation_none` in
+`logs/optuna/hls4ml/<row>.db`: two studies, none launched yet (2026-10-06). The space's widest
+point, [256, 128, 64], is the one the scratch run selected. In
+`scripts/optuna/make_train_catalogues.py` and `tests/conftest.py` the rows form `JET_LEVEL`, inside
+`BASELINE_ONLY` and outside `MODELS`, which `tests/test_algorithms.py` builds on constituent
+batches; the generator gives them the constituent count 150 alone, a header note of their own and
+catalogues in the default layout alone, one block each, "transferred from experiment config (no
+study yet)".
+
+No group acts on the observables, so the invariance probe would report a perfect invariance that is
+never tested. Under `probe: false` `InvarianceMetricCallback` transforms nothing: it keeps the clean
+logits, recomputed in fp32 as for every row, and the labels, logs the 24 groupless
+`performance/*` keys of `clean_metrics` at the end of the test epoch, and under `eval.py` writes
+`outputs/<label>.npz` with `logits_clean` and `labels` alone. Every other row keeps the default,
+`probe: true`. The results row has the networks' header: every invariance cell holds NaN, through
+the missing keys, and `selected_inv_key` reads `invariance/mean_tv`. `PlottingCallback` reads the
+step's logits and the labels alone and draws its ROC curves and confusion matrices unchanged.
+
+The base class counts the FLOPs and eBOPs of the MLP alone, on its 53 or 52 inputs: they leave out
+the upstream computation of the observables (N-subjettiness, energy correlation functions,
+grooming), which an FPGA would have to carry too, so they understate what the tagger costs as a
+whole and compare with no network's. At the algorithm default, widths [128, 64, 32], the counts per
+jet are 34 368 and 34 112 FLOPs and 1.103 and 1.095 M eBOPs for `jet_level_all53` and
+`jet_level_noeta52` (olgpu, 2026-10-06); at the widest point of the space, [256, 128, 64], the layer
+widths give 109 696 and 109 184 FLOPs and 3.52 and 3.50 M eBOPs. A smoke training on the record took
+2.1 s per epoch on a V100 at batches of 2048, which puts a 50-epoch trial near 2 minutes, a study
+near 7 V100-hours and a 200-epoch process near 7 minutes; two epochs reached a test accuracy of
+0.814 and 0.813.
+
+`tests/test_jet_level.py` writes synthetic shards in the record's layout (a constituent list
+column, 53 `j_*` columns with a constant `j_ptfrac`, and `label`; two shards per split, each split
+at its own offset) and checks the column order and `exclude`, that every split and fold is the
+standardisation of its jets by the training split's constants, bit for bit, with the constant
+column centred to zero, that a fold holds the jets `fold_indices` selects from the pooled jets,
+the batch shapes and the one-hot labels, that the test split keeps its trailing jets, and the
+refusals. It trains `jet_level_noeta52` on the CPU, its main run and two folds, evaluates the three
+checkpoints with `eval.py` and checks the one row under `jet_level/`: the networks' header,
+`nconstituents` 150, NaN in every invariance cell, positive costs, and an `.npz` per checkpoint
+with the two keys. Under `slow` and with the record, it checks that the datamodule's labels of
+every split equal those of the loader's cache at N = 16 and that the shards' constituent lists,
+capped at 16, hold the cache's real-constituent counts, jet by jet. `tests/test_invariance.py`
+checks the probe-less mode against `clean_metrics`, `tests/test_configs.py` the copies, the search
+spaces, the shared revision and fold seed and the experiments, and
+`tests/test_make_train_catalogues.py` the catalogues.
 
 ## Vector neurons on the four-momentum
 

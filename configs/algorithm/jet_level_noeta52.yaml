@@ -1,0 +1,44 @@
+# The MLP of mlp.yaml on the record's jet-level observables less the jet rapidity j_eta, 52 of
+# them: the ceiling for the rows exact under the beam boost, which cannot see the rapidity. A copy
+# of mlp.yaml that differs in name, nconstituents and nbr_feats (tests/test_configs.py keeps the
+# rest in step), so that the search space and the training recipe are those of the constituent MLP.
+_target_: src.algorithms.mlp.MLPClassifier
+_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+name: jet_level_noeta52
+
+# One slot per jet, holding its observables; data.nconstituents (150) only labels the row.
+nconstituents: 1
+# A number: the datamodule takes the observables from the shards at run time, so no list exists in
+# the config to take the length of.
+nbr_feats: 52
+output_dim: 5
+
+# Interpolated from the data config, which refuses every regime but the baseline.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+transform_kwargs: ${data.transform_kwargs}
+
+hidden_layers: [128, 64, 32]
+activation: relu
+batchnorm: false
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 1.0e-3
+  weight_decay: 1.0e-7
+
+scheduler:
+  scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    mode: max
+    patience: 80
+    factor: 0.1
+    threshold: 1.0e-4
+  monitor: val/acc
+  interval: epoch
+  frequency: 1
+
+compile: false

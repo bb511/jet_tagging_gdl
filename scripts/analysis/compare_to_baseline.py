@@ -6,7 +6,7 @@ against is chosen here, when the tables are joined, rather than at evaluation ti
 on ``model`` and ``nconstituents``; a run row with no baseline row of that pair is reported and
 left out rather than dropped in silence. ``--baseline-model`` pairs every run row with that one
 model's row at the same constituent count instead, so that every architecture is measured against
-a single reference, such as the jet-level ceiling of ``scripts/jet_level/ceiling.py``.
+a single reference, such as the jet-level ceiling ``jet_level_noeta52``.
 
 The per-fold difference is the unit. ``kfold_seed`` fixes the splits and the test split itself
 never moves, so fold i of two regimes is fitted on the same jets and scored on the same jets, and

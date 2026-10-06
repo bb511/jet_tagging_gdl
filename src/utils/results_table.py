@@ -191,7 +191,8 @@ def write_results_row(cfg: DictConfig, folds: list[dict[str, object]]) -> None:
         model_name=cfg.algorithm.name,
         augmentation_scheme=cfg.data.augmentation_scheme,
         nconstituents=cfg.data.nconstituents,
-        features=cfg.data.features,
+        # The jet-level datamodule takes its columns from the shards and has no such key.
+        features=cfg.data.get("features"),
         subdir=cfg.results_table.subdir,
         invariance_metric=cfg.results_table.invariance_metric,
     ).write(folds)
