@@ -14,6 +14,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+import jax
 import numpy as np
 import torch
 
@@ -77,6 +78,21 @@ def _outputs_label(callbacks: list) -> str | None:
     return probes[0].subdir if probes else None
 
 
+def _require_cpu_jax() -> None:
+    """Refuse to evaluate unless JAX runs on the CPU.
+
+    :raises ValueError: on any other backend, where XLA's float64 2**f is off by an ulp
+        for some f, so that the port would round some jets otherwise than alkaid.
+    """
+    backend = jax.default_backend()
+    if backend != "cpu":
+        raise ValueError(
+            f"JAX runs on {backend!r}, where XLA's float64 2**f is inexact, so the "
+            "exported port and its stored logits would not match alkaid bit for bit. "
+            "Evaluate vn_hgq with algorithm.jax_platform=cpu."
+        )
+
+
 class VectorNeuronsHGQ(VectorNeurons):
     """The vector neurons trained quantisation-aware with HGQ2, for synthesis by alkaid.
 
@@ -89,7 +105,10 @@ class VectorNeuronsHGQ(VectorNeurons):
 
     At test time the integer bits of every wrapping quantiser are traced on the record's
     whole training split; the test, the probe and the export all read the traced port,
-    and ``ebops_total`` holds its EBOPs, NaN until then.
+    and ``ebops_total`` holds its EBOPs, NaN until then. Testing runs with JAX on the
+    CPU alone, where the float64 port computes the fixed-point values of the hardware
+    exactly; on a GPU, XLA's float64 2**f is off by an ulp for some f, so the stored
+    logits would not be bit-exact against alkaid.
     """
 
     def build_net(
@@ -151,7 +170,10 @@ class VectorNeuronsHGQ(VectorNeurons):
 
     def _keras_inputs(self, x: torch.Tensor) -> np.ndarray:
         """The prepared rows of a batch or a whole split, in Keras's float type."""
-        chunks = (self._network_inputs(c.to(self.device)) for c in x.split(CHUNK))
+        # The buffers' device: during setup() Lightning already reports the
+        # accelerator as self.device, before it moves the module there.
+        device = self.denorm_scales.device
+        chunks = (self._network_inputs(c.to(device)) for c in x.split(CHUNK))
         rows = np.concatenate([chunk.cpu().numpy() for chunk in chunks])
         return rows.astype(self.net.keras_model.inputs[0].dtype)
 
@@ -272,7 +294,10 @@ class VectorNeuronsHGQ(VectorNeurons):
 
         The callbacks' hooks run first and read the feature layout alone, so every test
         batch, the probe's included, meets the traced port.
+
+        :raises ValueError: when JAX does not run on the CPU.
         """
+        _require_cpu_jax()
         start = time.perf_counter()
         jets, _ = self.trainer.datamodule.load_split("train")
         ebops = calibrate(self.net.keras_model, self._keras_inputs(jets))

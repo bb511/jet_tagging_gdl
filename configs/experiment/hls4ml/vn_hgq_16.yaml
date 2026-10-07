@@ -1,7 +1,7 @@
 # @package _global_
 # The vector neurons trained quantisation-aware with HGQ2 at 16 constituents, in the architecture of
-# the float vn finals, whose main run algorithm.init_from names; one constant beta per run, and the
-# last epoch is the model. Symmetry-embedded, so it runs the baseline regime only.
+# the float vn whose main run algorithm.init_from names; one constant beta per run, and the last
+# epoch is the model. Symmetry-embedded, so it runs the baseline regime only.
 defaults:
   - override /data: hls4ml
   - override /algorithm: vn_hgq
@@ -24,8 +24,10 @@ data:
   num_workers: 0
   pin_memory: false
 
+# The study's best at N = 16 with one block in place of two, which comes within 0.1 points of the
+# two-block best at about half the depth and cost; the paper shows the one-block scan alone.
 algorithm:
-  num_blocks: 2
+  num_blocks: 1
   vector_channels: 16
   scalar_channels: 32
   invariants: 8

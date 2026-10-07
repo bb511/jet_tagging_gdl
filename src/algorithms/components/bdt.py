@@ -1,10 +1,4 @@
-"""Gradient-boosted trees behind the interface of a network.
-
-One scikit-learn ``HistGradientBoostingClassifier`` is grown by warm starts, a fixed
-number of boosting iterations per call, each iteration one tree per class. The estimator
-holds no tensor, so it travels in the state dict as pickled bytes, which Lightning's
-checkpoints carry and ``src/eval.py`` loads with ``weights_only=False``.
-"""
+"""Gradient-boosted trees behind the interface of a network."""
 
 import pickle
 
@@ -13,8 +7,7 @@ import torch
 from sklearn.ensemble import HistGradientBoostingClassifier
 from torch import nn
 
-# The class probabilities are floored before the logarithm, so that a class the trees
-# rule out keeps a finite log-probability.
+# The class probabilities are floored before the logarithm.
 PROBABILITY_FLOOR = 1e-7
 
 
@@ -28,8 +21,7 @@ def _classifier(
 ) -> HistGradientBoostingClassifier:
     """An unfitted estimator that each fit extends by its new ``max_iter``.
 
-    Early stopping is off, so that no fit holds a split of the jets back and every fit
-    ends at exactly ``max_iter`` iterations.
+    Early stopping is off. Every fit ends at exactly ``max_iter`` iterations.
     """
     return HistGradientBoostingClassifier(
         max_iter=0,

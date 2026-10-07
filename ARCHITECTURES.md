@@ -19,6 +19,9 @@ MLP on the record's jet-level observables, `jet_level_all53` and `jet_level_noet
 for the networks (see "Jet-level ceiling"). Two more joined that ceiling on 2026-10-07,
 gradient-boosted trees on the same observables, `jet_level_bdt_all53` and `jet_level_bdt_noeta52`,
 in a module of their own, `src/algorithms/bdt.py`, which wraps scikit-learn rather than a network.
+A quantised twin of the vector neurons, `vn_hgq`, joined the same day in modules of its own, which
+train the `vn` network quantisation-aware with HGQ2 on Keras for synthesis with alkaid (see "Vector
+neurons trained quantisation-aware").
 PELICAN, a plain
 Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the
 refactor; nano-PELICAN, which existed as configuration only, went with them, and so did the
@@ -432,6 +435,294 @@ network against a nine-slot copy), that the batch is de-normalised, that removin
 moves the logits through the multiplicity, that every gate starts at 1/2 and that the logits are
 finite on the FLOP counter's input. `tests/test_configs.py` checks that the experiments set
 `data.features` to `required_features` and leave `extras.matmul_precision` unset.
+
+## Vector neurons trained quantisation-aware (`vn_hgq`)
+
+Added on 2026-10-07 in one row, `vn_hgq`, on a plan agreed with Patrick on 2026-10-06 and
+2026-10-07 (`~/.claude/plans/the-vector-neuron-networks-drifting-meadow.md` on the Mac). The row
+measures what the `vn` network costs in a Level-1 trigger: its latency and resources on the VU13P
+(`xcvu13p-flga2577-2-e`) at a clock of 5 ns, the part and clock of Odagiu et al. 2024
+(arXiv:2402.01876). The network is trained quantisation-aware with HGQ2 and compiled to Verilog by
+alkaid, the successor of da4ml, whose flow JEDI-linear (arXiv:2508.15468) used for its published
+designs. The two alternatives, read on 2026-10-05, do not fit the port. hls4ml 1.3 has no handler
+for HGQ2's `QSum`, confines the two-input Einsum to the Latency strategy and maps a hard sigmoid to
+a slope of 0.2, where Keras 3 and torch use 1/6 (read in its source, not tried). TriggerFlow 0.3.11
+supports the uGT alone and pins Keras 3.11, below the 3.15 that hgq2 0.2.0 needs. Our code is the
+port `src/algorithms/components/vector_neurons_hgq.py`, which sets Keras's backend to JAX before
+it imports Keras and which the subclass therefore imports first, the weight copy
+`src/algorithms/components/vector_neurons_port.py` and the `VectorNeurons` subclass
+`VectorNeuronsHGQ` in `src/algorithms/vector_neurons_hgq.py`. Around them sit
+`configs/algorithm/vn_hgq.yaml`, a standalone copy of `vn.yaml` that `tests/test_configs.py` keeps
+equal to it up to `units`, the optimiser, the scheduler and the keys of the port and its training,
+`configs/callbacks/quantised.yaml`, the experiment configs
+`configs/experiment/hls4ml/vn_hgq_{16,50,150}.yaml`, the hand-written catalogues
+`scripts/hls4ml/runvn_hgq_{train,eval}.sh`, `scripts/synthesis/synthesise_vn.py` with its
+`requirements.txt`, and `scripts/analysis/compare_outputs.py`. The dependencies form the optional
+Poetry group `hgq`, installed with `poetry install --no-root --with hgq` and absent from the NGT
+image: Keras 3.15, hgq2 0.2.0, alkaid 0.8.1, JAX 0.10.2 with its CUDA 12 plugin, and nvcc 12.6.85,
+pinned so that ptxas matches torch's CUDA runtime. In `scripts/optuna/make_train_catalogues.py` and
+`tests/conftest.py` the row forms `QUANTISED`, outside `MODELS`: it has no study, and no catalogue
+of it is generated.
+
+Lightning keeps the loop, the data, validation, testing and the invariance probe; Keras 3.15 on
+JAX owns the network, its optimiser and its training step. Patrick ruled out Keras's torch
+backend. `net` is a `KerasNetwork`, an `nn.Module` without torch parameters whose `forward` hands
+the prepared batch to Keras's `predict_on_batch` and returns the logits as a torch tensor, so that
+`model_step`, validation, the test, the probe, `eval.py` and `write_results_row` run unchanged.
+Only training is overridden. Under manual optimisation each batch is one call of Keras's
+`train_on_batch`, which in Keras 3.15.1 is the jitted step of `fit`, the layers' EBOPs losses
+included (read in `keras/src/backend/jax/trainer.py`). The optimiser is Keras's AdamW, with a
+weight decay of 0.05 that spares the quantisers' variables, `global_clipnorm` 1 and a cosine decay
+from 1e-3 to 1e-5 stepped per batch. `configure_optimizers` compiles it into the model and returns
+None, so Lightning puts its mock optimiser in place of a torch one, and `training_step` calls that
+optimiser's `step` once per batch: the step does nothing but advance `global_step`, without which
+`ModelCheckpoint` never saves. The experiments therefore run at `precision: 32`, since 16-mixed
+would pass the step through a gradient scaler with no gradient to check, and at
+`gradient_clip_val: null`, which manual optimisation requires. The Keras weights are stored in the
+Lightning checkpoint (`on_save_checkpoint`, and `on_load_checkpoint`, which casts them to the
+port's float type); the Keras optimiser state is not, so a run cannot resume mid-way. β, the
+weight of the EBOPs in the loss, is assigned to every quantised layer at the start of each epoch,
+as HGQ2's `BetaScheduler` does, constant or from HGQ2's `PieceWiseSchedule` over `beta_schedule`.
+The epoch means of `train/loss` (the cross entropy), `train/acc` (Keras's micro accuracy, not the
+macro accuracy of the other rows) and `train/loss_total` (with the EBOPs and bit penalties) are
+logged, and per epoch `train/ebops`, `train/beta` and `train/lr`. `setup()` refuses the SCL, which
+the Keras step does not compute. Three edits to shared code serve the row and change nothing for
+the others: `JetTaggingModule.__init__` prices a model through the hook `_record_costs`, `forward`
+reads a batch through `_network_inputs` (the cast, the width guard and `_prepare_inputs`), and
+`HLS4MLDataModule.load_split` returns one split of the record at full width, rebased as `setup()`
+rebases it.
+
+The port starts at the rows [p_T in GeV, Δη, Δφ] of the constituents sorted by decreasing p_T,
+the angles measured from the leading constituent and zero on a padded row, which `_prepare_inputs`
+computes in torch. The sort, the leader subtraction and the wrap of φ are integer pre-processing of
+the trigger words, outside the synthesised block, so the latencies and costs below leave them out.
+`_prepare_inputs` also clamps each column to the range of its word, because the words wrap: alkaid
+0.8.1 traces no input quantiser but a WRAP one. Vectors are stored as (jets, 4, channels),
+components first, so that every channel mixing is a dense layer on the last axis. In the order of
+`VectorNeuronsClassifier.forward`:
+
+| stage                    | layers                                                        | quantisers                    |
+| ------------------------ | ------------------------------------------------------------- | ----------------------------- |
+| words                    | `Quantizer` `pt_word` and `angle_word`                        | fixed kif, WRAP               |
+| p, keep, count n         | p_T / 16, min(4 p_T, 1), `QSum` `count`                       | exact; n one fixed bit        |
+| lifts, jet, rank forms   | `QEinsum`, `QSum`                                             | datalanes                     |
+| stream                   | `QBatchNormalization`, `QDense`, `QMultiply`, `QSum`, `QAdd`  | datalanes, weights            |
+| tensor invariants        | `QEinsum`, bias-free `QEinsumDense`                           | datalanes, weights            |
+| channel mixing           | `QEinsumDense` (first block), bias-free `QDense` (later ones) | datalanes, weights            |
+| forms                    | two bias-free `QDense`, `QEinsum`                             | datalanes, weights            |
+| scalar update, residuals | `QBatchNormalization`, two `QDense`, `QAdd`                   | datalanes, weights            |
+| gates                    | `QDense`, `Quantizer` of `HardSigmoidConfig`, `QEinsum`       | gate fixed at 8 fraction bits |
+| head                     | `QBatchNormalization`, `QDense` layers, `head_last`           | logits fixed kif (1, 6, 8)    |
+
+The p_T word is the trigger's `pt_t` (CMSSW `DataFormats/L1TParticleFlow/interface/datatypes.h`),
+`ap_ufixed<14,12>` or kif (0, 12, 2): [0, 4096) GeV at an LSB of 0.25 GeV. The angle words, kif
+(1, 1, 8), hold [−2, 2) rad at 2⁻⁸ rad in 10 bits, the width of the trigger's local angles, whose
+LSB of π/720 they approximate with a power of two. The dry run of 2026-10-07 found p_T up to
+1634 GeV and |Δη| and |Δφ| up to 1.77 and 0.83 on the record. The word rounds to nearest, so a
+constituent below 0.125 GeV becomes a zero word and is read as padding. p is counted in units of
+16 GeV, a power of two, so that it is an exact shift of the word, and the multiplicity enters as
+the count n rather than n/N; the copy folds the float row's 20 GeV and the 1/N into the batch
+normalisations. The metric G is a slice, a factor −2 and a concatenation, (x₃, −2 x₁, −2 x₂, x₀),
+exact in Keras and in alkaid. The keep flag is min(4 p_T, 1), exact because a real p_T is a
+multiple of the LSB; the float network's flag is a cast of p ≠ 0, and alkaid has no handler for a
+cast of a boolean. The gate is HGQ2's `HardSigmoidConfig` quantiser applied to (2/3) z. It returns
+q/4 + 1/2, q being the rounded input saturated on [−2, 2), which equals torch's relu6(z + 3)/6 to
+within 2^−(f+2) for the gate's f = 8 fraction bits and costs a clamp, a shift and an add; Keras's
+`hard_sigmoid` would become a lookup table in alkaid. The gates start at exactly 1/2, as in torch.
+Each batch normalisation is a `QBatchNormalization` followed by a `QDense`, built with torch's
+epsilon 1e-5 and momentum 0.9 (torch's 0.1), and alkaid replays it as one quantised scale and
+offset per channel; the fused layers do not reproduce torch (see the caveats below). A dropout
+layer, absent at the configs' rate of 0, would be replayed by alkaid as the identity.
+
+`copy_float_weights` copies a trained `vn` into the port, which in eval mode and in `float_mode`
+(every quantiser but the gate's clamp the identity) then reproduces its logits. Every channel
+mixing takes the transposed weight, the stacked rank weights of the tensor invariants, (3, K, N),
+become an (N, 3K) kernel, and the gate's weight and bias are scaled by 2/3. A batch normalisation
+that reads a channel scaled by s keeps its output if its running mean becomes s·mean and its
+running variance s²(var + 1e-5) − 1e-5, where s is λ^d for a channel of degree d in p, λ = 20/16
+being the ratio of the units, and N for the count; `_first_segments`, `_read_segments` and
+`_copy_stream` list the degrees. The first block's normalisation and the kernel rows of the first
+layer of its MLP are de-interleaved, because torch's `r.flatten(1)` reads p₁, f₁, p₂, f₂, …, where
+the port reads the N values of p before the N forms f. `algorithm.init_from` names the float run, as
+a run directory, its manifest or a `.ckpt`, and `setup("fit")` raises unless its architecture keys
+equal the port's, `units` aside. On the main checkpoint of the two-block `vn` finals at N = 16, the
+float-mode port reproduced the torch logits to 3.6e-8 relative (dry run on olgpu, 2026-10-07).
+
+Every input of a product, a sum or an affine map is a datalane: an HGQ2 kif quantiser with WRAP
+overflow and rounding to nearest, per element, whose fraction bits are trained and whose integer
+bits are traced. Kernels and batch-normalisation scales are kbi quantisers with SAT_SYM overflow,
+and biases and offsets kbi quantisers with WRAP; the words, the keep bit, the count, the gates and
+the logits are fixed. The model is built inside `LayerConfigScope(beta0=0.0, enable_ebops=True)`.
+Before training, `setup("fit")` copies the float network, then `seed_weight_bits` gives every
+weight quantiser `weight_bits` bits and the integer bits its copied value needs, so that no weight
+saturates, and `seed_datalane_bits` gives every datalane i + f = `data_bits`, with i traced by
+HGQ2's `trace_minmax` on the first `calibration_jets` (100 000) training jets. It traces twice: the
+first trace reads each lane through upstream lanes still at HGQ2's default of six fraction bits,
+and a lane whose range the second trace widens would otherwise wrap. The defaults, 14 data and 8
+weight bits, come from a table of seeded widths on the two-block finals at N = 16 (dry run,
+2026-10-07): 14 and 8 bits cost 0.10 points of validation accuracy at 2.85 M EBOPs, 12 and 10
+bits, the plan's first choice, 0.87 points at 2.99 M, and 8 data bits collapsed the network. The
+largest traced integer width was 10 bits. The float logits reached 15.1 in magnitude, so the output
+word, kif (1, 6, 8) with saturation, keeps two integer bits spare.
+
+At test time `on_test_start` traces the integer bits of every WRAP quantiser afresh on the record's
+whole training split, the range the hardware is built for, and stores the EBOPs of the traced port
+as `ebops_total`, NaN until then. The split comes from `load_split("train")`, because
+`trainer.test` runs `setup("test")` alone and `setup("fit")` would serve fold 1 of the pooled
+splits; at N = 16 the trace took 106 s for its 496 k jets. The callbacks' hooks run first and read
+the feature layout alone, so every test batch, the probe's included, meets the traced port. The
+FLOPs are counted on the float network of the same architecture (`_record_costs`), so `flops_mean`
+equals that of `vn`, while `ebops_mean` holds HGQ2's EBOPs of the traced port at its trained widths,
+not the uniform 8-bit count of every other row. The rows therefore go to `results/quantised/`
+(`results_table.subdir`), beside the float reference, whose `ebops_mean` is the 8-bit count. In
+the dry run on the two-block port, 31 clean test jets left a range traced on the training split,
+against 11 to 15 thousand jets under the probe's `so3` and `lorentz_iso` transforms; their lanes
+wrap, and the flip rates of those groups measure the wrapped port.
+
+The evaluation runs Keras in float64 (`floatx`, the default, which the eval catalogue repeats) with
+JAX on the CPU, which `on_test_start` enforces. In float64 every value of the port is the
+fixed-point value of the hardware, so the probe's `logits_clean` are the bit-exact reference of
+the design; in float32 the products of quantised values exceed the 24-bit mantissa. Two numerical
+faults stood in the way, both found in the dry run: Keras 3.15 computes floor and ceil in float32
+on JAX, which the component patches for float64 tensors at import, and XLA's float64 `2**f` on the
+V100 is off by one ulp for some f, which no patch reaches and which made about 2 % of the jets
+round otherwise than alkaid. Under `eval.py` the module also writes `outputs/<label>_hgq/` beside
+the probe's `outputs/<label>.npz`: `model.keras`, the traced port; `inputs.npz`, whose
+`inputs_clean` holds the (jets, N, 3) words in the probe's jet order, exact in float32; and
+`export.json`, the run behind the export (row, N, β, EBOPs, units, quantisation, float type, test
+count, checkpoint, test accuracy and versions).
+
+The protocol fine-tunes a float reference at one constant β per run and takes the last epoch as
+the model. The reference is a one-block `vn` main run (`fold=null`) at the settings of the N = 16
+study's best (16 vector and 32 scalar channels, 8 forms, 4 tensor invariants of each kind, a stream
+of 8, head [64, 32], learning rate 4.99e-3, weight decay 0.05), trained by block 1 of
+`runvn_hgq_train.sh` into `logs/train/hls4ml/vn/nconst16/baseline_1block`, which
+`algorithm.init_from` of blocks 2 to 5 names. One block replaced the two of the finals on
+2026-10-07, when Patrick decided that the paper shows the one-block scan alone: it comes within
+0.1 points of the two-block best at about half the depth and cost. Blocks 2 to 5 run β ∈ {1e-8,
+3e-8, 1e-7, 3e-7} for 100 epochs on batches of 2048 under `callbacks=quantised`, whose
+`ModelCheckpoint` has `monitor: null` and `save_top_k: 1`, so that each epoch's file replaces the
+last and the manifest points at the last epoch; nothing stops a run early, and no
+`LearningRateMonitor` runs, since it reads a torch optimiser. The grid was fixed on the seeded
+two-block finals, where β·E₀ over the initial cross entropy (E₀ = 2.85 M EBOPs, cross entropy
+0.761) ran from 0.037 to 1.1; 1e-6 was dropped. The four β blocks share the label
+`vn_hgq_nconst16_baseline`, so `--only` selects them by index. The first epoch, at a learning rate
+of 1e-3, takes the copied solution from 0.72 to 0.66 in accuracy before it recovers; a lower rate
+for the fine-tuning is untried. `val/acc` during training does not measure the model: validation
+runs in eval mode on the integer bits that training re-traced on its last batch, so some
+validation jets wrap, and in the scan `val/acc` swung between 0.45 and 0.71 while `train/acc`
+stayed at 0.723. The `val_acc_best` of these runs' manifests is therefore meaningless, and the
+calibrated evaluation is the measure. The experiment configs at N = 50 and 150 carry the
+three-block architectures of the float finals; nothing has been trained at those counts.
+
+`scripts/synthesis/synthesise_vn.py` takes the `outputs/<label>_hgq/` directory and the probe's
+`.npz` of one evaluation. It imports nothing from `src` and runs wherever
+`scripts/synthesis/requirements.txt` is installed (alkaid 0.8.1, hgq2 0.2.0, Keras 3.15.1 and JAX
+0.10.2 on the CPU, on Python 3.11 or later). It loads the model with Keras on JAX's CPU backend at
+the export's float type, refusing any other backend and applying the same floor patch, and checks
+Keras's prediction of the stored words against `logits_clean`. alkaid then traces the model into
+combinational logic, as `alkaid convert` does, and emulates it bit for bit; both predictions are
+written to `keras_outputs.npz` and `alkaid_outputs.npz` in the probe's layout, and the emulation
+must match `logits_clean` exactly (`--max-mismatch` 0). alkaid's `RTLModel` writes the Verilog
+project `prj/` for the VU13P at 5 ns, with a latency cutoff of 5 ns per stage. Verilator
+co-simulates 1000 jets, which must match the emulation exactly, and Vivado implements the project
+out of context through alkaid's `build_vivado_prj.tcl`, with its reports under
+`prj/output_vn_hgq/reports/`. `alkaid report` then reads the project, and `check.json` and the
+report make one row of `synthesis.csv`: latency, resources, WNS, Fmax, alkaid's cost and register
+bits, the accuracies, the mismatch counts and the versions, the Vivado columns NaN until Vivado has
+run. `--no-cosim` and `--no-vivado` skip either step. A synthesis pod with Vivado alone takes the
+split mode: olgpu writes `prj/` with `--no-vivado`, the pod runs Vivado in `prj/`, and
+`--report-only` on olgpu parses the returned reports into the row.
+
+`scripts/analysis/compare_outputs.py` compares two outputs files of the same jets figure by figure:
+the accuracy, the AUC and the three working points of `src.symmetry.WORKING_POINTS`, each read at
+thresholds set on its own scores. Its verdict passes when every macro working point lies within a
+two-sided relative tolerance of 1 %, and per class it reports, without judging, the largest
+vertical gap between the two ROC curves at an FPR of 1e-3 or more. It reads an evaluation's `.npz`
+and the synthesis script's two files alike. Patrick decided on 2026-10-07 that its tolerance
+applies between the HGQ2 model of a run and the alkaid design; the float network enters the paper
+as the comparison of accuracy against cost.
+
+The scan ran at N = 16 on olgpu on 2026-10-07, in the clone's `logs/`, and its chain left the
+projects, `synthesis.csv` and the fidelity table in
+`/data/deodagiu/claude/jet_tagging_gdl/hgq_scan/`. The float reference reached a `val/acc_best` of
+0.7214, and the seeded port started at 1 985 251 EBOPs. On the full test split, with the macro
+figures of the probe (the rejection 1/ε_B at ε_S = 30 % and the TPR at FPR = 1 % and 10 %) and
+alkaid's latency at 5 ns:
+
+| run             | test acc | AUC    | rejection | TPR 1 % | TPR 10 % | EBOPs   | latency     | alkaid cost | register bits |
+| --------------- | -------- | ------ | --------- | ------- | -------- | ------- | ----------- | ----------- | ------------- |
+| float reference | 0.7195   | 0.9235 | 272.4     | 0.3777  | 0.7778   |         |             |             |               |
+| β = 1e-8        | 0.7191   | 0.9233 | 271.4     | 0.3766  | 0.7771   | 840 850 | 34 (170 ns) | 321 501     | 232 951       |
+| β = 3e-8        | 0.7193   | 0.9232 | 271.7     | 0.3760  | 0.7768   | 602 569 | 32 (160 ns) | 262 025     | 180 790       |
+| β = 1e-7        | 0.7181   | 0.9229 | 266.8     | 0.3750  | 0.7754   | 374 093 | 29 (145 ns) | 195 432     | 126 604       |
+| β = 3e-7        | 0.7158   | 0.9218 | 255.3     | 0.3686  | 0.7730   | 225 163 | 27 (135 ns) | 139 931     | 89 860        |
+
+Every design was bit-exact: Keras and alkaid differed from `logits_clean` on no logit, the
+Verilator co-simulation matched, and `compare_outputs.py` passed every working point with a ROC gap
+of 0. Every design accepts a jet per clock (an initiation interval of 1). Against the reference, β
+of 1e-8 and 3e-8 keep the three macro working points within 0.5 % (relative), while 1e-7 loses
+2.1 % of the rejection and 3e-7 loses 6.3 %, with 2.4 % of the TPR at 1 %. The untrained two-block
+port at the seeded 12 and 10 bits had taken 60 cycles (300 ns) and a cost of 803 317 in the dry
+run. Vivado has not yet run, so no LUT, FF or timing figure exists: alkaid's cost is its own
+estimate, and the latencies assume that the 5 ns clock is met. At N = 16 the comparators are
+JEDI-linear, 136 k LUT at 75 ns and 73.6 % (on the untruncated jet's axis, see "JEDI-linear"), and
+the DeepSets of Odagiu et al. 2024, 747 k LUT and 555 DSPs at 115 ns.
+
+`tests/test_vector_neurons_hgq.py` checks the port: that in float mode it reproduces the torch
+network in float64 to 1e-6 relative (eight slots, some padded, two blocks, random gates and running
+statistics), that the fold leaves an eval batch normalisation unchanged, that the first block's
+scalars follow torch's flattening and units, that the gate is torch's hard sigmoid within 2⁻¹⁰ and
+exactly 1/2 at zero, that floor and ceil keep float64 and the p_T word rounds a near tie as integer
+arithmetic does, that keep is 1 on a real word and 0 on padding (0.12 GeV is padding), that seeding
+sets the trainable widths and leaves the fixed quantisers alone, that the quantised port trains two
+steps, traces and survives a `.keras` round trip, and, with alkaid installed, that alkaid
+reproduces it bit for bit. `tests/test_vn_hgq_module.py` runs the module on the CPU on a stub
+datamodule: training steps Keras per batch, advances `global_step` and checkpoints the last epoch
+with the Keras weights; a checkpoint restores them in the port's float type; β reaches every
+quantised layer, constant or scheduled; the evaluation traces the training split and exports a
+model whose prediction of the stored words equals `logits_clean`; JAX off the CPU is refused at
+test time; a GPU run keeps the CPU backend; the float twin prices the FLOPs while the EBOPs wait for
+the trace; and `init_from` copies a float run of the same architecture alone.
+`tests/test_synthesise_vn.py` loads the script by path and checks the CSV row with and without
+Vivado, its header, the macro accuracy against torchmetrics, a tiny export end to end through
+`--no-cosim --no-vivado` and `--report-only` (bit-exact, both prediction files written), the
+co-simulation where Verilator exists, the refusal of JAX off the CPU and the floor patch.
+`tests/test_compare_outputs.py` checks that an identical candidate passes with no difference, that
+shuffling the logits of one class fails its working points, that noise within the tolerance passes
+and beyond it fails, the macro accuracy against torchmetrics, the ROC gap against the step
+functions, the CSV rows, the refusals of a bad floor, a foreign header and other labels, and the
+figure. `tests/test_configs.py` checks the experiments (fp32, no clipping, the unranked checkpoint,
+no early stopping, `num_workers` 0, the features, JAX following the trainer) and `vn_hgq.yaml`
+against `vn.yaml`, `tests/test_make_train_catalogues.py` that `QUANTISED` agrees in both modules
+and that no layout generates its catalogues, and `tests/test_datamodule.py` that
+`load_split("train")` at `n_folds` 1 is the training split at full width. Every module that imports
+Keras sets `KERAS_BACKEND=jax` and `JAX_PLATFORMS=cpu` first and skips without `hgq` (or
+`alkaid`), so `make test` passes without the group.
+
+The port was shaped by the following behaviours of hgq2 0.2.0, alkaid 0.8.1, Keras 3.15.1 and
+JAX 0.10.2, each read in their sources or met on olgpu. `QBatchNormDense` trains with the offset
+−mean·kernel, without the scale and the shift of the normalisation, and `QEinsumDenseBatchnorm`
+normalises its output with Keras's global `epsilon()` in place of torch's 1e-5, so neither fused
+layer reproduces a torch BatchNorm followed by a Linear. alkaid's `mirror_quantizer` drops the
+`scaler` of a `Quantizer`, which Keras multiplies back, so no quantiser carries one. alkaid maps
+Keras's `hard_sigmoid` to a full-width lookup table, hence the gate's `HardSigmoidConfig`, and
+traces WRAP input quantisers alone, hence the clamp in torch. Keras 3.15 casts a float64 tensor to
+float32 in floor and ceil on JAX, so HGQ2's rounding floor(x 2^f + 1/2) misrounded values within
+float32 resolution of a tie: 39 of 12 288 test jets of the dry run disagreed with alkaid until the
+component replaced both for float64 tensors at import (`_float64_kept`, copied into the synthesis
+script). XLA's float64 `2**f` on the V100 is off by one ulp for some f, which only running the
+evaluation on the CPU avoids. `trace_minmax` stages its data on `cpu:0`, so a GPU run keeps JAX's
+CPU backend beside CUDA, and it recompiles for every batch shape, about 35 s at its first call.
+Keras marks the product of a tensor and a Python scalar as sparse, which the float32 build fails to
+trace, so p is p_T divided by the units. alkaid has no handler for a cast of a boolean,
+`keras.ops.relu` or `Stack`, and drops a batch axis of size 1 in `Reshape` and `Flatten`; the port
+uses none of them. On olgpu `~/.keras/keras.json` selects tensorflow, so `KERAS_BACKEND` must be
+`jax` before Keras is first imported: the component sets it by default and raises if Keras came up
+on another backend. Verilator 5.052 from conda-forge (alkaid warns of miscompiled RTL below 5.048)
+sits in a scratch environment on olgpu,
+`/data/deodagiu/claude/jet_tagging_gdl/hgq_impl/verilator_env`,
+and needs `CXX=x86_64-conda-linux-gnu-c++` there.
 
 ## JEDI-linear
 

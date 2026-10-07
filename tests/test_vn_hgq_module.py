@@ -20,10 +20,12 @@ from torch.utils.data import DataLoader
 
 pytest.importorskip("hgq")
 
+import jax
 import keras
 from hgq.layers.core import QLayerBase
 
 from src.algorithms import JetTaggingModule
+from src.algorithms.components.vector_neurons_hgq import _PLATFORMS
 from src.algorithms.vector_neurons_hgq import VectorNeuronsHGQ
 from src.callbacks.invariance import InvarianceMetricCallback
 from src.data.components.dataset import HLS4MLDataset
@@ -278,6 +280,22 @@ def test_evaluation_traces_the_training_split_and_exports_the_reference(
     assert (meta["row"], meta["nconstituents"]) == ("vn_hgq", N_SLOTS)
     assert (meta["n_test"], meta["floatx"]) == (SIZES["test"], "float64")
     assert meta["ckpt_path"] == ckpt_path
+
+
+def test_evaluation_refuses_jax_off_the_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    # On a GPU, XLA's float64 2**f is off by an ulp for some f, so the stored logits
+    # would not be bit-exact against alkaid.
+    port = _port()
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+
+    with pytest.raises(ValueError, match="algorithm.jax_platform=cpu"):
+        port.on_test_start()
+
+
+def test_a_gpu_run_keeps_the_cpu_backend_beside_cuda() -> None:
+    # HGQ2's trace_minmax stages its data on cpu:0. configure_jax itself is not run
+    # here: the backend has started, after which it leaves the platforms alone.
+    assert _PLATFORMS == {"gpu": "cuda,cpu", "cuda": "cuda,cpu", "cpu": "cpu"}
 
 
 def test_the_float_twin_prices_the_flops_and_the_ebops_wait_for_the_trace() -> None:

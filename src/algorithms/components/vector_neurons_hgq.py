@@ -14,8 +14,8 @@ that p is an exact shift of the word, and the multiplicity enters as the count n
 than n / N; ``vector_neurons_port.copy_float_weights`` folds both differences into the
 batch normalisations of a trained float network.
 
-This is the only module of the repository that imports Keras: it sets the JAX backend
-before the import and raises if Keras came up on another one.
+This module selects Keras's backend: it sets JAX before the import and raises if Keras
+came up on another one, so the port and the subclass import it before anything else.
 """
 
 import os
@@ -57,6 +57,7 @@ from hgq.quantizer.internal import (
 from hgq.utils import trace_minmax
 from jax._src.xla_bridge import backends_are_initialized
 from keras import ops
+from keras.src import backend as keras_backend
 from torch import nn
 
 if keras.backend.backend() != "jax":
@@ -66,13 +67,37 @@ if keras.backend.backend() != "jax":
         "keras."
     )
 
+
+def _float64_kept(name: str):
+    """Keras's elementwise *name* on JAX, computed in float64 for a float64 tensor."""
+    keras_fn, jax_fn = getattr(keras_backend.numpy, name), getattr(jax.numpy, name)
+
+    def fn(x):
+        x = ops.convert_to_tensor(x)
+        if keras.backend.standardize_dtype(x.dtype) == "float64":
+            return jax_fn(x)
+        return keras_fn(x)
+
+    return fn
+
+
+# Keras 3.15 casts a float64 tensor to float32 in floor and ceil on JAX (its
+# result_type(float64, float) is float32), so HGQ2's rounding floor(x 2^f + 1/2)
+# misrounds a scaled value within float32 resolution of a tie, and the float64 port
+# disagrees with alkaid's integer arithmetic (39 of 12288 test jets of the dry run).
+# Both keep float64 here, before any quantiser is built or loaded.
+for _name in ("floor", "ceil"):
+    setattr(keras_backend.numpy, _name, _float64_kept(_name))
+
 # The keep flag and the count: 0 or 1, one unsigned integer bit.
 KEEP_KIF = (0, 1, 0)
 # torch's default, so that the copied running statistics normalise as they did there.
 BN_EPSILON = 1e-5
 # Fraction bits of the gate in float_mode, where its quantiser only implements the clamp.
 FLOAT_GATE_F = 24
-_PLATFORMS = {"gpu": "cuda", "cuda": "cuda", "cpu": "cpu"}
+# A GPU run keeps the CPU backend beside CUDA, the default: HGQ2's trace_minmax stages
+# its data under keras.device("cpu:0").
+_PLATFORMS = {"gpu": "cuda,cpu", "cuda": "cuda,cpu", "cpu": "cpu"}
 
 
 @dataclass
@@ -89,8 +114,8 @@ class Quantisation:
     pt_kif: tuple[int, int, int] = (0, 12, 2)
     angle_kif: tuple[int, int, int] = (1, 1, 8)
     output_kif: tuple[int, int, int] = (1, 6, 8)
-    data_bits: int = 12
-    weight_bits: int = 10
+    data_bits: int = 14
+    weight_bits: int = 8
     gate_f: int = 8
     float_mode: bool = False
 
@@ -235,7 +260,10 @@ def _words(port: _Port, x):
 def _lift(port: _Port, pt, angles):
     """Return p (jets, N), keep (jets, N, 1), the count n (jets, 1), the unit lift's
     tail (eta, phi, eta^2 + phi^2) (jets, N, 3) and the lifts u (jets, N, 4)."""
-    p = pt * (1.0 / port.units)
+    # A division rather than the product by 1 / units: Keras marks the product of a
+    # tensor and a Python scalar sparse, which the float32 build fails to trace. alkaid
+    # replays both as the same shift.
+    p = pt / port.units
     # Exact: a real p_T is a multiple of the word's LSB, and a cast of a bool has no
     # alkaid handler.
     keep = ops.expand_dims(ops.minimum(pt * 2.0 ** port.q.pt_kif[2], 1.0), -1)

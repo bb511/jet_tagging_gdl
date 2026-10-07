@@ -34,8 +34,11 @@ quantisation:
   pt_kif: [0, 12, 2]
   angle_kif: [1, 1, 8]
   output_kif: [1, 6, 8]
-  data_bits: 12 # i + f of every trainable datalane, seeded before training
-  weight_bits: 10 # bits of every weight and bias, seeded before training
+  # Seeded before training. On the two-block float finals at N = 16 (dry run of 2026-10-07),
+  # seeding 14 data and 8 weight bits cost 0.10 points of accuracy at 2.85 M EBOPs, and 12 and 10
+  # bits 0.87 points.
+  data_bits: 14 # i + f of every trainable datalane
+  weight_bits: 8 # bits of every weight and bias
   gate_f: 8 # fraction bits of the hard-sigmoid gates
   float_mode: false # true: every quantiser but the gates' clamp is the identity
 

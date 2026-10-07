@@ -281,6 +281,12 @@ def clean_metrics(logits: np.ndarray, labels: np.ndarray) -> dict[str, float]:
     return {} if clean is None else _clean_metrics(*_clean_reading(clean, labels))
 
 
+def one_vs_rest(logits: np.ndarray) -> np.ndarray:
+    """The per-class scores `clean_metrics` reads its working points and AUC off: the
+    log-odds of each class against the rest, in float64, shape (jets, classes)."""
+    return _one_vs_rest(logits.astype(np.float64))
+
+
 def _point_metrics(
     group: str, frozen: FrozenPoint, transformed: Counts, totals: Counts
 ) -> dict[str, float]:

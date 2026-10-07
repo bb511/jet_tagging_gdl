@@ -191,6 +191,13 @@ def test_tiny_export_is_bit_exact(synth, keras64, tmp_path):
     assert {key: check[key] for key in expected} == expected
     assert check["acc_macro_alkaid"] == check["acc_macro_keras"]
     assert check["cosim_exact"] is None
+    probe = np.load(tmp_path / "outputs" / "main.npz")
+    for name in ("keras", "alkaid"):
+        outputs = np.load(out / f"{name}_outputs.npz")
+        assert outputs["logits_clean"].dtype == np.float32
+        assert outputs["labels"].dtype == np.int8
+        assert np.array_equal(outputs["logits_clean"], probe["logits_clean"])
+        assert np.array_equal(outputs["labels"], probe["labels"])
     for name in ("metadata.json", "report.json", "build_vivado_prj.tcl"):
         assert (out / "prj" / name).is_file()
     assert synth.main(["--out", str(out), "--report-only"]) == 0
@@ -207,3 +214,22 @@ def test_tiny_export_cosimulates_exactly(synth, keras64, tmp_path):
     assert synth.main([*argv, "--no-vivado", "--cosim-jets", str(N_JETS)]) == 0
     check = synth.read_json(out / "check.json")
     assert (check["n_cosim"], check["cosim_exact"]) == (N_JETS, True)
+
+
+def test_jax_off_the_cpu_is_refused(synth, keras64, monkeypatch):
+    # On a GPU, XLA's float64 2**f is off by an ulp for some f.
+    import jax
+
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    with pytest.raises(SystemExit, match="JAX_PLATFORMS=cpu"):
+        synth.import_keras("float64")
+
+
+def test_floor_keeps_a_float64_tensor_in_float64(synth, keras64):
+    # Keras 3.15 floors in float32 on JAX, where 626 - 2^-15 is a tie that rounds to 626.
+    near = keras64.ops.convert_to_tensor([626.0 - 2.0**-15], "float64")
+
+    floor = keras64.ops.floor(near)
+
+    assert keras64.backend.standardize_dtype(floor.dtype) == "float64"
+    assert np.asarray(floor).tolist() == [625.0]

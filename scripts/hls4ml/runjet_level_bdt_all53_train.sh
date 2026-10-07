@@ -19,12 +19,18 @@
 
 # ------------------------------------------------------------------------
 # jet_level_bdt_all53  nconst=150  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 137 of jet_level_bdt_all53_nconst150_augmentation_none, val/acc_best=0.830927
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/jet_level_bdt_all53_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.l2_regularization=0.1 \
+#     algorithm.learning_rate=0.04868876360390555 \
+#     algorithm.max_depth=12 \
+#     algorithm.max_features=0.5 \
+#     algorithm.max_leaf_nodes=127 \
+#     algorithm.min_samples_leaf=500 \
 #     trainer=cpu \
 #     hydra.run.dir=logs/train/hls4ml/jet_level_bdt_all53/nconst150/baseline

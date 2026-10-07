@@ -218,6 +218,36 @@ def test_the_gate_is_the_hard_sigmoid_of_torch_within_its_rounding() -> None:
     assert z[0, 2000] == 0.0 and g[0, 2000] == 0.5
 
 
+def test_floor_and_ceil_keep_a_float64_tensor_in_float64() -> None:
+    # Keras 3.15 computes both in float32 on JAX, where 626 - 2^-15 and 625 + 2^-15 are
+    # ties that round to the even 626 and 625; importing the component keeps float64.
+    configure_jax("cpu", 1, "float64")
+    ties = [626.0 - 2.0**-15, 625.0 + 2.0**-15]
+    near = keras.ops.convert_to_tensor(ties, "float64")
+    single = keras.ops.convert_to_tensor([1.5], "float32")
+
+    floor, ceil = keras.ops.floor(near), keras.ops.ceil(near)
+
+    dtypes = [keras.backend.standardize_dtype(t.dtype) for t in (floor, ceil)]
+    assert dtypes == ["float64", "float64"]
+    assert np.asarray(floor).tolist() == [625.0, 625.0]
+    assert np.asarray(ceil).tolist() == [626.0, 626.0]
+    assert keras.backend.standardize_dtype(keras.ops.floor(single).dtype) == "float32"
+
+
+def test_the_pt_word_rounds_a_near_tie_as_integer_arithmetic_does() -> None:
+    # 625.5 -+ 2^-15 LSB round to 625 and 626 LSB. HGQ2 rounds floor(x 2^f + 1/2), whose
+    # argument 626 - 2^-15 a float32 floor would take to 626.
+    _, words_model = _port(Quantisation())
+    lsb = 2.0 ** -Quantisation().pt_kif[2]
+    rows = np.zeros((1, N_SLOTS, 3))
+    rows[0, :2, 0] = [(625.5 - 2.0**-15) * lsb, (625.5 + 2.0**-15) * lsb]
+
+    words = _predict(words_model, rows)
+
+    assert words[0, :2, 0].tolist() == [625 * lsb, 626 * lsb]
+
+
 def test_keep_is_one_on_a_real_word_and_zero_on_padding() -> None:
     # The p_T word has an LSB of 0.25 GeV, rounded to nearest: 0.13 GeV becomes a real
     # constituent of 0.25 GeV, 0.12 GeV a padded one.

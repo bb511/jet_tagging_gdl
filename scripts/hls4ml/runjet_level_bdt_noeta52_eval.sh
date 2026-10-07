@@ -19,13 +19,19 @@
 
 # ------------------------------------------------------------------------
 # jet_level_bdt_noeta52  nconst=150  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 111 of jet_level_bdt_noeta52_nconst150_augmentation_none, val/acc_best=0.829839
 # ------------------------------------------------------------------------
 # python3 src/eval.py \
 #     experiment=hls4ml/jet_level_bdt_noeta52_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.l2_regularization=0.1 \
+#     algorithm.learning_rate=0.06754452728688037 \
+#     algorithm.max_depth=6 \
+#     algorithm.max_features=0.5 \
+#     algorithm.max_leaf_nodes=127 \
+#     algorithm.min_samples_leaf=500 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jet_level_bdt_noeta52/nconst150/baseline \
 #     results_table.invariance_metric=tv \
 #     trainer=cpu \

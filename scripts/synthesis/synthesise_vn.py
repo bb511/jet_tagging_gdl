@@ -6,13 +6,18 @@ The input is what ``src/eval.py`` leaves for a ``vn_hgq`` checkpoint: the direct
 probe's ``outputs/<label>.npz``, whose clean logits are the bit-exact reference.
 
 1. Keras runs on JAX's CPU backend at the ``floatx`` of ``export.json`` (float64
-   reproduces the fixed-point arithmetic exactly, float32 does not);
+   reproduces the fixed-point arithmetic exactly, float32 does not); another backend is
+   refused, since XLA's float64 2**f is inexact on a GPU;
 2. ``import hgq`` registers its layers and alkaid's plugin for them; the model loads;
 3. Keras predicts the exported words, and a drift from the probe's logits is logged;
 4. alkaid traces the model into combinational logic, as ``alkaid convert`` does;
-5. alkaid's emulation is compared with the probe's logits: ``n_mismatch`` counts the
-   logit entries that differ, and more than ``--max-mismatch`` stops the run; the macro
-   (mean per-class recall, torchmetrics' default) and micro accuracies follow;
+5. the Keras and the alkaid predictions are written to ``<out>/keras_outputs.npz`` and
+   ``<out>/alkaid_outputs.npz`` in the layout of the probe's file, so that
+   ``scripts/analysis/compare_outputs.py`` reads off either its working points and its
+   ROC gap against the probe's logits; alkaid's emulation is then compared with the
+   probe's logits: ``n_mismatch`` counts the logit entries that differ, and more than
+   ``--max-mismatch`` stops the run, after the two files are written; the macro (mean
+   per-class recall, torchmetrics' default) and micro accuracies follow;
 6. the Verilog project ``<out>/prj/`` is written for ``--part`` at ``--clock`` ns, and
    ``<out>/check.json`` records steps 3 to 7;
 7. unless ``--no-cosim``, Verilator co-simulates ``--cosim-jets`` jets, which must
@@ -205,24 +210,76 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def import_keras(floatx: str) -> Any:
-    """Import Keras on JAX at ``floatx``, with HGQ2's layers registered for loading.
+def _float64_kept(name: str) -> Callable[[Any], Any]:
+    """Keras's elementwise *name* on JAX, computed in float64 for a float64 tensor.
 
-    JAX runs on the CPU unless ``JAX_PLATFORMS`` says otherwise. Under float64 the x64
-    mode is switched on before any array exists, since Keras would otherwise round the
-    products of quantised values to float32.
+    A copy of ``_float64_kept`` in src/algorithms/components/vector_neurons_hgq.py,
+    since this script imports nothing from src.
     """
-    os.environ["KERAS_BACKEND"] = "jax"
+    import jax
+    import keras
+    from keras.src import backend as keras_backend
+
+    keras_fn, jax_fn = getattr(keras_backend.numpy, name), getattr(jax.numpy, name)
+
+    def fn(x):
+        x = keras.ops.convert_to_tensor(x)
+        if keras.backend.standardize_dtype(x.dtype) == "float64":
+            return jax_fn(x)
+        return keras_fn(x)
+
+    return fn
+
+
+def _keep_float64_rounding() -> None:
+    """Make Keras's floor and ceil keep a float64 tensor in float64.
+
+    Keras 3.15 casts it to float32 there on JAX, so HGQ2's rounding floor(x 2^f + 1/2)
+    misrounds a value within float32 resolution of a tie, and the Keras check would
+    report logits that differ from alkaid's where the hardware agrees. The component
+    src/algorithms/components/vector_neurons_hgq.py applies the same patch at import.
+    """
+    from keras.src import backend as keras_backend
+
+    for name in ("floor", "ceil"):
+        setattr(keras_backend.numpy, name, _float64_kept(name))
+
+
+def _start_jax(floatx: str) -> None:
+    """Start JAX on the CPU, unless ``JAX_PLATFORMS`` names another platform, and in x64
+    under float64.
+
+    :raises SystemExit: when JAX runs elsewhere than on the CPU: on a GPU, XLA's float64
+        2**f is off by an ulp for some f, so that Keras would round some jets otherwise
+        than alkaid.
+    """
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
     import jax
 
     jax.config.update("jax_enable_x64", floatx == "float64")
+    if (backend := jax.default_backend()) != "cpu":
+        raise SystemExit(
+            f"JAX runs on {backend!r}, where XLA's float64 2**f is inexact, so Keras "
+            "would not be bit-exact against alkaid; set JAX_PLATFORMS=cpu."
+        )
+
+
+def import_keras(floatx: str) -> Any:
+    """Import Keras on JAX at ``floatx``, with HGQ2's layers registered for loading.
+
+    Under float64 the x64 mode is switched on before any array exists, since Keras would
+    otherwise round the products of quantised values to float32, and floor and ceil are
+    made to keep float64.
+    """
+    os.environ["KERAS_BACKEND"] = "jax"
+    _start_jax(floatx)
     import hgq  # noqa: F401
     import keras
 
     keras.config.set_floatx(floatx)
     if keras.backend.backend() != "jax":
         raise ImportError(f"Keras runs on {keras.backend.backend()}, not on JAX")
+    _keep_float64_rounding()
     return keras
 
 
@@ -391,15 +448,38 @@ def generate(
         raise SystemExit("the Verilator co-simulation differs from alkaid's emulation")
 
 
+def write_predictions(out: Path, labels: np.ndarray, **logits: np.ndarray) -> None:
+    """Write ``<out>/<name>_outputs.npz`` for each keyword, in the layout of the probe's
+    file: ``logits_clean`` (jets, classes) in float32, exact behind the output
+    quantiser, and ``labels`` (jets,) in int8."""
+    out.mkdir(parents=True, exist_ok=True)
+    for name, values in logits.items():
+        arrays = {"logits_clean": values.astype(np.float32)}
+        np.savez(out / f"{name}_outputs.npz", **arrays, labels=labels.astype(np.int8))
+
+
+def predict(
+    args: argparse.Namespace, model: Any, parts: list[np.ndarray], labels: np.ndarray
+) -> tuple[Any, np.ndarray, np.ndarray]:
+    """Steps 3 to 5 up to the comparison: the Keras prediction, alkaid's trace and its
+    emulation, both predictions written for ``compare_outputs.py``.
+
+    :return: the traced logic and the Keras and alkaid logits (jets, classes).
+    """
+    y_keras = _timed("Keras prediction", keras_predict, model, parts)
+    comb = _timed("alkaid trace", trace_comb, model, args.hard_dc)
+    y_alkaid = _timed("alkaid emulation", comb.predict, parts, args.threads)
+    write_predictions(args.out, labels, keras=y_keras, alkaid=y_alkaid)
+    return comb, y_keras, y_alkaid
+
+
 def build(args: argparse.Namespace) -> None:
     """Steps 1 to 7: load, predict, trace, emulate, write the project, co-simulate."""
     export = read_json(args.export_dir / "export.json")
     model = _timed("loading", load_model, args.export_dir, export["floatx"])
     words, logits, labels = load_reference(args.export_dir, args.outputs_npz)
     parts = split_inputs(model, words)
-    y_keras = _timed("Keras prediction", keras_predict, model, parts)
-    comb = _timed("alkaid trace", trace_comb, model, args.hard_dc)
-    y_alkaid = _timed("alkaid emulation", comb.predict, parts, args.threads)
+    comb, y_keras, y_alkaid = predict(args, model, parts, labels)
     stats = emulation_stats(y_keras, y_alkaid, logits, labels)
     check = record_emulation(args, export, stats)
     generate(args, comb, flatten(parts), y_alkaid, check)
@@ -452,7 +532,11 @@ def vivado_timing(report: dict[str, Any]) -> dict[str, float]:
 
 def csv_row(check: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
     """Merge ``check.json`` and alkaid's project report into one row of ``CSV_FIELDS``,
-    NaN wherever a step has not run."""
+    NaN wherever a step has not run.
+
+    The row holds no working point: ``compare_outputs.py`` reads those off
+    ``keras_outputs.npz`` and ``alkaid_outputs.npz`` beside ``check.json``.
+    """
     row = {column: _number(report, key) for column, key in REPORT_FIELDS.items()}
     row.update(vivado_timing(report), **check)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
