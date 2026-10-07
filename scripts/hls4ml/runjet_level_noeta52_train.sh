@@ -19,13 +19,17 @@
 
 # ------------------------------------------------------------------------
 # jet_level_noeta52  nconst=150  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 169 of jet_level_noeta52_nconst150_augmentation_none, val/acc_best=0.830216
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     experiment=hls4ml/jet_level_noeta52_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.batchnorm=True \
+#     algorithm.hidden_layers='[256,128,64]' \
+#     algorithm.optimizer.lr=0.006612269287749972 \
+#     algorithm.optimizer.weight_decay=1e-07 \
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/jet_level_noeta52/nconst150/baseline

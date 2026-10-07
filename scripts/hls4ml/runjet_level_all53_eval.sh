@@ -19,13 +19,17 @@
 
 # ------------------------------------------------------------------------
 # jet_level_all53  nconst=150  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 104 of jet_level_all53_nconst150_augmentation_none, val/acc_best=0.831480
 # ------------------------------------------------------------------------
 # python3 src/eval.py \
 #     experiment=hls4ml/jet_level_all53_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.batchnorm=True \
+#     algorithm.hidden_layers='[128,64,32]' \
+#     algorithm.optimizer.lr=0.003549886541946912 \
+#     algorithm.optimizer.weight_decay=1e-07 \
 #     checkpoint_manifest_path=logs/train/hls4ml/jet_level_all53/nconst150/baseline \
 #     results_table.invariance_metric=tv \
 #     trainer=gpu \

@@ -67,13 +67,25 @@ EMBEDDED = (
     "vn",
     *MOMENT_ROWS,
 )
-# The MLP on the record's jet-level observables: rows of no architecture, outside MODELS,
-# which tests/test_algorithms.py builds on constituents. Run at N = 150 alone.
-JET_LEVEL = ("jet_level_all53", "jet_level_noeta52")
+# The MLP and the gradient-boosted trees on the record's jet-level observables: rows of no
+# architecture, outside MODELS, which tests/test_algorithms.py builds on constituents. Run
+# at N = 150 alone.
+JET_LEVEL = (
+    "jet_level_all53",
+    "jet_level_noeta52",
+    "jet_level_bdt_all53",
+    "jet_level_bdt_noeta52",
+)
+# The gradient-boosted trees, fitted by scikit-learn on the CPU: their catalogue blocks
+# select trainer=cpu and no device, and their costs are NaN.
+CPU_ROWS = ("jet_level_bdt_all53", "jet_level_bdt_noeta52")
 # Trained in the baseline regime alone, never under augmentation or the SCL; today the
 # embedded class and the jet-level rows, though a row that reads data.features could join
 # it without EMBEDDED.
 BASELINE_ONLY = (*EMBEDDED, *JET_LEVEL)
+# Trained quantisation-aware from a float row's checkpoint, outside MODELS: no study and
+# hand-written catalogues, and an algorithm that needs the optional hgq dependencies.
+QUANTISED = ("vn_hgq",)
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.
 RECORD_COLUMNS = (

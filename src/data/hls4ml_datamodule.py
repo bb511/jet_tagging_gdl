@@ -213,6 +213,12 @@ class HLS4MLDataModule(LightningDataModule):
         """Loader processes for a pass that never transforms; 0 workers stays 0."""
         return min(self.num_workers, EVAL_WORKERS)
 
+    def load_split(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """The jets of the record's own *split*, every column, rebased as setup()
+        rebases them, and their labels; setup("fit") pools and re-splits them under
+        folds."""
+        return self._load(self._ensure_record(), split)
+
     def _record_root(self) -> str:
         """Where the data is stored on the machine."""
         return snapshot_download(REPO_ID, repo_type="dataset", revision=self.revision)

@@ -7,7 +7,15 @@ import optuna
 from optuna.distributions import CategoricalDistribution
 from optuna.trial import TrialState, create_trial
 
-from tests.conftest import BASELINE_ONLY, EMBEDDED, JET_LEVEL, MODELS, ROOT
+from tests.conftest import (
+    BASELINE_ONLY,
+    CPU_ROWS,
+    EMBEDDED,
+    JET_LEVEL,
+    MODELS,
+    QUANTISED,
+    ROOT,
+)
 
 # scripts/ is not a package, so the generator is loaded by path, as the analysis scripts'
 # tests load theirs. It is registered before it is executed because dataclasses resolves
@@ -115,6 +123,20 @@ def test_the_generator_names_the_rows_and_regimes_the_tests_do() -> None:
     assert make_train_catalogues.EMBEDDED == set(EMBEDDED)
     assert make_train_catalogues.BASELINE_ONLY == set(BASELINE_ONLY)
     assert tuple(make_train_catalogues.JET_LEVEL) == JET_LEVEL
+    assert make_train_catalogues.CPU_ROWS == set(CPU_ROWS)
+    assert tuple(make_train_catalogues.QUANTISED) == QUANTISED
+
+
+def test_no_layout_generates_a_catalogue_of_a_quantised_row(tmp_path: Path) -> None:
+    # Their catalogues are hand-written, so a regeneration must neither write nor
+    # expect them.
+    out = tmp_path / "catalogues"
+
+    make_train_catalogues._generate(_empty_dbs(tmp_path), out, ROOT, Layout(), False)
+
+    for layout in (Layout(), Layout(features=FEATURES)):
+        assert not set(make_train_catalogues.models_of(layout)) & set(QUANTISED)
+    assert not any(row in path.name for path in out.iterdir() for row in QUANTISED)
 
 
 def test_the_four_momentum_layout_names_no_feature_set_anywhere(
@@ -197,3 +219,24 @@ def test_a_jet_level_row_has_one_baseline_block_at_150_in_the_default_layout(
     assert _manifest_paths(evaluate) == {
         "logs/train/hls4ml/jet_level_noeta52/nconst150/baseline"
     }
+
+
+def test_a_cpu_row_has_one_unpinned_cpu_block_per_catalogue(tmp_path: Path) -> None:
+    # No trainer.devices override, so the submitters' --gpu and --gpus, which rewrite
+    # that override alone, leave the command unchanged on a CPU host.
+    out = tmp_path / "catalogues"
+
+    make_train_catalogues._generate(_empty_dbs(tmp_path), out, ROOT, Layout(), False)
+
+    for row in CPU_ROWS:
+        for task in ("train", "eval"):
+            text = (out / f"run{row}_{task}.sh").read_text()
+            assert make_train_catalogues.count_commands(LIB, text) == 1
+            assert text.count("trainer=cpu") == 1
+            assert "trainer.devices" not in text and "trainer=gpu" not in text
+            assert f"experiment=hls4ml/{row}_150 \\" in text
+    mlp = (out / "runjet_level_all53_train.sh").read_text()
+    assert "trainer=gpu \\\n#     trainer.devices=[0]" in mlp
+    assert not set(make_train_catalogues.models_of(Layout(features=FEATURES))) & set(
+        CPU_ROWS
+    )

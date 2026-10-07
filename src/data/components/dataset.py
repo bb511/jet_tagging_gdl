@@ -1,4 +1,4 @@
-# In-memory dataset that hands the trainer whole batches of jets.
+# In-memory dataset that gives the trainer whole batches of jets.
 
 import math
 from collections.abc import Callable

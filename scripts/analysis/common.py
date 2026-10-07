@@ -58,6 +58,8 @@ MODEL_DISPLAY = {
     "moments_only": "Moments only",
     "jet_level_all53": "Jet observables (53)",
     "jet_level_noeta52": "Jet observables w/o eta (52)",
+    "jet_level_bdt_all53": "Jet observables BDT (53)",
+    "jet_level_bdt_noeta52": "Jet observables BDT w/o eta (52)",
     "transformer": "JetFormer",
 }
 

@@ -19,13 +19,17 @@
 
 # ------------------------------------------------------------------------
 # moments_only  nconst=16  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 197 of moments_only_nconst16_augmentation_none, val/acc_best=0.702764
 # ------------------------------------------------------------------------
 # python3 src/eval.py \
 #     experiment=hls4ml/moments_only_16 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.moments=rankcut \
+#     algorithm.optimizer.lr=0.007152396369766525 \
+#     algorithm.optimizer.weight_decay=1e-07 \
+#     algorithm.rho_layers='[64,32]' \
 #     checkpoint_manifest_path=logs/train/hls4ml/moments_only/nconst16/baseline \
 #     results_table.invariance_metric=tv \
 #     trainer=gpu \
@@ -38,13 +42,17 @@
 
 # ------------------------------------------------------------------------
 # moments_only  nconst=50  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 19 of moments_only_nconst50_augmentation_none, val/acc_best=0.804513
 # ------------------------------------------------------------------------
 # python3 src/eval.py \
 #     experiment=hls4ml/moments_only_50 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.moments=rankcut \
+#     algorithm.optimizer.lr=0.008611550799237118 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.rho_layers='[64,32]' \
 #     checkpoint_manifest_path=logs/train/hls4ml/moments_only/nconst50/baseline \
 #     results_table.invariance_metric=tv \
 #     trainer=gpu \
@@ -57,13 +65,17 @@
 
 # ------------------------------------------------------------------------
 # moments_only  nconst=150  baseline  (method=augmentation, group=none)
-# transferred from experiment config (no study yet)
+# best trial 105 of moments_only_nconst150_augmentation_none, val/acc_best=0.817685
 # ------------------------------------------------------------------------
 # python3 src/eval.py \
 #     experiment=hls4ml/moments_only_150 \
 #     data.method=augmentation \
 #     data.augmentation_scheme=none \
 #     data.n_folds=5 \
+#     algorithm.moments=rankcut \
+#     algorithm.optimizer.lr=0.005462008936973458 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.rho_layers='[64,32]' \
 #     checkpoint_manifest_path=logs/train/hls4ml/moments_only/nconst150/baseline \
 #     results_table.invariance_metric=tv \
 #     trainer=gpu \

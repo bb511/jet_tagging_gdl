@@ -92,7 +92,11 @@ class JetTaggingModule(LightningModule):
         self._build_metrics(output_dim, method)
 
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
-        # FLOPs and eBOPs of the model, per jet.
+        self._record_costs(nconstituents, nbr_feats)
+
+    def _record_costs(self, nconstituents: int, nbr_feats: int) -> None:
+        """Store the per-jet FLOPs and eBOPs of the model as ``flops_total`` and
+        ``ebops_total``, its unpriced elements as ``ebops_unpriced``."""
         record_flops(self, nconstituents, nbr_feats)
         record_ebops(self, nconstituents, nbr_feats)
 
@@ -123,13 +127,18 @@ class JetTaggingModule(LightningModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits for a batch of shape (jets, const, features)."""
+        return self.net(self._network_inputs(x))
+
+    def _network_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """Return what the network reads of a batch: in float32, reduced to the
+        network's columns when it arrives at full width, and prepared."""
         x = x.to(torch.float32)
         if (
             self.model_feature_indices is not None
             and x.shape[-1] != self.hparams.nbr_feats
         ):
             x = x[:, :, self.model_feature_indices]
-        return self.net(self._prepare_inputs(x))
+        return self._prepare_inputs(x)
 
     def model_step(
         self, batch: tuple[torch.Tensor, torch.Tensor]

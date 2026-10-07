@@ -16,7 +16,10 @@ JEDI-linear reading the jet moments of the vector neurons, `deepsets_moments` an
 `jedi_linear_moments`, and the control on the moments alone, `moments_only`. Two rows joined on
 2026-10-06 with no network of their own, in place of a standalone script of the day before: the
 MLP on the record's jet-level observables, `jet_level_all53` and `jet_level_noeta52`, a ceiling
-for the networks (see "Jet-level ceiling"). PELICAN, a plain
+for the networks (see "Jet-level ceiling"). Two more joined that ceiling on 2026-10-07,
+gradient-boosted trees on the same observables, `jet_level_bdt_all53` and `jet_level_bdt_noeta52`,
+in a module of their own, `src/algorithms/bdt.py`, which wraps scikit-learn rather than a network.
+PELICAN, a plain
 Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the
 refactor; nano-PELICAN, which existed as configuration only, went with them, and so did the
 permutation check. The two four-momentum rows of the vector neurons went on 2026-10-03. This file
@@ -1009,6 +1012,90 @@ capped at 16, hold the cache's real-constituent counts, jet by jet. `tests/test_
 checks the probe-less mode against `clean_metrics`, `tests/test_configs.py` the copies, the search
 spaces, the shared revision and fold seed and the experiments, and
 `tests/test_make_train_catalogues.py` the catalogues.
+
+Two rows of gradient-boosted trees joined on 2026-10-07, `jet_level_bdt_all53` and
+`jet_level_bdt_noeta52`, on the same observables through the same datamodule, so that the ceiling
+rests on a second model family and not on the MLP alone. In the scratch run of 2026-10-05 the best
+of six tree points reached a validation and test accuracy of 0.8302 and 0.8298 on all 53
+observables, against the MLP's 0.8319 and 0.8316: close enough that either family could set the
+ceiling once both are searched alike. The rows run scikit-learn's `HistGradientBoostingClassifier`
+through the networks' pipeline: `src/train.py` with the default callbacks, the Optuna sweeper,
+`submit_train.sh --folds 5`, `src/eval.py`, the generated catalogues and the results tables. The
+module is `src/algorithms/bdt.py::BoostedTreesClassifier` and the wrapper
+`src/algorithms/components/bdt.py::BoostedTrees`; around them sit
+`configs/algorithm/jet_level_bdt_{all53,noeta52}.yaml`, the experiment configs
+`configs/experiment/hls4ml/jet_level_bdt_{all53,noeta52}_150.yaml`, the search configs
+`configs/hparams_search/hls4ml/jet_level_bdt_{all53,noeta52}_optuna.yaml`, the hand-written
+`scripts/hls4ml/runjet_level_bdt_{all53,noeta52}_search.sh` and the generated
+`scripts/hls4ml/runjet_level_bdt_{all53,noeta52}_{train,eval}.sh`.
+
+Boosting is mapped onto epochs. One estimator is kept for the whole run, with `warm_start=True` and
+`early_stopping=False`; before each fit its `max_iter` is raised by `trees_per_epoch`, 10 and never
+searched, and each iteration grows one tree per class. An epoch therefore adds ten iterations and
+`val/acc` is logged per epoch, so the networks' callbacks apply unchanged: the checkpoint keeps the
+best epoch by `val/acc`, early stopping waits 100 epochs, and Optuna reads `val/acc_best`. A trial
+of 50 epochs grows up to 500 iterations and a training of 200 epochs up to 2000. Lightning
+validates an epoch before it calls `on_train_epoch_end`, so the fit happens inside `training_step`
+on the epoch's last batch (`trainer.is_last_batch`), and the validation of epoch k is scored on
+(k + 1) × 10 iterations. The fit reads the datamodule's whole training split, not the epoch's
+batches, which are a fresh permutation less a random partial batch. scikit-learn refits its bin
+edges on the jets of every fit and, inside `fit`, scores the earlier trees on the binned jets, so
+only identical jets keep the earlier trees reading as they were grown; on identical jets three fits
+of ten iterations give the trees of one fit of thirty. Training is manual
+(`automatic_optimization = False`): `configure_optimizers` returns None, for which Lightning puts in
+its mock optimiser, and each batch takes one mock step, without which `global_step` would stay at
+zero and `ModelCheckpoint` would save nothing. The training loss and accuracy are the base class's,
+computed once per epoch on the epoch's last batch after the fit: a pass over the whole split would
+score every tree on every jet once more, a cost that grows with the trees, for figures that select
+nothing.
+
+The estimator holds no tensor. It travels in the state dict as `pickle.dumps(estimator)` bytes,
+through `get_extra_state` and `set_extra_state` under the key `net._extra_state`, so Lightning's
+checkpoints carry it and `eval.py`, which loads them with `weights_only=False`, restores it.
+Validation and test run the base class's steps on the log-probabilities
+`log(clip(predict_proba, 1e-7, 1))`, zeros before the first fit. The estimator's draws (the
+subsample its bin edges are fitted on, the feature subsampling) are seeded from
+`torch.initial_seed()`, the run's seed, so that the folds share them as the networks share their
+initialisation. The trees run in scikit-learn, outside the torch operations the counters trace, so
+the module overrides `_record_costs`, the base class's hook for the counts, to set `flops_total`,
+`ebops_total` and `ebops_unpriced` to NaN, and the results row holds `nan` in `flops_mean` and
+`ebops_mean`. The experiments select `/trainer: cpu` with `precision: 32` and
+`gradient_clip_val: null`, since Lightning refuses clipping under manual optimisation. The
+generator lists the two rows in `CPU_ROWS` as well as `JET_LEVEL`, and their blocks carry
+`trainer=cpu` and no `trainer.devices`, which the submitters' `--gpu` and `--gpus` would rewrite:
+a block runs unchanged on a CPU host. The
+algorithm configs are copies of each other up to `name` and `nbr_feats`, set `optimizer` and
+`scheduler` to null and leave the trees at scikit-learn's defaults (learning rate 0.1, 31 leaves, no
+depth limit, 20 jets per leaf, no L2 term, every feature at each split). The two search configs hold
+one space, with 200 trials and TPE at seed 1234 with 20 start-up trials: a log-uniform learning rate
+on [0.01, 0.3], `max_leaf_nodes` in {15, 31, 63, 127, 255}, `max_depth` in {0, 6, 12},
+`min_samples_leaf` in {20, 100, 500}, `l2_regularization` in {0, 0.1, 1} and `max_features` in
+{0.5, 1}. A depth of 0 means no limit: the sweeper writes a None choice as the string 'None', which
+Hydra keeps as a string, so the search spells it 0 and the wrapper maps 0 and None to None.
+
+On olgpu's CPUs at 8 threads (2026-10-07), an epoch of ten iterations on the 496 000 training jets
+took 3.2 s at the start and about 0.63 s longer for every ten iterations already grown, 15.4 s at
+epoch 19: every fit, the training metrics and the validation evaluate all the earlier trees again.
+The process peaked at 1.8 GB. A linear extrapolation, not a measurement, puts a 50-epoch trial at
+the defaults near 16 minutes, a 200-trial study near 50 hours on one driver, and a 200-epoch process
+near 3.7 hours unless early stopping ends it. At the defaults the validation accuracy peaked at
+0.8268 after 80 iterations, and three epochs gave a test accuracy of 0.8215 and 0.8210 for the two
+rows. A checkpoint holds about 5 kB per tree at 31 leaves (0.78 MB at 30 iterations), so one of
+2000 iterations at 255 leaves would hold about 330 MB.
+
+`tests/test_bdt.py` checks the wrapper (zeros before the first fit, ten iterations per fit,
+finite log-probabilities that sum to one up to the floor, three fits of the same jets equal to one,
+the state-dict round trip, the depth mapping), that epoch k is validated on (k + 1) × 10 iterations
+with one mock step per batch, and an end-to-end run of `jet_level_bdt_noeta52` on the synthetic
+shards with the default callbacks and an MLflow logger: a main run and fold 1 of 3, three epochs
+each, then `eval.py` on the directory. That run ends at 30 iterations, the best checkpoint holds
+(epoch + 1) × 10, and the one row under `jet_level/` has the networks' header, `nconstituents` 150,
+NaN costs and invariance cells, with a two-key `.npz` per checkpoint. The test also checks the
+copies, the shared search space and the experiments' CPU trainer, fp32, absent clipping, disabled
+probe and subdirectory. `tests/test_configs.py` exempts the two rows from the cost inequality and
+keeps its MLP-space check to the MLP rows, and `tests/test_make_train_catalogues.py` checks
+`CPU_ROWS` against `tests/conftest.py` and that each catalogue of the two rows holds one block,
+`trainer=cpu` without a device, in the default layout alone.
 
 ## Vector neurons on the four-momentum
 

@@ -8,7 +8,7 @@ DeepSets, MLP, JetFormer, the Linformer and JEDI-linear are trained on a 3 x 7 g
     - SO(2), SO(3) and Lorentz augmentation
     - SO(2), SO(3) and Lorentz symmetry loss
 
-Symmetry-embedded architectures are trained on the baseline only, and so are the two
+Symmetry-embedded architectures are trained on the baseline only, and so are the four
 rows on the record's jet-level observables, at 150 constituents alone.
 The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 ``logs/optuna/hls4ml/<label>/`` for a feature set other than the four-momentum.
@@ -47,9 +47,18 @@ MODELS = [
     "jedi_linear_moments",
     "moments_only",
 ]
-# The MLP on the record's jet-level observables, all 53 and the 52 without the jet rapidity:
-# rows of no architecture, outside MODELS, which tests/test_algorithms.py builds on constituents.
-JET_LEVEL = ["jet_level_all53", "jet_level_noeta52"]
+# The MLP and the gradient-boosted trees on the record's jet-level observables, all 53 and the
+# 52 without the jet rapidity: rows of no architecture, outside MODELS, which
+# tests/test_algorithms.py builds on constituents.
+JET_LEVEL = [
+    "jet_level_all53",
+    "jet_level_noeta52",
+    "jet_level_bdt_all53",
+    "jet_level_bdt_noeta52",
+]
+# Fitted by scikit-learn, so their blocks select the CPU trainer and no device, which the
+# submitters' --gpu and --gpus then leave unchanged.
+CPU_ROWS = {"jet_level_bdt_all53", "jet_level_bdt_noeta52"}
 NCONSTITUENTS = [16, 50, 150]
 # The observables are computed from the whole jet, so their rows are labelled with the one
 # constituent count that never truncates it.
@@ -96,6 +105,9 @@ EMBEDDED = {
 # A row that reads data.features but runs the baseline alone would join this set and not
 # EMBEDDED, so that every feature set still had catalogues for it.
 BASELINE_ONLY = set(EMBEDDED) | set(JET_LEVEL)
+# Trained quantisation-aware from a float row's checkpoint, with no study: outside MODELS, so
+# that no catalogue of theirs is generated; scripts/hls4ml/run<row>_*.sh are hand-written.
+QUANTISED = ["vn_hgq"]
 
 VARIANTS_OF = {
     model: VARIANTS[:1] if model in BASELINE_ONLY else VARIANTS
@@ -260,13 +272,20 @@ def _common_body(
     return body + (overrides_of(trial[2]) if trial else [])
 
 
+def trainer_overrides(model: str) -> list[str]:
+    """The trainer a block selects: the CPU for a row of ``CPU_ROWS``, else GPU 0, which
+    the submitters rewrite to the device they place the block on."""
+    if model in CPU_ROWS:
+        return ["trainer=cpu"]
+    return ["trainer=gpu", "trainer.devices=[0]"]
+
+
 def train_block(
     model: str, nconst: int, variant: Variant, trial: Trial | None, layout: Layout
 ) -> list[str]:
     """One training command, folds included, writing to its own hydra run dir."""
     body = _common_body(model, nconst, variant, trial, layout) + [
-        "trainer=gpu",
-        "trainer.devices=[0]",
+        *trainer_overrides(model),
         f"hydra.run.dir={layout.run_dir('train', model, nconst, variant[0])}",
     ]
     return _block(_header(model, nconst, variant, trial), "src/train.py", body)
@@ -286,8 +305,7 @@ def eval_block(
     body = _common_body(model, nconst, variant, trial, layout) + [
         f"checkpoint_manifest_path={train_dir}",
         "results_table.invariance_metric=tv",
-        "trainer=gpu",
-        "trainer.devices=[0]",
+        *trainer_overrides(model),
         f"hydra.run.dir={layout.run_dir('eval', model, nconst, label)}",
     ]
     return _block(_header(model, nconst, variant, trial), "src/eval.py", body)

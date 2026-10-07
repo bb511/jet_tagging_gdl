@@ -1,0 +1,21 @@
+# @package callbacks
+
+# A quantisation-aware run (vn_hgq), whose last epoch is the model: the checkpoint keeps the newest
+# epoch alone and nothing stops the run early. No LearningRateMonitor, which reads a torch
+# optimiser: the rate lives in Keras and is logged as train/lr.
+defaults:
+  - util@model_checkpoint: model_checkpoint
+  - util@model_summary: model_summary
+  - util@rich_progress_bar: rich_progress_bar
+  - main@invariance_metric: invariance_metric
+  - main@plotting: plotting
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch_{epoch:03d}"
+  # Unranked: each epoch's file replaces the previous one, so best_model_path is the last epoch.
+  monitor: null
+  save_top_k: 1
+  save_last: false
+  auto_insert_metric_name: false

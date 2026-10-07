@@ -267,6 +267,22 @@ def test_the_served_fold_is_fold_indices_of_the_pooled_jets(
     assert torch.equal(datamodule.data_val.y, y_all[val_idx])
 
 
+def test_a_whole_split_is_the_record_s_own_at_full_width_and_rebased(
+    record: FakeRecord,
+) -> None:
+    # The quantised row traces its quantisers on the record's training split at test
+    # time, when setup("fit") has not run; at n_folds 1 that split is what it trained on.
+    datamodule = _datamodule(features=["pt", "eta", "phi"], n_folds=1)
+    datamodule.prepare_data()
+    datamodule.setup(stage="fit")
+
+    x, y = datamodule.load_split("train")
+
+    assert x.shape[-1] == len(RECORD_COLUMNS)
+    assert torch.equal(x[..., datamodule.feature_indices()], datamodule.data_train.X)
+    assert torch.equal(y, datamodule.data_train.y)
+
+
 def test_the_record_is_told_the_cache_and_the_constituent_count(
     record: FakeRecord,
 ) -> None:

@@ -52,6 +52,14 @@ dev = [
     "pytest (>=8,<10)",
     "pre-commit (>=3.7,<5)",
 ]
+# The quantisation-aware vn_hgq: HGQ2 on Keras/JAX and alkaid; not in the NGT image.
+hgq = [
+    "keras (>=3.15,<3.16)",
+    "hgq2 (==0.2.0)",
+    "alkaid (==0.8.1)",
+    "jax[cuda12] (>=0.10.2,<0.11)",
+    "nvidia-cuda-nvcc-cu12 (==12.6.85)",
+]
 
 # The CUDA 12.6 build of torch is not on PyPI, so it is pulled from the PyTorch index.
 [[tool.poetry.source]]
@@ -64,6 +72,9 @@ torch = {source = "pytorch-cu126"}
 
 [tool.poetry]
 package-mode = false
+
+[tool.poetry.group.hgq]
+optional = true
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

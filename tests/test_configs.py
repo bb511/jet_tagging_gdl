@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import hydra
@@ -14,21 +15,23 @@ from src.algorithms.deepsets import (
 from src.algorithms.vector_neurons import VectorNeurons
 from tests.conftest import (
     BASELINE_ONLY,
+    CPU_ROWS,
     EMBEDDED,
     JET_LEVEL,
     MODELS,
     MOMENT_ROWS,
     NCONSTITUENTS,
     PT_ETAREL_PHIREL,
+    QUANTISED,
     ROOT,
     compose_root,
     point_into,
 )
 
 # The jet-level rows run at the one constituent count that labels them.
-EXPECTED_EXPERIMENTS = {f"{model}_{n}" for model in MODELS for n in NCONSTITUENTS} | {
-    f"{row}_150" for row in JET_LEVEL
-}
+EXPECTED_EXPERIMENTS = {
+    f"{model}_{n}" for model in (*MODELS, *QUANTISED) for n in NCONSTITUENTS
+} | {f"{row}_150" for row in JET_LEVEL}
 # The baseline-only rows (the embedded class and the jet-level rows) are never trained
 # under the SCL, so they have no SCL space.
 EXPECTED_SEARCHES = {
@@ -40,6 +43,7 @@ EXPECTED_SEARCHES = {
 SUBDIRS = {
     **dict.fromkeys(EMBEDDED, "embedded"),
     **dict.fromkeys(JET_LEVEL, "jet_level"),
+    **dict.fromkeys(QUANTISED, "quantised"),
 }
 
 
@@ -72,6 +76,8 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     assert set(EXPERIMENTS) == EXPECTED_EXPERIMENTS
     cfg = _composed(tmp_path, f"experiment=hls4ml/{experiment}")
     model, nconstituents = experiment.rsplit("_", 1)
+    if model in QUANTISED:
+        pytest.importorskip("hgq")
 
     assert hydra.utils.instantiate(cfg.data).nconstituents == int(nconstituents)
     assert hydra.utils.instantiate(cfg.trainer)
@@ -80,8 +86,16 @@ def test_every_experiment_config_builds_data_algorithm_and_trainer(
     # A jet-level row reads one slot of observables per jet, whatever labels it.
     slots = 1 if model in JET_LEVEL else int(nconstituents)
     assert module.hparams.nconstituents == slots
-    # Every MAC the FLOP counter prices at 2 the eBOP counter prices at 8 x 8.
-    assert module.ebops_total >= 32 * module.flops_total > 0
+    if model in QUANTISED:
+        # Priced on the float twin; the EBOPs are known once the test pass has traced
+        # the quantisers.
+        assert math.isnan(module.ebops_total) and module.flops_total > 0
+    elif model in CPU_ROWS:
+        # The trees run in scikit-learn, which neither counter sees.
+        assert math.isnan(module.flops_total) and math.isnan(module.ebops_total)
+    else:
+        # Every MAC the FLOP counter prices at 2 the eBOP counter prices at 8 x 8.
+        assert module.ebops_total >= 32 * module.flops_total > 0
     assert cfg.results_table.subdir == SUBDIRS.get(model)
     assert cfg.callbacks.invariance_metric.probe == (model not in JET_LEVEL)
 
@@ -133,12 +147,16 @@ def test_the_study_name_follows_the_regime(tmp_path: Path) -> None:
         assert study_name == f"deepsets_nconst16_{method}_{scheme}"
 
 
-def test_the_beamless_pelican_differs_from_the_beams_on_one_in_the_switch_alone() -> None:
+def test_the_beamless_pelican_differs_from_the_beams_on_one_in_the_switch_alone() -> (
+    None
+):
     # pelican_lorentz.yaml is a standalone copy of pelican.yaml, because the algorithm tests load
     # these files with OmegaConf alone and a defaults list would not resolve there; this is what
     # keeps the copy from drifting.
     beams, lorentz = (
-        OmegaConf.to_container(OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml"))
+        OmegaConf.to_container(
+            OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
+        )
         for name in ("pelican", "pelican_lorentz")
     )
     assert (beams["add_beams"], lorentz["add_beams"]) == (True, False)
@@ -278,6 +296,51 @@ def _search_params(name: str) -> dict[str, str]:
     return dict(OmegaConf.load(path).hydra.sweeper.params)
 
 
+@pytest.mark.parametrize(
+    "experiment", [f"{row}_{n}" for row in QUANTISED for n in NCONSTITUENTS]
+)
+def test_the_quantised_experiments_step_keras_in_fp32_and_keep_the_last_epoch(
+    experiment: str, tmp_path: Path
+) -> None:
+    # Lightning refuses gradient clipping under manual optimisation, and 16-mixed would
+    # pass the mock optimiser's step through a gradient scaler with no gradient to
+    # check. The last epoch is the model, so the checkpoint is unranked and nothing
+    # stops a run early; JAX's threads rule out forked loader workers.
+    cfg = _composed(tmp_path, f"experiment=hls4ml/{experiment}")
+    checkpoint = cfg.callbacks.model_checkpoint
+
+    assert cfg.trainer.gradient_clip_val is None and cfg.trainer.precision == 32
+    assert checkpoint.monitor is None and checkpoint.save_top_k == 1
+    assert not checkpoint.save_last
+    assert {"early_stopping", "lr_monitor"}.isdisjoint(cfg.callbacks)
+    assert cfg.data.num_workers == 0
+    assert list(cfg.data.features) == VectorNeurons.required_features
+    # JAX follows the trainer, whose devices are a count or a list of indices.
+    assert (cfg.algorithm.jax_platform, cfg.algorithm.jax_devices) == ("cpu", 1)
+    gpu = compose_root(
+        "train.yaml", f"experiment=hls4ml/{experiment}", "trainer.devices=[1]"
+    )
+    assert gpu.algorithm.jax_platform == "gpu"
+    assert list(gpu.algorithm.jax_devices) == [1]
+
+
+def test_the_quantised_vn_differs_from_vn_in_the_port_and_its_training_alone() -> None:
+    # vn_hgq.yaml is a standalone copy of vn.yaml, as the other rows that share a
+    # network are, so that its architecture keys stay those of the float checkpoints it
+    # copies.
+    vn, quantised = _algorithm_yaml("vn"), _algorithm_yaml("vn_hgq")
+    port = "quantisation beta beta_schedule init_from calibration_jets floatx"
+    training = "jax_platform jax_devices warmup_fraction"
+
+    assert (vn["units"], quantised["units"]) == (20.0, 16.0)
+    for key in "_target_ name units optimizer scheduler".split():
+        vn.pop(key)
+        quantised.pop(key)
+    for key in f"{port} {training}".split():
+        quantised.pop(key)
+    assert vn == quantised
+
+
 @pytest.mark.parametrize("row", MOMENT_ROWS)
 def test_each_moment_row_differs_from_its_parent_in_the_moments_alone(row: str) -> None:
     # Standalone copies, as jedi_linear.yaml is of deepsets.yaml, read against their
@@ -364,7 +427,8 @@ def _sweeper(tmp_path: Path, row: str) -> dict:
     return OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
 
 
-@pytest.mark.parametrize("row", JET_LEVEL)
+# The trees search a space of their own, which tests/test_bdt.py checks.
+@pytest.mark.parametrize("row", [row for row in JET_LEVEL if row not in CPU_ROWS])
 def test_each_jet_level_row_searches_the_mlp_space(row: str, tmp_path: Path) -> None:
     # The space, the budget and the sampler of the constituent MLP; only the study moves.
     sweeper, mlp = _sweeper(tmp_path, row), _sweeper(tmp_path, "mlp")

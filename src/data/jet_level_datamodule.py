@@ -2,11 +2,9 @@
 
 Beside its constituents, every jet of the record carries 53 observables computed
 upstream from the whole jet: its p_T, rapidity, mass and multiplicity, N-subjettiness,
-energy correlation functions and groomed masses. They are read off the record's parquet
-shards in the order in which the record's loader reads its jets, so that the folds of
-`src.data.hls4ml_datamodule.fold_indices` select the same jets for the networks and for
-these rows. The observables are never transformed, so only the baseline regime runs on
-them.
+energy correlation functions and groomed masses. T
+The folds of `src.data.hls4ml_datamodule.fold_indices` select the same jets for the
+networks and for these rows.
 """
 
 from collections.abc import Sequence
@@ -70,8 +68,7 @@ def _standardiser(x_train: np.ndarray) -> Scale:
 
 
 def _tensors(split: Split, scale: Scale) -> tuple[torch.Tensor, torch.Tensor]:
-    """The standardised jets (jets, 1, features) and the one-hot labels (jets, 5), both
-    float32."""
+    """The standardised jets (jets, 1, features) and the one-hot labels (jets, 5)."""
     (x, labels), (mean, std) = split, scale
     jets = torch.from_numpy(((x - mean) / std).astype(np.float32)).unsqueeze(1)
     return jets, torch.eye(len(CLASS_NAMES))[torch.from_numpy(labels)]
@@ -100,15 +97,10 @@ def _loader(dataset: HLS4MLDataset) -> DataLoader:
 
 
 class JetLevelDataModule(LightningDataModule):
-    """Serve the record's jet-level observables, standardised, with the splits and the
-    folds of `src.data.hls4ml_datamodule.HLS4MLDataModule`.
+    """Serve the record's jet-level observables, standardised.
 
-    Every split is standardised with the mean and the standard deviation of the record's
-    own training split: fixed constants, the same for every fold and at test time, as
-    the record's loader normalises the constituents of every fold. ``eval.py`` tests the
-    checkpoints of every fold with one datamodule, which per-fold statistics would not
-    allow. The constructor reads nothing: the shards are opened on the first use of
-    ``setup()`` or of an attribute that needs them.
+    Every split is standardised with the mean and the standard deviation.
+    These are derived from the training module of the data.
 
     :param revision: the record's commit, as pinned in ``configs/data/hls4ml.yaml``.
     :param shards_dir: the directory of the ``{train,validation,test}-*.parquet``
@@ -123,7 +115,7 @@ class JetLevelDataModule(LightningDataModule):
         pools them and serves fold ``fold_idx`` (counted from zero) of k.
     """
 
-    # The batches carry the row's observables alone, nothing for a probe to transform.
+    # The batches have the row's observables alone, nothing for a probe to transform.
     keep_full_features_at_test = False
     norm_scales = None
 
@@ -165,8 +157,7 @@ class JetLevelDataModule(LightningDataModule):
 
     @property
     def shards_directory(self) -> Path:
-        """The directory of the shards, fetched from the hub on first use unless
-        ``shards_dir`` names one."""
+        """The directory of the shards, got from the hub."""
         if self._directory is None:
             self._directory = Path(self.shards_dir or self._snapshot() / "data")
         return self._directory
@@ -200,8 +191,7 @@ class JetLevelDataModule(LightningDataModule):
         return [name for name in self.feature_names if name not in self.exclude]
 
     def feature_indices(self) -> list[int] | None:
-        """The columns of ``features`` in ``feature_names``, None when they are all of
-        them in order."""
+        """The columns of ``features`` in ``feature_names``, None when in order."""
         indices = [self.feature_names.index(name) for name in self.features]
         return None if indices == list(range(len(self.feature_names))) else indices
 
@@ -213,8 +203,7 @@ class JetLevelDataModule(LightningDataModule):
         return self._scale
 
     def setup(self, stage: str | None = None) -> None:
-        """Build the datasets of *stage* (``fit``, ``validate`` or ``test``, None for
-        all)."""
+        """Build *stage* (``fit``, ``validate`` or ``test``, None for all)."""
         if stage in (None, "fit") and self.data_train is None:
             self._setup_fit()
         if stage in (None, "validate") and self.data_val is None:
