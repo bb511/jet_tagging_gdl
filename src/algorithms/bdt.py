@@ -1,8 +1,7 @@
-"""Gradient-boosted trees on the jet-level observables, trained by the Lightning loop.
+"""Gradient-boosted trees on the jet-level observables, inside lightning loop.
 
-Each epoch adds ``trees_per_epoch`` boosting iterations to one warm-started estimator,
-so that the networks' callbacks apply unchanged: the checkpoint keeps the best epoch by
-``val/acc``, early stopping counts epochs, and Optuna reads ``val/acc_best``.
+Each epoch adds ``trees_per_epoch`` boosting iterations to one warm-started estimator.
+The networks' callbacks thus apply unchanged.
 """
 
 import math
@@ -17,19 +16,20 @@ from src.algorithms.components.bdt import BoostedTrees
 class BoostedTreesClassifier(JetTaggingModule):
     """A ``HistGradientBoostingClassifier`` in the place of a network.
 
-    Training is manual and has no torch optimiser: for the None of
-    ``configure_optimizers`` Lightning puts in its mock optimiser, whose step each batch
-    takes, since ``ModelCheckpoint`` saves nothing while ``global_step`` stays at zero.
+    Training is manual and has no torch optimiser.
+    This is a hacky way to have BDTs with consistent design.
     The trees are fitted on the last batch of an epoch, because Lightning validates an
     epoch before ``on_train_epoch_end``. Validation and test run the base class's steps
-    on the trees' log-probabilities. The trees run in scikit-learn, outside the torch
-    operations that the FLOP and eBOP counters trace, so the costs are NaN.
+    on the trees' log-probabilities. The costs reported by the trees are NaN.
     """
 
     def build_net(self, trees_per_epoch: int = 10, **tree_kwargs) -> nn.Module:
-        """Build the estimator; *tree_kwargs* are arguments of scikit-learn's
+        """Build the estimator.
+
+        *tree_kwargs* are arguments of scikit-learn's
         ``HistGradientBoostingClassifier``, at its defaults unless the config sets them,
-        and ``max_depth`` 0 sets no limit (components/bdt.py)."""
+        and ``max_depth`` 0 sets no limit (components/bdt.py).
+        """
         self.automatic_optimization = False
         # The run's torch seed, so that the folds share the estimator's draws as the
         # networks share their initialisation.
@@ -52,11 +52,6 @@ class BoostedTreesClassifier(JetTaggingModule):
         self.optimizers().step()
         if not self.trainer.is_last_batch:
             return
-        # The whole training split rather than the epoch's batches, a fresh permutation
-        # less a random partial batch: the fit reads the earlier trees through bin
-        # edges refitted on the jets it is given, which only identical jets reproduce.
         jets = self.trainer.datamodule.data_train
         self.net.fit_more(jets.X, jets.y.argmax(dim=1))
-        # One batch: every tree read on every training jet would add a pass whose cost
-        # grows with the trees, for figures that select nothing.
         super().training_step(batch, batch_idx)

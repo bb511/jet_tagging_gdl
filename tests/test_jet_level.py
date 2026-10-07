@@ -11,7 +11,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.data.hls4ml_datamodule import HLS4MLDataModule, fold_indices
-from src.data.jet_level_datamodule import JetLevelDataModule, shard_paths
+from src.data.hls4ml_jet_level_datamodule import JetLevelDataModule, shard_paths
 from src.eval import evaluate
 from src.train import train
 from tests.conftest import (

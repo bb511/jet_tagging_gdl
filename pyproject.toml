@@ -13,7 +13,8 @@ requires-python = ">=3.11,<3.13"
 # and so are easy to prune by mistake: sqlalchemy holds optuna 2.10's storage layer below
 # the 2.x that breaks it, pandas backs optuna's trials_dataframe(), mlflow is the backend
 # of MLFlowLogger, and pyyaml comes with omegaconf. pyarrow is what the record's own loader
-# reads its parquet shards with, and src/data/jet_level_datamodule.py reads them with it too.
+# reads its parquet shards with, and src/data/hls4ml_jet_level_datamodule.py reads them
+# with it too.
 # optuna comes with the sweeper too, but scripts/optuna imports it directly, so it is
 # declared.
 dependencies = [

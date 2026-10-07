@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.algorithms.bdt import BoostedTreesClassifier
 from src.algorithms.components.bdt import BoostedTrees
-from src.data.jet_level_datamodule import JetLevelDataModule
+from src.data.hls4ml_jet_level_datamodule import JetLevelDataModule
 from src.eval import evaluate
 from src.train import train
 from src.utils.checkpoints import merge_manifests

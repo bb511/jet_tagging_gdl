@@ -1,6 +1,6 @@
 # The record's 53 jet-level observables (the j_* columns of its parquet shards), standardised with
 # the moments of its training split and served as jets of one slot, for the jet-level ceiling.
-_target_: src.data.jet_level_datamodule.JetLevelDataModule
+_target_: src.data.hls4ml_jet_level_datamodule.JetLevelDataModule
 
 # The networks' pin in configs/data/hls4ml.yaml, so that both read one record; tests/test_configs.py
 # keeps the two equal.

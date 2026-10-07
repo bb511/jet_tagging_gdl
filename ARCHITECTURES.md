@@ -910,7 +910,8 @@ functions and groomed masses. `jet_level_all53` reads all of them and `jet_level
 the jet rapidity `j_eta`, which a row exact under the beam boost cannot see; it is the ceiling for
 those rows. `j_ptfrac` is 1 on every jet, so 52 and 51 of the columns carry information. The rows
 are the MLP of `src/algorithms/mlp.py` on one slot of observables per jet, with no network or
-module of their own. Around it sit `src/data/jet_level_datamodule.py`, `configs/data/jet_level.yaml`,
+module of their own. Around it sit `src/data/hls4ml_jet_level_datamodule.py`,
+`configs/data/jet_level.yaml`,
 `configs/algorithm/jet_level_{all53,noeta52}.yaml`, the experiment configs
 `configs/experiment/hls4ml/jet_level_{all53,noeta52}_150.yaml`, the search configs
 `configs/hparams_search/hls4ml/jet_level_{all53,noeta52}_optuna.yaml`, the hand-written search
