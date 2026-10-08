@@ -38,6 +38,7 @@ from src.algorithms.components.vector_neurons_hgq import (
 )
 from src.algorithms.components.vector_neurons_port import (
     ARCHITECTURE_KEYS,
+    LEGACY_DEFAULTS,
     _checkpoint_path,
     copy_float_weights,
     load_float_network,
@@ -120,6 +121,8 @@ class VectorNeuronsHGQ(VectorNeurons):
         invariants: int = 16,
         tensor_invariants: int = 2,
         stream_channels: int = 16,
+        mlp_layers: int = 2,
+        gate: bool = True,
         dropout: float = 0.0,
         units: float = 16.0,
         quantisation: dict[str, Any] | None = None,
@@ -140,11 +143,11 @@ class VectorNeuronsHGQ(VectorNeurons):
         keras.utils.set_random_seed(torch.initial_seed() % 2**32)
         self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
         self.automatic_optimization = False
-        self.quantisation = Quantisation(**(quantisation or {}))
+        q = self.quantisation = Quantisation(**(quantisation or {}))
         n, n_class = self.hparams.nconstituents, self.hparams.output_dim
         widths = (vector_channels, scalar_channels, invariants, tensor_invariants)
-        layers = (*widths, stream_channels, dropout, units, n_class, self.quantisation)
-        return KerasNetwork(*build_port(n, head_layers, num_blocks, *layers))
+        layers = (*widths, stream_channels, mlp_layers, gate, dropout, units, n_class)
+        return KerasNetwork(*build_port(n, head_layers, num_blocks, *layers, q))
 
     def _record_costs(self, nconstituents: int, nbr_feats: int) -> None:
         """Price the FLOPs on the float network of this architecture, as the ``vn`` row
@@ -199,7 +202,8 @@ class VectorNeuronsHGQ(VectorNeurons):
         datalanes."""
         model, q = self.net.keras_model, self.quantisation
         if self.hparams.init_from:
-            copy_float_weights(model, self._float_network(), self.hparams.units)
+            net, units = self._float_network(), self.hparams.units
+            copy_float_weights(model, net, units, fold_norm=q.fold_norm)
         seed_weight_bits(model, q.weight_bits)
         jets = datamodule.data_train.X[: self.hparams.calibration_jets]
         ebops = seed_datalane_bits(model, self._keras_inputs(jets), q.data_bits)
@@ -212,7 +216,8 @@ class VectorNeuronsHGQ(VectorNeurons):
         """
         path = _checkpoint_path(Path(self.hparams.init_from))
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-        theirs, ours = checkpoint["hyper_parameters"], self.hparams
+        theirs = {**LEGACY_DEFAULTS, **checkpoint["hyper_parameters"]}
+        ours = {**LEGACY_DEFAULTS, **self.hparams}
         differ = [k for k in ARCHITECTURE if theirs.get(k) != ours.get(k)]
         if differ:
             pairs = ", ".join(f"{k} {theirs.get(k)} vs {ours.get(k)}" for k in differ)

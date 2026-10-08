@@ -99,6 +99,10 @@ class Quantisation:
         to the trainable quantisers before training.
     :param float_mode: replaces every quantiser but the gate's by an identity, for
         the comparison with the float network.
+    :param fold_norm: builds no batch normalisation, the copy of a float network folding
+        each into the dense layer that reads it.
+    :param round_mode: HGQ2's rounding of every trainable datalane: RND adds half an LSB
+        before the floor, which alkaid emits as a constant adder, and TRN truncates.
     """
 
     pt_kif: tuple[int, int, int] = (0, 12, 2)
@@ -108,12 +112,14 @@ class Quantisation:
     weight_bits: int = 8
     gate_f: int = 8
     float_mode: bool = False
+    fold_norm: bool = False
+    round_mode: str = "RND"
 
     def datalane(self) -> QuantizerConfig:
-        """WRAP and RND per element, f trained and i traced."""
+        """WRAP per element, rounding by ``round_mode``, f trained and i traced."""
         if self.float_mode:
             return QuantizerConfig("dummy", "datalane")
-        return QuantizerConfig("kif", "datalane")
+        return QuantizerConfig("kif", "datalane", round_mode=self.round_mode)
 
     def weight(self) -> QuantizerConfig:
         """SAT_SYM per element, for kernels and batch-normalisation scales."""
@@ -144,7 +150,7 @@ class Quantisation:
 
 @dataclass(frozen=True)
 class _Port:
-    """The quantisers and widths every stage of the builder reads."""
+    """The quantisers, widths and switches every stage of the builder reads."""
 
     q: Quantisation
     nconstituents: int
@@ -153,6 +159,8 @@ class _Port:
     invariants: int
     tensors: int
     stream: int
+    mlp_layers: int
+    gate: bool
     dropout: float
     units: float
 
@@ -218,6 +226,12 @@ def _norm(q: Quantisation, name: str) -> QBatchNormalization:
     )
 
 
+def _normalise(q: Quantisation, name: str, x):
+    """*x* through the batch normalisation *name*, or *x* itself under ``fold_norm``,
+    where the copy folds the normalisation into the dense layer that reads *x*."""
+    return x if q.fold_norm else _norm(q, name)(x)
+
+
 def _keep_multiply(port: _Port, name: str, x, keep):
     """Zero the padded slots of *x*, the 0/1 flag *keep* read through one fixed bit."""
     confs = [port.q.datalane(), port.q.fixed(KEEP_KIF)]
@@ -262,7 +276,8 @@ def _lift(port: _Port, pt, angles):
 def _stream(port: _Port, r, keep):
     """JEDI-linear's per-rank network of ``Stream`` on the (jets, N, 2) scalars *r*."""
     q, width = port.q, port.stream
-    e = _dense(q, width, "stream_embed", activation="relu")(_norm(q, "stream_norm")(r))
+    r = _normalise(q, "stream_norm", r)
+    e = _dense(q, width, "stream_embed", activation="relu")(r)
     e = _keep_multiply(port, "stream_keep0", e, keep)
     pooled = _sum(port, "stream_pool", e, keepdims=True)
     local = _dense(q, width, "stream_local")(e)
@@ -297,15 +312,17 @@ def _tensor_invariants(port: _Port, u, tail) -> list:
 
 def _first_scalars(port: _Port, p, keep, tail, u):
     """The first block's input scalars [p, f, sum p, B(U, U), stream, chain, pair4,
-    triangle], where torch interleaves p and f."""
+    triangle], where torch interleaves p and f; no stream and no tensor invariants at
+    width 0."""
     jet = _sum(port, "jet_sum", u)
     g_jet = _metric(jet, 1)
     f = _einsum(port, "bnm,bm->bn", "rank_form", u, g_jet)
     r = ops.concatenate([ops.expand_dims(p, -1), ops.expand_dims(f, -1)], axis=-1)
     p_sum = _sum(port, "p_sum", p, keepdims=True)
     jet_form = ops.expand_dims(_einsum(port, "bm,bm->b", "jet_form", jet, g_jet), -1)
-    extras = [_stream(port, r, keep), *_tensor_invariants(port, u, tail)]
-    return ops.concatenate([p, f, p_sum, jet_form, *extras], axis=-1)
+    stream = [_stream(port, r, keep)] if port.stream > 0 else []
+    tensors = _tensor_invariants(port, u, tail) if port.tensors > 0 else []
+    return ops.concatenate([p, f, p_sum, jet_form, *stream, *tensors], axis=-1)
 
 
 def _read(port: _Port, v, n, s, prefix: str):
@@ -318,12 +335,15 @@ def _read(port: _Port, v, n, s, prefix: str):
 
 
 def _scalar_update(port: _Port, v, s, n, b: int):
-    """The batch normalisation and the scalar MLP of block *b*."""
+    """The batch normalisation and the scalar MLP of block *b*, ReLU between its dense
+    layers and none after the last."""
     q, width = port.q, port.scalar
-    x = _norm(q, f"block{b}_norm")(_read(port, v, n, s, f"block{b}"))
-    x = _dropout(port, x, f"block{b}_dropout0")
-    x = _dense(q, width, f"block{b}_mlp0", activation="relu")(x)
-    return _dense(q, width, f"block{b}_mlp1")(_dropout(port, x, f"block{b}_dropout1"))
+    x = _normalise(q, f"block{b}_norm", _read(port, v, n, s, f"block{b}"))
+    for j in range(port.mlp_layers):
+        activation = "relu" if j < port.mlp_layers - 1 else None
+        x = _dropout(port, x, f"block{b}_dropout{j}")
+        x = _dense(q, width, f"block{b}_mlp{j}", activation=activation)(x)
+    return x
 
 
 def _gate(port: _Port, s, v, b: int):
@@ -339,6 +359,8 @@ def _first_block(port: _Port, u, s, n):
     shape = (4, port.vector)
     mixed = _einsum_dense(port, "bnm,nc->bmc", shape, "block0_mix")(u)
     s_new = _scalar_update(port, mixed, s, n, 0)
+    if not port.gate:
+        return mixed, s_new
     return _gate(port, s_new, mixed, 0), s_new
 
 
@@ -348,7 +370,7 @@ def _later_block(port: _Port, v, s, n, b: int):
     mixed = _dense(q, port.vector, f"block{b}_mix", use_bias=False)(v)
     update = _scalar_update(port, mixed, s, n, b)
     s_new = QAdd(iq_confs=q.datalane(), name=f"block{b}_residual_s")([update, s])
-    gated = _gate(port, s_new, mixed, b)
+    gated = _gate(port, s_new, mixed, b) if port.gate else mixed
     v_new = QAdd(iq_confs=q.datalane(), name=f"block{b}_residual_v")([gated, v])
     return v_new, s_new
 
@@ -356,7 +378,7 @@ def _later_block(port: _Port, v, s, n, b: int):
 def _head(port: _Port, v, s, n, head_layers: Sequence[int], n_class: int):
     """The readout forms, the head's batch normalisation and its MLP; no softmax."""
     q = port.q
-    x = _norm(q, "head_norm")(_read(port, v, n, s, "readout"))
+    x = _normalise(q, "head_norm", _read(port, v, n, s, "readout"))
     for j, width in enumerate(head_layers):
         x = _dropout(port, x, f"head_dropout{j}")
         x = _dense(q, width, f"head{j}", activation="relu")(x)
@@ -374,6 +396,8 @@ def build_port(
     invariants: int = 16,
     tensor_invariants: int = 2,
     stream_channels: int = 16,
+    mlp_layers: int = 2,
+    gate: bool = True,
     dropout: float = 0.0,
     units: float = 16.0,
     n_class: int = 5,
@@ -392,7 +416,9 @@ def build_port(
         raise ValueError(f"units must be a power of two, got {units}.")
     q = quantisation or Quantisation()
     widths = (vector_channels, scalar_channels, invariants, tensor_invariants)
-    port = _Port(q, nconstituents, *widths, stream_channels, dropout, units)
+    port = _Port(
+        q, nconstituents, *widths, stream_channels, mlp_layers, gate, dropout, units
+    )
     return _build(port, num_blocks, head_layers, n_class)
 
 

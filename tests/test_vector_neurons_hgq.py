@@ -15,7 +15,7 @@ import torch.nn.functional as F
 pytest.importorskip("hgq")
 
 import keras
-from hgq.layers import Quantizer
+from hgq.layers import QBatchNormalization, Quantizer
 from hgq.layers.core import QLayerBase
 from hgq.quantizer.internal import (
     FixedPointQuantizerBase,
@@ -56,9 +56,23 @@ ARCHITECTURE = {
     "tensor_invariants": 2,
     "stream_channels": 8,
 }
+# (gate, mlp_layers, stream_channels, tensor_invariants): today's network and the
+# latency ablation's variants, each switching one more piece off.
+VARIANTS = [
+    (True, 2, 8, 2),
+    (False, 2, 8, 2),
+    (False, 1, 8, 2),
+    (False, 1, 0, 2),
+    (False, 1, 0, 0),
+]
 # GeV per unit of p_T: the float row's and the port's.
 FLOAT_UNITS, PORT_UNITS = 20.0, 16.0
 LAMBDA = FLOAT_UNITS / PORT_UNITS
+# Today's quantised port and the one of both latency switches.
+QUANTISED = {
+    "default": Quantisation(),
+    "folded_trn": Quantisation(fold_norm=True, round_mode="TRN"),
+}
 
 
 def _jets(n_jets: int = 64, seed: int = 1) -> torch.Tensor:
@@ -74,13 +88,14 @@ def _jets(n_jets: int = 64, seed: int = 1) -> torch.Tensor:
     return x[:, torch.randperm(N_SLOTS, generator=generator)]
 
 
-def _torch_net(x: torch.Tensor) -> VectorNeuronsClassifier:
+def _torch_net(x: torch.Tensor, **variant: object) -> VectorNeuronsClassifier:
     # float64 and eval mode. The gates get N(0, 1) weights, so that each is a function
     # of the scalars rather than the constant 1/2, the batch normalisations random
     # affine parameters, and one training pass at momentum 1 sets their running
     # statistics to those of the jets, so that every fold is exercised.
     torch.manual_seed(0)
-    net = VectorNeuronsClassifier(N_SLOTS, HEAD, units=FLOAT_UNITS, **ARCHITECTURE)
+    architecture = {**ARCHITECTURE, **variant}
+    net = VectorNeuronsClassifier(N_SLOTS, HEAD, units=FLOAT_UNITS, **architecture)
     net = net.double()
     with torch.no_grad():
         for module in net.modules():
@@ -104,23 +119,28 @@ def _rows(x: torch.Tensor) -> np.ndarray:
     return torch.stack([x[..., 0], eta * real, phi * real], dim=-1).numpy()
 
 
-def _port(quantisation: Quantisation) -> tuple[keras.Model, keras.Model]:
+def _port(
+    quantisation: Quantisation, **variant: object
+) -> tuple[keras.Model, keras.Model]:
     configure_jax("cpu", 1, "float64")
     keras.utils.set_random_seed(0)
+    architecture = {**ARCHITECTURE, **variant}
     return build_port(
-        N_SLOTS, HEAD, units=PORT_UNITS, quantisation=quantisation, **ARCHITECTURE
+        N_SLOTS, HEAD, units=PORT_UNITS, quantisation=quantisation, **architecture
     )
 
 
-def _copied(quantisation: Quantisation, x: torch.Tensor) -> tuple:
-    net = _torch_net(x)
-    model, words_model = _port(quantisation)
-    copy_float_weights(model, net, PORT_UNITS)
+def _copied(quantisation: Quantisation, x: torch.Tensor, **variant: object) -> tuple:
+    net = _torch_net(x, **variant)
+    model, words_model = _port(quantisation, **variant)
+    copy_float_weights(model, net, PORT_UNITS, fold_norm=quantisation.fold_norm)
     return net, model, words_model
 
 
-def _seeded(x: torch.Tensor) -> tuple[keras.Model, keras.Model, np.ndarray]:
-    _, model, words_model = _copied(Quantisation(), x)
+def _seeded(
+    x: torch.Tensor, quantisation: Quantisation
+) -> tuple[keras.Model, keras.Model, np.ndarray]:
+    _, model, words_model = _copied(quantisation, x)
     rows = _rows(x)
     seed_weight_bits(model, 10)
     seed_datalane_bits(model, rows, 12)
@@ -131,11 +151,29 @@ def _predict(model: keras.Model, rows: np.ndarray) -> np.ndarray:
     return np.asarray(model.predict_on_batch(rows))
 
 
-def test_the_float_port_reproduces_the_torch_network() -> None:
+@pytest.mark.parametrize("fold_norm", [False, True])
+@pytest.mark.parametrize(
+    "gate, mlp_layers, stream_channels, tensor_invariants", VARIANTS
+)
+def test_the_float_port_reproduces_the_torch_network(
+    gate: bool,
+    mlp_layers: int,
+    stream_channels: int,
+    tensor_invariants: int,
+    fold_norm: bool,
+) -> None:
     # The criterion of the copy: in float mode only the gate's clamp, at 2^-24, and the
-    # float64 rounding of the folds separate the two.
+    # float64 rounding of the folds separate the two. Folded, every batch normalisation
+    # lives in the dense layer after it: the stream's, both blocks' and the head's.
+    variant = dict(
+        gate=gate,
+        mlp_layers=mlp_layers,
+        stream_channels=stream_channels,
+        tensor_invariants=tensor_invariants,
+    )
     x = _jets()
-    net, model, _ = _copied(Quantisation(float_mode=True), x)
+    q = Quantisation(float_mode=True, fold_norm=fold_norm)
+    net, model, _ = _copied(q, x, **variant)
     with torch.no_grad():
         expected = net(x).numpy()
 
@@ -143,6 +181,16 @@ def test_the_float_port_reproduces_the_torch_network() -> None:
 
     assert logits.dtype == np.float64
     assert np.abs(logits - expected).max() <= 1e-6 * max(1.0, np.abs(expected).max())
+    norms = [layer for layer in model.layers if isinstance(layer, QBatchNormalization)]
+    assert len(norms) == (0 if fold_norm else 3 + (stream_channels > 0))
+    names = {layer.name for layer in model.layers}
+    assert all((f"block{b}_gate" in names) == gate for b in range(2))
+    assert {f"block0_mlp{j}" for j in range(3)} & names == {
+        f"block0_mlp{j}" for j in range(mlp_layers)
+    }
+    assert ("stream_embed" in names) == (stream_channels > 0)
+    tensors = {name for name in names if name.startswith("tensors_")}
+    assert bool(tensors) == (tensor_invariants > 0)
 
 
 def test_the_fold_leaves_an_eval_batch_norm_unchanged() -> None:
@@ -306,11 +354,12 @@ def test_seeding_sets_the_trainable_bits_and_leaves_the_fixed_quantisers() -> No
         assert all(np.array_equal(a, b) for a, b in zip(kif, after[path]))
 
 
+@pytest.mark.parametrize("name", QUANTISED)
 def test_the_quantised_port_trains_traces_and_survives_a_round_trip(
-    tmp_path: Path,
+    tmp_path: Path, name: str
 ) -> None:
-    x = _jets()
-    model, words_model, rows = _seeded(x)
+    x, quantisation = _jets(), QUANTISED[name]
+    model, words_model, rows = _seeded(x, quantisation)
     network = KerasNetwork(model, words_model)
     optimizer = keras.optimizers.AdamW(learning_rate=1e-3, global_clipnorm=1.0)
     optimizer.exclude_from_weight_decay(var_list=quantiser_variables(model))
@@ -344,14 +393,47 @@ def test_the_quantised_port_trains_traces_and_survives_a_round_trip(
     assert np.array_equal(logits.numpy(), _predict(model, rows))
 
 
-def test_alkaid_reproduces_the_port_bit_for_bit() -> None:
+@pytest.mark.parametrize("name", QUANTISED)
+def test_round_mode_reaches_the_trainable_datalanes_alone(name: str) -> None:
+    quantisation = QUANTISED[name]
+    model, _ = _port(quantisation)
+    kifs = [
+        layer
+        for layer in model._flatten_layers()
+        if isinstance(layer, FixedPointQuantizerKIF)
+    ]
+    trainable = {layer.round_mode for layer in kifs if layer.trainable}
+    fixed = {layer.round_mode for layer in kifs if not layer.trainable}
+
+    assert trainable == {quantisation.round_mode}
+    assert fixed == {"RND"}
+
+
+def test_truncation_floors_a_near_tie_in_float64() -> None:
+    # TRN floors x 2^f: at f = 0, -1/4 goes to -1 where RND gives 0, and 626 - 2^-15
+    # to 625 where the float32 floor of Keras 3.15 on JAX would give 626.
+    configure_jax("cpu", 1, "float64")
+    lane = Quantizer(Quantisation(round_mode="TRN").datalane())
+    x = np.array([[626.0 - 2.0**-15, -0.25]])
+    lane.build(x.shape)
+    inner = lane.quantizer
+    inner._i.assign(np.full(inner._i.shape, 10.0))
+    inner._f.assign(np.zeros(inner._f.shape))
+
+    y = np.asarray(lane(x, training=False))
+
+    assert y.tolist() == [[625.0, -1.0]]
+
+
+@pytest.mark.parametrize("name", QUANTISED)
+def test_alkaid_reproduces_the_port_bit_for_bit(name: str) -> None:
     # alkaid replays the traced port on the words it reads; under float64 every value
     # of Keras is the fixed-point value of the hardware, so the two must agree exactly.
     pytest.importorskip("alkaid")
     from alkaid.converter import trace_model
     from alkaid.trace import HWConfig, trace
 
-    model, words_model, rows = _seeded(_jets())
+    model, words_model, rows = _seeded(_jets(), QUANTISED[name])
     calibrate(model, rows)
     words = _predict(words_model, rows)
 

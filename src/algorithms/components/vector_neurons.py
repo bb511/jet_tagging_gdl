@@ -141,6 +141,10 @@ class EquivariantBlock(nn.Module):
     :param residual: add the input to both states. Every block but the first does; the
         input of the first is the constituents by rank and their scalars, not a state of
         the same space.
+    :param mlp_layers: linear layers of the scalar MLP, ReLU between them and none after
+        the last.
+    :param gate: gate the mixed vectors. Without the gate they pass unscaled, so that on
+        an FPGA the vector path does not wait for the scalar MLP.
     """
 
     def __init__(
@@ -152,14 +156,16 @@ class EquivariantBlock(nn.Module):
         invariants: int,
         dropout: float,
         residual: bool,
+        mlp_layers: int = 2,
+        gate: bool = True,
     ) -> None:
         super().__init__()
         self.linear = ChannelLinear(c_in, vector_channels)
         self.invariants = FormInvariants(vector_channels, invariants)
         width = s_in + self.invariants.width + 1
         self.norm = nn.BatchNorm1d(width)
-        self.mlp = _mlp([width, scalar_channels, scalar_channels], dropout)
-        self.gate = ChannelGate(scalar_channels, vector_channels)
+        self.mlp = _mlp([width, *[scalar_channels] * mlp_layers], dropout)
+        self.gate = ChannelGate(scalar_channels, vector_channels) if gate else None
         self.residual = residual
 
     def forward(
@@ -174,10 +180,11 @@ class EquivariantBlock(nn.Module):
         """
         u = self.linear(v)
         s_new = self.mlp(self.norm(torch.cat([s, self.invariants(u), c], dim=-1)))
-        if not self.residual:
-            return self.gate(s_new, u), s_new
-        s_new = s_new + s
-        return self.gate(s_new, u) + v, s_new
+        if self.residual:
+            s_new = s_new + s
+        if self.gate is not None:
+            u = self.gate(s_new, u)
+        return (u + v if self.residual else u), s_new
 
 
 class Stream(nn.Module):
@@ -258,8 +265,10 @@ class VectorNeuronsClassifier(nn.Module):
     :param scalar_channels: scalar channels of every block.
     :param invariants: forms read in every block and in the readout.
     :param tensor_invariants: correlators of each of the three kinds the first block
-        reads.
-    :param stream_channels: width of the per-constituent stream.
+        reads; 0 builds no tensor invariants.
+    :param stream_channels: width of the per-constituent stream; 0 builds no stream.
+    :param mlp_layers: linear layers of the scalar MLP of every block.
+    :param gate: gate the mixed vectors in every block.
     :param dropout: dropout rate in front of each linear layer of the scalar MLPs and of
         the head; it never touches a vector.
     :param units: GeV per unit of p_T, 20 as in the L-GATr-slim and LLoCa rows.
@@ -277,6 +286,8 @@ class VectorNeuronsClassifier(nn.Module):
         invariants: int = 16,
         tensor_invariants: int = 2,
         stream_channels: int = 16,
+        mlp_layers: int = 2,
+        gate: bool = True,
         dropout: float = 0.0,
         units: float = 20.0,
         n_class: int = 5,
@@ -284,8 +295,12 @@ class VectorNeuronsClassifier(nn.Module):
         super().__init__()
         self.nconstituents, self.units = nconstituents, units
         self.register_buffer("metric", _form_matrix(), persistent=False)
-        self.stream = Stream(stream_channels)
-        self.tensors = TensorInvariants(nconstituents, tensor_invariants)
+        self.stream = Stream(stream_channels) if stream_channels > 0 else None
+        self.tensors = (
+            TensorInvariants(nconstituents, tensor_invariants)
+            if tensor_invariants > 0
+            else None
+        )
         self.blocks = _blocks(
             nconstituents,
             # Every rank's scalars, the jet's two, the stream and three kinds of tensor
@@ -296,6 +311,8 @@ class VectorNeuronsClassifier(nn.Module):
             scalar_channels=scalar_channels,
             invariants=invariants,
             dropout=dropout,
+            mlp_layers=mlp_layers,
+            gate=gate,
         )
         self.readout = FormInvariants(vector_channels, invariants)
         width = scalar_channels + self.readout.width + 1
@@ -315,8 +332,9 @@ class VectorNeuronsClassifier(nn.Module):
         jet = u.sum(dim=1, keepdim=True)
         r = torch.stack([p, _form(u, jet, self.metric)], dim=-1)
         jet_scalars = [p.sum(dim=1, keepdim=True), _form(jet, jet, self.metric)]
-        extras = [self.stream(r, keep), self.tensors(u, unit)]
-        return torch.cat([r.flatten(1), *jet_scalars, *extras], dim=-1)
+        stream = [] if self.stream is None else [self.stream(r, keep)]
+        tensors = [] if self.tensors is None else [self.tensors(u, unit)]
+        return torch.cat([r.flatten(1), *jet_scalars, *stream, *tensors], dim=-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits of a batch of jets.

@@ -21,8 +21,10 @@ num_blocks: 1
 vector_channels: 16 # lifted vector channels of every block
 scalar_channels: 64 # scalar channels of every block
 invariants: 16 # forms read in every block and in the readout
-tensor_invariants: 2 # three-point correlators of each of three kinds, read by the first block
-stream_channels: 16 # width of the per-constituent stream
+tensor_invariants: 2 # three-point correlators of each of three kinds, read by the first block; 0 builds none
+stream_channels: 16 # width of the per-constituent stream; 0 builds none
+mlp_layers: 2 # linear layers of the scalar MLP of every block, ReLU between them
+gate: true # false passes the mixed vectors ungated, so that they need not wait for the scalar MLP
 head_layers: [64, 32] # hidden widths of the readout MLP
 dropout: 0.0
 units: 20.0 # GeV per unit of p_T, the L-GATr-slim and LLoCa rows' scale; never searched

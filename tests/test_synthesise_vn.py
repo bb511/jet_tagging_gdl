@@ -28,6 +28,8 @@ CHECK = {
     "part": "xcvu13p-flga2577-2-e",
     "clock_ns": 5.0,
     "latency_cutoff": 5.0,
+    "ternary": "fused",
+    "method0": "wmc",
     "export_dir": "/export",
     "prj_dir": "/prj",
     "alkaid_version": "0.8.1",
@@ -81,6 +83,8 @@ def test_csv_row_reads_check_and_vivado_report(synth, tmp_path):
         "vivado_done": True,
         "model": "vn_hgq",
         "beta": 1e-7,
+        "ternary": "fused",
+        "method0": "wmc",
         "n_mismatch": 0,
     }
     assert {key: row[key] for key in expected} == expected
@@ -105,6 +109,18 @@ def test_append_row_writes_the_header_once(synth, tmp_path):
     assert len(rows) == 2
     assert (rows[0]["lut"], rows[1]["lut"]) == ("nan", "50000")
     assert list(rows[0]) == list(synth.CSV_FIELDS)
+
+
+def test_a_csv_of_another_header_is_refused(synth, tmp_path):
+    # A file written before the ternary and method0 columns, which a row would misalign.
+    path = tmp_path / "synthesis.csv"
+    synth.append_row(path, synth.csv_row(CHECK, METADATA))
+    synth.check_header(path)
+    old = [field for field in synth.CSV_FIELDS if field not in ("ternary", "method0")]
+    path.write_text(",".join(old) + "\n")
+
+    with pytest.raises(SystemExit, match="another header"):
+        synth.check_header(path)
 
 
 @pytest.mark.parametrize(
@@ -182,13 +198,26 @@ def _export(synth, keras, directory: Path) -> list[str]:
     return ["--export-dir", str(export_dir), "--outputs-npz", str(npz)]
 
 
-def test_tiny_export_is_bit_exact(synth, keras64, tmp_path):
+@pytest.mark.parametrize(
+    "options, ternary, method0",
+    [
+        ((), "fused", "wmc"),
+        (("--ternary", "off", "--method0", "mc"), "off", "mc"),
+        (
+            ("--ternary", "aware", "--method0", "wmc-pdc", "--hard-dc", "0"),
+            "aware",
+            "wmc-pdc",
+        ),
+    ],
+)
+def test_tiny_export_is_bit_exact(synth, keras64, tmp_path, options, ternary, method0):
     out = tmp_path / "synth"
     argv = [*_export(synth, keras64, tmp_path), "--out", str(out), "--threads", "2"]
-    assert synth.main([*argv, "--no-cosim", "--no-vivado"]) == 0
+    assert synth.main([*argv, *options, "--no-cosim", "--no-vivado"]) == 0
     check = synth.read_json(out / "check.json")
     expected = {"n_mismatch": 0, "n_mismatch_keras": 0, "n_test": N_JETS, "ii": 1}
     assert {key: check[key] for key in expected} == expected
+    assert (check["ternary"], check["method0"]) == (ternary, method0)
     assert check["acc_macro_alkaid"] == check["acc_macro_keras"]
     assert check["cosim_exact"] is None
     probe = np.load(tmp_path / "outputs" / "main.npz")
@@ -205,15 +234,36 @@ def test_tiny_export_is_bit_exact(synth, keras64, tmp_path):
     assert len(rows) == 2
     expected = {"n_mismatch": "0", "vivado_done": "False", "lut": "nan"}
     assert {key: rows[0][key] for key in expected} == expected
+    assert (rows[0]["ternary"], rows[0]["method0"]) == (ternary, method0)
 
 
 @pytest.mark.skipif(shutil.which("verilator") is None, reason="no Verilator")
-def test_tiny_export_cosimulates_exactly(synth, keras64, tmp_path):
+@pytest.mark.parametrize("ternary", ["fused", "aware"])
+def test_tiny_export_cosimulates_exactly(synth, keras64, tmp_path, ternary):
     out = tmp_path / "synth"
     argv = [*_export(synth, keras64, tmp_path), "--out", str(out), "--threads", "2"]
-    assert synth.main([*argv, "--no-vivado", "--cosim-jets", str(N_JETS)]) == 0
+    options = ["--ternary", ternary, "--no-vivado", "--cosim-jets", str(N_JETS)]
+    assert synth.main([*argv, *options]) == 0
     check = synth.read_json(out / "check.json")
     assert (check["n_cosim"], check["cosim_exact"]) == (N_JETS, True)
+
+
+def test_aware_fusion_keeps_the_logic_and_delays_no_output(synth, keras64):
+    # The ternary adders replace binary pairs exactly, and each is kept only where it
+    # is no later than the root it replaces.
+    from hgq.utils import trace_minmax
+
+    model, words = _tiny_model(keras64), _words(np.random.default_rng(0))
+    parts = synth.split_inputs(model, words)
+    trace_minmax(model, parts)
+    comb = synth.trace_comb(model, {"hard_dc": 0, "method0": "wmc"}, "off")
+
+    fused = synth.fuse_aware(comb)
+
+    assert any(op.opcode == 11 for op in fused.ops)
+    assert np.array_equal(fused.predict(parts), comb.predict(parts))
+    latency = [max(op.latency for op in logic.ops) for logic in (fused, comb)]
+    assert latency[0] <= latency[1]
 
 
 def test_jax_off_the_cpu_is_refused(synth, keras64, monkeypatch):

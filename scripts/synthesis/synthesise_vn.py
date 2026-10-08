@@ -10,7 +10,10 @@ probe's ``outputs/<label>.npz``, whose clean logits are the bit-exact reference.
    refused, since XLA's float64 2**f is inexact on a GPU;
 2. ``import hgq`` registers its layers and alkaid's plugin for them; the model loads;
 3. Keras predicts the exported words, and a drift from the probe's logits is logged;
-4. alkaid traces the model into combinational logic, as ``alkaid convert`` does;
+4. alkaid traces the model into combinational logic, as ``alkaid convert`` does, its
+   constant matrix-vector products solved by ``--method0`` at ``--hard-dc``; under
+   ``--ternary aware`` its adder pairs are then fused latency-aware, so that the
+   emulation of step 5 and the co-simulation of step 7 check the fused logic;
 5. the Keras and the alkaid predictions are written to ``<out>/keras_outputs.npz`` and
    ``<out>/alkaid_outputs.npz`` in the layout of the probe's file, so that
    ``scripts/analysis/compare_outputs.py`` reads off either its working points and its
@@ -18,14 +21,16 @@ probe's ``outputs/<label>.npz``, whose clean logits are the bit-exact reference.
    probe's logits: ``n_mismatch`` counts the logit entries that differ, and more than
    ``--max-mismatch`` stops the run, after the two files are written; the macro (mean
    per-class recall, torchmetrics' default) and micro accuracies follow;
-6. the Verilog project ``<out>/prj/`` is written for ``--part`` at ``--clock`` ns, and
+6. the Verilog project ``<out>/prj/`` is written for ``--part`` at ``--clock`` ns, with
+   alkaid's own ternary-adder fusion under ``--ternary fused`` alone, and
    ``<out>/check.json`` records steps 3 to 7;
 7. unless ``--no-cosim``, Verilator co-simulates ``--cosim-jets`` jets, which must
    match alkaid's emulation exactly;
 8. unless ``--no-vivado``, Vivado implements the project out of context through
    alkaid's ``build_vivado_prj.tcl`` (reports in ``prj/output_vn_hgq/reports/``);
 9. alkaid's project report (``prj/report.json``) and ``check.json`` make one row of
-   ``--csv``; the Vivado columns hold NaN when Vivado has not run.
+   ``--csv``; the Vivado columns hold NaN when Vivado has not run. An existing
+   ``--csv`` whose header is not today's is refused before step 1.
 
 Nothing is imported from ``src``, so the script runs wherever
 ``scripts/synthesis/requirements.txt`` is installed. A project written on one machine
@@ -92,6 +97,10 @@ REPORT_FIELDS = {
     "uram": "URAM",
 }
 VIVADO_DONE = {"LUT", "WNS(ns)"}
+# alkaid's CMVM methods; at hard_dc 0, wmc and mc are solved as wmc-dc and mc-dc.
+METHODS = ("wmc", "mc", "wmc-pdc", "mc-pdc")
+# The ternary-adder fusion: alkaid's (RTLModel's default), none, or fuse_aware's.
+TERNARY = ("fused", "off", "aware")
 
 CSV_FIELDS = (
     "model",
@@ -101,6 +110,8 @@ CSV_FIELDS = (
     "part",
     "clock_ns",
     "latency_cutoff",
+    "ternary",
+    "method0",
     "ii",
     "latency_cycles",
     "latency_ns",
@@ -147,6 +158,8 @@ OPTIONS: tuple[tuple[str, dict[str, Any]], ...] = (
         {"type": float, "default": 5.0, "help": "combinational delay per stage (ns)"},
     ),
     ("--hard-dc", {"type": int, "default": 5, "help": "alkaid's delay constraint"}),
+    ("--method0", {"choices": METHODS, "default": "wmc", "help": "alkaid's CMVM"}),
+    ("--ternary", {"choices": TERNARY, "default": "fused", "help": "adder fusion"}),
     ("--cosim-jets", {"type": int, "default": 1000, "help": "jets co-simulated"}),
     ("--no-cosim", {"action": "store_true", "help": "skip the co-simulation"}),
     ("--no-vivado", {"action": "store_true", "help": "skip the Vivado run"}),
@@ -331,13 +344,51 @@ def keras_predict(model: Any, parts: list[np.ndarray]) -> np.ndarray:
     return np.asarray(logits, dtype=np.float64)
 
 
-def trace_comb(model: Any, hard_dc: int) -> Any:
-    """Trace the model into alkaid's combinational logic, as ``alkaid convert`` does."""
+def _ternary_op(ops: list[Any], root_idx: int, child_idx: int) -> Any:
+    """The opcode-11 ternary adder of the binary adder *root_idx* and its single-use
+    binary operand *child_idx*, as alkaid's ``fuse_ternary_adders`` builds it."""
+    from alkaid.trace.passes.ternary import _to_ternary_terms
+    from alkaid.types import Op
+
+    root, terms = ops[root_idx], _to_ternary_terms(ops, root_idx, child_idx)
+    addr = tuple(idx for idx, _, _ in terms)
+    data = tuple(x for _, sign, shift in terms for x in (int(sign > 0), shift))
+    return Op(addr, 11, data, root.qint, root.latency, root.cost)
+
+
+def fuse_aware(comb: Any) -> Any:
+    """Fuse the adder pairs alkaid would fuse, keeping a ternary adder only when it is
+    no later than the binary root it replaces, so that no output is delayed.
+
+    A prototype of the latency study of 2026-10-09 on alkaid 0.8.1, not an alkaid
+    option: alkaid scores a pair by the adders it saves alone, and fusing a root with
+    one child of a balanced tree lengthens the path, the sibling staying binary.
+    """
+    from alkaid.trace.passes import add_surrogate, dead_code_elimin
+    from alkaid.trace.passes.surrogate import cost_lat_ternary_add
+    from alkaid.trace.passes.ternary import _fusion_leafs
+
+    ops = list(comb.ops)
+    for root_idx, child_idx in _fusion_leafs(comb).items():
+        root, ops[root_idx] = ops[root_idx], _ternary_op(comb.ops, root_idx, child_idx)
+        _, delay = cost_lat_ternary_add(root_idx, ops, comb.carry_size % 65535)
+        ready = max(comb.ops[idx].latency for idx in ops[root_idx].addr)
+        if ready + delay > root.latency:
+            ops[root_idx] = root
+    fused = comb._replace(ops=ops)
+    return add_surrogate(dead_code_elimin(fused), _skip_op8_cost=True)
+
+
+def trace_comb(model: Any, options: dict[str, Any], ternary: str) -> Any:
+    """Trace the model into alkaid's combinational logic with the solver *options*, as
+    ``alkaid convert`` does, and fuse its adders latency-aware under *ternary*
+    ``aware``."""
     from alkaid.converter import trace_model
     from alkaid.trace import HWConfig, trace
 
-    inputs, outputs = trace_model(model, HWConfig(1, 1, -1), {"hard_dc": hard_dc})
-    return trace(inputs, outputs)
+    inputs, outputs = trace_model(model, HWConfig(1, 1, -1), options)
+    comb = trace(inputs, outputs)
+    return fuse_aware(comb) if ternary == "aware" else comb
 
 
 def macro_accuracy(logits: np.ndarray, labels: np.ndarray) -> float:
@@ -379,6 +430,8 @@ def run_record(args: argparse.Namespace, export: dict[str, Any]) -> dict[str, An
         **{key: export[key] for key in ("nconstituents", "beta", "ebops")},
         **target,
         "latency_cutoff": args.latency_cutoff,
+        "ternary": args.ternary,
+        "method0": args.method0,
         "export_dir": str(args.export_dir.resolve()),
         "prj_dir": str((args.out / "prj").resolve()),
         **{f"{name}_version": version(dist) for name, dist in DISTRIBUTIONS},
@@ -407,6 +460,7 @@ def write_rtl(args: argparse.Namespace, comb: Any, meta: dict[str, Any]) -> Any:
     from alkaid.codegen import RTLModel
 
     kwargs = {name: getattr(args, key) for key, name in RTL_OPTIONS.items()}
+    kwargs["ternary_fuse"] = args.ternary == "fused"
     rtl = RTLModel(comb, args.out / "prj", PROJECT, flavor="verilog", **kwargs)
     rtl.write(meta)
     return rtl
@@ -467,7 +521,8 @@ def predict(
     :return: the traced logic and the Keras and alkaid logits (jets, classes).
     """
     y_keras = _timed("Keras prediction", keras_predict, model, parts)
-    comb = _timed("alkaid trace", trace_comb, model, args.hard_dc)
+    options = {"hard_dc": args.hard_dc, "method0": args.method0}
+    comb = _timed("alkaid trace", trace_comb, model, options, args.ternary)
     y_alkaid = _timed("alkaid emulation", comb.predict, parts, args.threads)
     write_predictions(args.out, labels, keras=y_keras, alkaid=y_alkaid)
     return comb, y_keras, y_alkaid
@@ -544,6 +599,17 @@ def csv_row(check: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
     return {key: math.nan if row.get(key) is None else row[key] for key in CSV_FIELDS}
 
 
+def check_header(path: Path) -> None:
+    """Refuse to append to a CSV whose header is not ``CSV_FIELDS``, which a row would
+    misalign: one written before a column was added."""
+    if not path.exists():
+        return
+    with path.open(newline="") as handle:
+        header = next(csv.reader(handle), [])
+    if header != list(CSV_FIELDS):
+        raise SystemExit(f"{path} has another header than CSV_FIELDS; pass a new --csv")
+
+
 def append_row(path: Path, row: dict[str, Any]) -> None:
     """Append the row, writing the header first into a new file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -567,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
     """Run the steps the command line asks for; return the exit status."""
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    check_header(args.csv)
     if not args.report_only:
         build(args)
         implement(args)

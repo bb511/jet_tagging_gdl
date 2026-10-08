@@ -2,21 +2,21 @@
 # ========================================================================
 # VN_HGQ EVALUATION COMMANDS
 # ========================================================================
-# Five eval runs at 16 constituents, one per block of runvn_hgq_train.sh:
-# the float reference, then one per beta. Hand-written: vn_hgq has no study
-# and the reference is a variant of a study's best, so
-# scripts/optuna/make_train_catalogues.py neither writes nor regenerates
-# this file.
+# Twenty eval runs at 16 constituents, one per block of
+# runvn_hgq_train.sh: the float reference, one per beta, then the latency
+# ablation. Hand-written: vn_hgq has no study and the reference is a variant
+# of a study's best, so scripts/optuna/make_train_catalogues.py neither
+# writes nor regenerates this file.
 # Baseline only: the vector neurons embed the symmetry, so the augmentation
 # and SCL regimes are not run on them.
 # The first block evaluates the float reference, the one-block vn main run
 # logs/train/hls4ml/vn/nconst16/baseline_1block that algorithm.init_from of
-# every later block names. One block rather than the two-block finals: it
+# blocks 2 to 5 names. One block rather than the two-block finals: it
 # comes within 0.1 points of the two-block best at about half the depth and
 # cost, and the paper shows the one-block scan alone. Its row goes to
 # results/quantised/ (results_table.subdir), beside the quantised rows,
 # rather than to the finals' table in results/embedded/.
-# Each later block repeats its training block's overrides and runs Keras in
+# Each quantised block repeats its training block's overrides and runs Keras in
 # float64 (algorithm.floatx) on the CPU (algorithm.jax_platform), where it
 # reproduces the fixed-point arithmetic exactly; on a GPU, XLA's float64
 # 2**f is off by an ulp for some f and about 2 % of the jets round
@@ -28,9 +28,22 @@
 # The four beta blocks share the label vn_hgq_nconst16_baseline, so select
 # them with --only <index> (2 to 5), not by name; the reference is block 1.
 # Each beta block names its row vn_hgq_beta<tag> (algorithm.name), so that
-# the table in results/quantised/ tells the four apart. Each block's
-# evaluation merges the main run with the five folds fitted beside it on
-# 2026-10-08.
+# the table in results/quantised/ tells the four apart. The evaluation of
+# each of blocks 1 to 5 merges the main run with the five folds fitted
+# beside it on 2026-10-08.
+# Blocks 6 to 13 evaluate the latency ablation of runvn_hgq_train.sh: the
+# first four float variants (the gate, the head's 64-wide layer, the second
+# layer of the scalar MLP and the stream switched off one after another),
+# whose rows vn_<tag> also go to results/quantised/, then their fine-tunes
+# at beta=3e-07, rows vn_hgq_<tag>_beta3e-07. Blocks 14 and 15 do the same
+# for the fifth variant, which also switches off the tensor invariants.
+# Their labels repeat those of blocks 1 to 5, so select them by index too.
+# Blocks 16 and 17 evaluate the two float variants of blocks 16 and 17 of
+# runvn_hgq_train.sh (no gate, head [32], no stream, at the reference's
+# widths and at the one-block search's widths), rows vn_nogate_h32_nostream
+# and vn_nogate_h32_nostream_wide; blocks 18 to 20 evaluate the fine-tunes
+# of blocks 18 to 20 with the folded normalisations and truncating data
+# lanes, rows vn_hgq_<tag>_foldtrn_beta3e-07.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/cluster/submit_eval.sh, which queues them on a GPU or slurm.
@@ -176,3 +189,459 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_beta3e-07
+
+# ========================================================================
+# latency ablation of the one-block network  nconst=16
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate:
+# no channel gate
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.invariants=8 \
+#     algorithm.name=vn_nogate \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate_h32:
+# no gate, head [32]
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.name=vn_nogate_h32 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32 \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate_h32
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate_h32_mlp1:
+# no gate, head [32], one-layer scalar MLP
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_nogate_h32_mlp1 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1 \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate_h32_mlp1_nostream:
+# no gate, head [32], one-layer scalar MLP, no stream
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_nogate_h32_mlp1_nostream \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate:
+# no channel gate
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32:
+# no gate, head [32]
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32 \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32_mlp1:
+# no gate, head [32], one-layer scalar MLP
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1 \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_hgq_nogate_h32_mlp1_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32_mlp1_nostream:
+# no gate, head [32], one-layer scalar MLP, no stream
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_hgq_nogate_h32_mlp1_nostream_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_nostream_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_nostream_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate_h32_mlp1_nostream_notensor:
+# no gate, head [32], one-layer scalar MLP, no stream, no tensor invariants
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_nogate_h32_mlp1_nostream_notensor \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=0 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream_notensor \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream_notensor
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32_mlp1_nostream_notensor:
+# no gate, head [32], one-layer scalar MLP, no stream, no tensor invariants
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream_notensor \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_hgq_nogate_h32_mlp1_nostream_notensor_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=0 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_nostream_notensor_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_nostream_notensor_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate_h32_nostream:
+# no gate, head [32], no stream, the two-layer scalar MLP kept
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.name=vn_nogate_h32_nostream \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, latency ablation nogate_h32_nostream_wide:
+# no gate, head [32], no stream, at the widths of the vn study's best
+# one-block trial (8 vector channels, 64 scalar channels, 32 forms, 2 tensors)
+# hand-written: the float reference with the switches of the variant
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=32 \
+#     algorithm.name=vn_nogate_h32_nostream_wide \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=64 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=2 \
+#     algorithm.vector_channels=8 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream_wide \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream_wide
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32_mlp1_nostream_foldtrn:
+# no gate, head [32], one-layer scalar MLP, no stream, folded
+# normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_mlp1_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.mlp_layers=1 \
+#     algorithm.name=vn_hgq_nogate_h32_mlp1_nostream_foldtrn_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_nostream_foldtrn_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_mlp1_nostream_foldtrn_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32_nostream_foldtrn:
+# no gate, head [32], no stream, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# latency ablation nogate_h32_nostream_wide_foldtrn:
+# no gate, head [32], no stream, the one-block search's widths, folded
+# normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream_wide \
+#     algorithm.invariants=32 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_wide_foldtrn_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=64 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=2 \
+#     algorithm.vector_channels=8 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_wide_foldtrn_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_wide_foldtrn_beta3e-07

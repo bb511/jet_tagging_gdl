@@ -307,8 +307,9 @@ def test_the_float_twin_prices_the_flops_and_the_ebops_wait_for_the_trace() -> N
     assert not list(port.parameters())
 
 
+@pytest.mark.parametrize("fold_norm", [False, True])
 def test_init_from_copies_a_float_run_of_the_same_architecture_alone(
-    tmp_path: Path,
+    tmp_path: Path, fold_norm: bool
 ) -> None:
     # A float vn of random weights, saved as train.py leaves a run: a checkpoint and the
     # manifest naming it, which init_from reaches through the run directory.
@@ -326,7 +327,8 @@ def test_init_from_copies_a_float_run_of_the_same_architecture_alone(
     x = datamodule.splits["test"][0][..., COLUMNS]
     with torch.no_grad():
         expected = float_row.double().eval()(x)
-    port = _port(init_from=str(tmp_path), quantisation={"float_mode": True})
+    quantisation = {"float_mode": True, "fold_norm": fold_norm}
+    port = _port(init_from=str(tmp_path), quantisation=quantisation)
     before = port(x)
 
     port._trainer = SimpleNamespace(datamodule=datamodule)

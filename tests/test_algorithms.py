@@ -98,6 +98,8 @@ ARCHITECTURE_KEYS = {
         "invariants",
         "tensor_invariants",
         "stream_channels",
+        "mlp_layers",
+        "gate",
         "dropout",
         "units",
     },
