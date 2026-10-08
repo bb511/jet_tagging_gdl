@@ -27,6 +27,10 @@
 # initial EBOPs over the initial cross-entropy ran from 0.037 to 1.1.
 # The four beta blocks share the label vn_hgq_nconst16_baseline, so select
 # them with --only <index> (2 to 5), not by name; the reference is block 1.
+# Each beta block names its row vn_hgq_beta<tag> (algorithm.name), so that
+# the table in results/quantised/ tells the four apart. Each block's
+# evaluation merges the main run with the five folds fitted beside it on
+# 2026-10-08.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/cluster/submit_eval.sh, which queues them on a GPU or slurm.
@@ -80,6 +84,7 @@
 #     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block \
 #     algorithm.invariants=8 \
 #     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_beta1e-08 \
 #     algorithm.num_blocks=1 \
 #     algorithm.scalar_channels=32 \
 #     algorithm.stream_channels=8 \
@@ -106,6 +111,7 @@
 #     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block \
 #     algorithm.invariants=8 \
 #     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_beta3e-08 \
 #     algorithm.num_blocks=1 \
 #     algorithm.scalar_channels=32 \
 #     algorithm.stream_channels=8 \
@@ -132,6 +138,7 @@
 #     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block \
 #     algorithm.invariants=8 \
 #     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_beta1e-07 \
 #     algorithm.num_blocks=1 \
 #     algorithm.scalar_channels=32 \
 #     algorithm.stream_channels=8 \
@@ -158,6 +165,7 @@
 #     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block \
 #     algorithm.invariants=8 \
 #     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_beta3e-07 \
 #     algorithm.num_blocks=1 \
 #     algorithm.scalar_channels=32 \
 #     algorithm.stream_channels=8 \

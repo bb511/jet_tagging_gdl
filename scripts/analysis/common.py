@@ -50,6 +50,7 @@ MODEL_DISPLAY = {
     "lloca_z": "LLoCa (SO(2)xSO(1,1))",
     "lloca_so2": "LLoCa (SO(2))",
     "lloca_so3": "LLoCa (SO(3))",
+    "vn_hgq": "Vector neurons (HGQ2)",
     "vn": "Vector neurons",
     "jedi_linear": "JEDI-linear",
     "linformer": "Linformer",

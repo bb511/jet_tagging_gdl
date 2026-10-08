@@ -1,21 +1,14 @@
 """Quantisation-aware port of the vector neurons to HGQ2 on Keras and JAX.
 
-The port reproduces ``VectorNeuronsClassifier`` (components/vector_neurons.py) behind
-HGQ2 quantisers, so that alkaid can replay it bit for bit. It reads the rows [p_T GeV,
-eta, phi] sorted by decreasing p_T, the angles measured from the leading constituent and
-zero on a padded row; the sort, the leader subtraction and the wrap of phi stay outside,
-as integer pre-processing of the trigger words. The first two layers quantise p_T and
-the angles to those words; every later product, sum and affine map reads its inputs
-through a quantiser of its own.
+The port reproduces ``VectorNeuronsClassifier`` (components/vector_neurons.py)
+The pT sort, the leader constituent subtraction and the wrap of phi stay outside the
+model and hence are not counted in latency or resources.
+The first two layers quantise p_T and the angles.
+Every later product, sum and affine map reads its inputs through a quantiser of its own.
 
-Vectors are stored (jets, 4, channels), components first, so that every channel mixing
-is a dense layer on the last axis. p_T is counted in units of 16 GeV, a power of two, so
-that p is an exact shift of the word, and the multiplicity enters as the count n rather
-than n / N; ``vector_neurons_port.copy_float_weights`` folds both differences into the
-batch normalisations of a trained float network.
-
-This module selects Keras's backend: it sets JAX before the import and raises if Keras
-came up on another one, so the port and the subclass import it before anything else.
+Vectors are stored (jets, 4, channels) such that every channel mixing is a dense layer
+on the last axis (more efficient). p_T is counted in units of 16 GeV so it can be
+implemented as a bit shift. The multiplicity enters as the count n.
 """
 
 import os
@@ -81,17 +74,13 @@ def _float64_kept(name: str):
     return fn
 
 
-# Keras 3.15 casts a float64 tensor to float32 in floor and ceil on JAX (its
-# result_type(float64, float) is float32), so HGQ2's rounding floor(x 2^f + 1/2)
-# misrounds a scaled value within float32 resolution of a tie, and the float64 port
-# disagrees with alkaid's integer arithmetic (39 of 12288 test jets of the dry run).
-# Both keep float64 here, before any quantiser is built or loaded.
+# Keras 3.15 casts a float64 tensor to float32 in floor and ceil on JAX.
 for _name in ("floor", "ceil"):
     setattr(keras_backend.numpy, _name, _float64_kept(_name))
 
 # The keep flag and the count: 0 or 1, one unsigned integer bit.
 KEEP_KIF = (0, 1, 0)
-# torch's default, so that the copied running statistics normalise as they did there.
+# torch's default, keep batch normalisation the same.
 BN_EPSILON = 1e-5
 # Fraction bits of the gate in float_mode, where its quantiser only implements the clamp.
 FLOAT_GATE_F = 24
@@ -104,11 +93,12 @@ _PLATFORMS = {"gpu": "cuda,cpu", "cuda": "cuda,cpu", "cpu": "cpu"}
 class Quantisation:
     """The quantisers of the port.
 
-    The kif triples (keep_negative, integer bits, fraction bits) fix the trigger words
-    and the logits. ``data_bits`` and ``weight_bits`` are the widths that
-    ``seed_datalane_bits`` and ``seed_weight_bits`` give the trainable quantisers before
-    training. ``float_mode`` replaces every quantiser but the gate's by an identity, for
-    the comparison with the float network.
+    :param *_kif: (keep_negative, integer bits, fraction bits) fix the trigger words
+        and the logits.
+    :param *_bits: the widths that ``seed_datalane_bits`` and ``seed_weight_bits`` give
+        to the trainable quantisers before training.
+    :param float_mode: replaces every quantiser but the gate's by an identity, for
+        the comparison with the float network.
     """
 
     pt_kif: tuple[int, int, int] = (0, 12, 2)
@@ -147,12 +137,7 @@ class Quantisation:
         return QuantizerConfig("kif", "datalane", trainable=False, **kwargs)
 
     def gate(self) -> QuantizerConfig:
-        """HGQ2's hard sigmoid q(z) / 4 + 1 / 2, q saturating on [-2, 2).
-
-        On z = (2/3) z_torch it equals torch's relu6(z_torch + 3) / 6 up to the
-        rounding of z, 2^-(f + 2) at most: a clamp, a shift and an add in hardware,
-        where Keras's hard_sigmoid would become a lookup table.
-        """
+        """HGQ2's hard sigmoid q(z) / 4 + 1 / 2, q saturating on [-2, 2)."""
         f = FLOAT_GATE_F if self.float_mode else self.gate_f
         return HardSigmoidConfig(f0=f, trainable=False)
 

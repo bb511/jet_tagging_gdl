@@ -22,6 +22,9 @@
 # 0.037 to 1.1.
 # The four beta blocks share the label vn_hgq_nconst16_baseline, so select
 # them with --only <index> (2 to 5), not by name; the reference is block 1.
+# The five folds of every block were fitted on 2026-10-08 with the fold
+# commands of submit_train.sh --folds 5, run beside the existing main runs
+# rather than through the launcher, which would refit the main run.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/cluster/submit_train.sh, which queues them on a GPU or slurm.
