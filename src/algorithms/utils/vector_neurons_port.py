@@ -59,10 +59,11 @@ ARCHITECTURE_KEYS = (
     "gate",
     "dropout",
     "units",
+    "axis_offset",
 )
 # The keys that a checkpoint written before they existed lacks, at the values its
 # network was built with.
-LEGACY_DEFAULTS = {"mlp_layers": 2, "gate": True}
+LEGACY_DEFAULTS = {"mlp_layers": 2, "gate": True, "axis_offset": False}
 # A segment of degree COUNT holds the multiplicity, scaled by N rather than by lambda^d.
 COUNT = None
 # A batch-normalised segment: its width and its degree in p.
@@ -163,8 +164,11 @@ def _first_segments(net: VectorNeuronsClassifier) -> list[Segment]:
     n = net.nconstituents
     k = 0 if net.tensors is None else net.tensors.weight.shape[1]
     width = 0 if net.stream is None else net.stream.embed.out_features
-    # p and f of each rank, sum p, B(U, U), the stream, chain, pair4, triangle.
-    return [(n, 1), (n, 2), (1, 1), (1, 2), (width, 0), (k, 3), (k, 2), (k, 3)]
+    offset = 2 if net.axis_offset else 0
+    # p and f of each rank, sum p, B(U, U), the stream, chain, pair4, triangle and the
+    # leader's two angles from the full jet's axis.
+    segments = [(n, 1), (n, 2), (1, 1), (1, 2), (width, 0), (k, 3), (k, 2), (k, 3)]
+    return [*segments, (offset, 0)]
 
 
 def _deinterleave(nconstituents: int, width: int) -> np.ndarray:

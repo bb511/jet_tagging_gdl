@@ -2,7 +2,7 @@
 # ========================================================================
 # VN_HGQ EVALUATION COMMANDS
 # ========================================================================
-# Twenty eval runs at 16 constituents, one per block of
+# Twenty-eight eval runs at 16 constituents, one per block of
 # runvn_hgq_train.sh: the float reference, one per beta, then the latency
 # ablation. Hand-written: vn_hgq has no study and the reference is a variant
 # of a study's best, so scripts/optuna/make_train_catalogues.py neither
@@ -44,6 +44,13 @@
 # and vn_nogate_h32_nostream_wide; blocks 18 to 20 evaluate the fine-tunes
 # of blocks 18 to 20 with the folded normalisations and truncating data
 # lanes, rows vn_hgq_<tag>_foldtrn_beta3e-07.
+# Blocks 21 to 24 evaluate the full-axis-offset designs A1 and A2 of blocks
+# 21 to 24 of runvn_hgq_train.sh, rows vn_axis_<tag> and
+# vn_hgq_axis_<tag>_foldtrn_beta3e-07, with the probe off: a transform
+# rebases etarel and phirel on the kept constituents, so its invariance
+# figures would mean nothing.
+# Blocks 25 to 28 evaluate the beta scan and the learning-rate check of blocks
+# 25 to 28 of runvn_hgq_train.sh, rows vn_hgq_<tag>_foldtrn[_lr3e-04]_beta<beta>.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/cluster/submit_eval.sh, which queues them on a GPU or slurm.
@@ -645,3 +652,283 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_wide_foldtrn_beta3e-07
+
+# ========================================================================
+# vn and vn_hgq  nconst=16  (the full-axis offset, A1 and A2)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, full-axis offset axis_a1:
+# no gate, no stream, head [64,32], 128 scalar channels, the leader's eta and
+# phi from the full jet's axis as two more first-block scalars
+# hand-written: trial 134 of vn_cheap_axis_nconst16_augmentation_none
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.invariants=8 \
+#     algorithm.name=vn_axis_a1 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.007221469209238472 \
+#     algorithm.optimizer.weight_decay=0.01 \
+#     algorithm.scalar_channels=128 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=2 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a1 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_axis_a1
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, one block, full-axis offset axis_a2:
+# no gate, no stream, head [32], 128 scalar channels, the leader's eta and
+# phi from the full jet's axis as two more first-block scalars
+# hand-written: the best head-[32] trial of vn_cheap_axis_nconst16_augmentation_none
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=32 \
+#     algorithm.name=vn_axis_a2 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.008220876046413613 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.scalar_channels=128 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_1block_axis_a2
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# full-axis offset axis_a1_foldtrn:
+# the design of block 21, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a1 \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_axis_a1_foldtrn_beta3e-07 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=128 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=2 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a1_foldtrn_beta3e-07 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a1_foldtrn_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# full-axis offset axis_a2_foldtrn:
+# the design of block 22, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     algorithm.invariants=32 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_axis_a2_foldtrn_beta3e-07 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=128 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_beta3e-07 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_beta3e-07
+
+# ========================================================================
+# vn_hgq  nconst=16  (the beta scan and the learning-rate check of D2 and A2)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=1e-07
+# D2 (block 19) at beta=1e-07
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=1e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_beta1e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_beta1e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_beta1e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-08
+# D2 (block 19) at beta=3e-08
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-08 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_beta3e-08 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_beta3e-08 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_beta3e-08
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=1e-07
+# A2 (block 24) at beta=1e-07
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.beta=1e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     algorithm.invariants=32 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_axis_a2_foldtrn_beta1e-07 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=128 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_beta1e-07 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_beta1e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta=3e-07
+# D2 (block 19) at beta=3e-07, the fine-tune starting at a third of the learning rate
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_lr3e-04_beta3e-07 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.scheduler.initial_learning_rate=3.0e-4 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_lr3e-04_beta3e-07 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_lr3e-04_beta3e-07

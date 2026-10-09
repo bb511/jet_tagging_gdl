@@ -29,6 +29,10 @@ dropout: 0.0
 # GeV per unit of p_T: a power of two, so that p is a shift of the p_T word. The copy of a float vn
 # folds its 20 GeV into the batch normalisations.
 units: 16.0
+# true reads the leader's eta and phi from the full jet's axis as two more scalars of the first
+# block: a test of what that axis is worth, with data.full_axis true, nbr_feats 5 and data.features
+# [pt, eta, phi, etarel, phirel] (hparams_search/hls4ml/vn_cheap_axis_optuna.yaml).
+axis_offset: false
 
 quantisation:
   # (keep_negative, integer bits, fraction bits) of the trigger words: p_T on [0, 4096) GeV at

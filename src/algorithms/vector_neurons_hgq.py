@@ -120,6 +120,7 @@ class VectorNeuronsHGQ(VectorNeurons):
         gate: bool = True,
         dropout: float = 0.0,
         units: float = 16.0,
+        axis_offset: bool = False,
         quantisation: dict[str, Any] | None = None,
         beta: float = 1e-7,
         beta_schedule: list[list] | None = None,
@@ -136,6 +137,9 @@ class VectorNeuronsHGQ(VectorNeurons):
         configure_jax(jax_platform, jax_devices, floatx)
         # Keras draws the initial weights from a generator of its own, seeded from torch.
         keras.utils.set_random_seed(torch.initial_seed() % 2**32)
+        if axis_offset:
+            # As in VectorNeurons.build_net: meaningful under full_axis=True alone.
+            self.required_features = [*self.required_features, "etarel", "phirel"]
         self._register_denorm_scales()
         self.automatic_optimization = False
         self.quantisation = Quantisation(**(quantisation or {}))
@@ -152,6 +156,7 @@ class VectorNeuronsHGQ(VectorNeurons):
             gate=gate,
             dropout=dropout,
             units=units,
+            axis_offset=axis_offset,
             n_class=self.hparams.output_dim,
             quantisation=self.quantisation,
         )
@@ -168,15 +173,18 @@ class VectorNeuronsHGQ(VectorNeurons):
         self.ebops_total = self.ebops_unpriced = math.nan
 
     def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
-        """Return the rows the port reads, (jets, N, 3) [p_T GeV, eta, phi].
+        """Return the rows the port reads, (jets, N, 3) [p_T GeV, eta, phi], and under
+        the axis offset (jets, N, 5), with etarel and phirel behind them.
 
-        They are sorted by decreasing p_T, the angles measured from the leading
+        They are sorted by decreasing p_T, eta and phi measured from the leading
         constituent and zero on a padded row, and each column is clamped to the range of
         its trigger word: the words wrap, since alkaid traces no other input quantiser.
         """
         x = _sort_by_pt(super()._prepare_inputs(x))
         pt, q = x[..., :1], self.quantisation
-        angles = torch.stack(_relative_angles(x), dim=-1) * (pt > 0)
+        relative = torch.stack(_relative_angles(x), dim=-1) * (pt > 0)
+        # x[..., 3:] is empty without the axis offset.
+        angles = torch.cat([relative, x[..., 3:]], dim=-1)
         pt = pt.clamp(*_word_range(q.pt_kif))
         return torch.cat([pt, angles.clamp(*_word_range(q.angle_kif))], dim=-1)
 

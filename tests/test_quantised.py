@@ -47,17 +47,23 @@ ARCHITECTURE = {
     "head_layers": [16],
     "dropout": 0.0,
 }
-# (gate, mlp_layers, stream_channels, tensor_invariants, fold_norm): the network of the
-# finals and the latency ablation's variants, each switching one more piece off, the
-# batch normalisations folded into the next layer in every other one.
+# (gate, mlp_layers, stream_channels, tensor_invariants, fold_norm, axis_offset): the
+# network of the finals and the latency ablation's variants, each switching one more
+# piece off, the batch normalisations folded into the next layer in every other one,
+# then the finals' network and the cheap one reading the leader's offset from the full
+# jet's axis, unfolded and folded.
 VARIANTS = [
-    (True, 2, 8, 2, False),
-    (False, 2, 8, 2, True),
-    (False, 1, 8, 2, False),
-    (False, 1, 0, 2, True),
-    (False, 1, 0, 0, False),
+    (True, 2, 8, 2, False, False),
+    (False, 2, 8, 2, True, False),
+    (False, 1, 8, 2, False, False),
+    (False, 1, 0, 2, True, False),
+    (False, 1, 0, 0, False, False),
+    (True, 2, 8, 2, False, True),
+    (False, 2, 0, 2, True, True),
 ]
+AXIS_FEATURES = [*PT_ETA_PHI, "etarel", "phirel"]
 COLUMNS = [RECORD_COLUMNS.index(f"j1_{name}") for name in PT_ETA_PHI]
+AXIS_COLUMNS = [RECORD_COLUMNS.index(f"j1_{name}") for name in ("etarel", "phirel")]
 # Jets per split, in batches of 16; the test split ends in a partial batch.
 SIZES = {"train": 64, "validation": 32, "test": 40}
 BATCH = 16
@@ -74,35 +80,38 @@ SYNTHESIS_COLUMNS = (
 
 
 def _record(n_jets: int, seed: int) -> torch.Tensor:
-    # The record's 16 columns, of which the module reads pt (GeV), eta and phi: 1 to
-    # N_SLOTS real constituents of at least 1 GeV, so that every keep flag min(4 p_T, 1)
-    # is one, and the padded rows all zero.
+    # The record's 16 columns, of which the module reads pt (GeV), eta and phi, and
+    # etarel and phirel under the axis offset: 1 to N_SLOTS real constituents of at
+    # least 1 GeV, so that every keep flag min(4 p_T, 1) is one, and the padded rows all
+    # zero.
     generator = torch.Generator().manual_seed(seed)
     gauss = torch.randn(3, n_jets, N_SLOTS, generator=generator)
     columns = [1.0 + 40.0 * gauss[0].exp(), 0.4 + 0.25 * gauss[1], 0.3 * gauss[2]]
     x = torch.zeros(n_jets, N_SLOTS, len(RECORD_COLUMNS))
     x[..., COLUMNS] = torch.stack(columns, dim=-1)
     multiplicity = torch.randint(1, N_SLOTS + 1, (n_jets, 1), generator=generator)
+    x[..., AXIS_COLUMNS] = 0.3 * torch.randn(n_jets, N_SLOTS, 2, generator=generator)
     x[torch.arange(N_SLOTS) >= multiplicity] = 0.0
     return x
 
 
 class _Record(LightningDataModule):
     # What the module, the probe and eval.py read of HLS4MLDataModule: training and
-    # validation batches of [pt, eta, phi], test batches of all 16 columns, the fit's
+    # validation batches of *features*, test batches of all 16 columns, the fit's
     # training jets and the record's splits whole.
     feature_names = RECORD_COLUMNS
-    features = PT_ETA_PHI
     keep_full_features_at_test = True
     norm_scales = None
 
-    def __init__(self) -> None:
+    def __init__(self, features: list[str] = PT_ETA_PHI) -> None:
         super().__init__()
+        self.features = features
+        self.columns = [RECORD_COLUMNS.index(f"j1_{name}") for name in features]
         self.splits = {
             split: (_record(n_jets, seed), labels(n_jets, seed))
             for seed, (split, n_jets) in enumerate(SIZES.items())
         }
-        self.data_train = self._dataset("train", COLUMNS)
+        self.data_train = self._dataset("train", self.columns)
         self.requested: list[str] = []
 
     def _dataset(self, split: str, columns=None, **kwargs) -> HLS4MLDataset:
@@ -111,7 +120,7 @@ class _Record(LightningDataModule):
         return HLS4MLDataset(x, y, batch_size=BATCH, **kwargs)
 
     def feature_indices(self) -> list[int]:
-        return COLUMNS
+        return self.columns
 
     def load_split(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
         self.requested.append(split)
@@ -121,7 +130,7 @@ class _Record(LightningDataModule):
         return DataLoader(self.data_train, batch_size=None)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self._dataset("validation", COLUMNS), batch_size=None)
+        return DataLoader(self._dataset("validation", self.columns), batch_size=None)
 
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self._dataset("test", drop_last=False), batch_size=None)
@@ -205,7 +214,8 @@ def evaluated(fitted: SimpleNamespace, tmp_path_factory: pytest.TempPathFactory)
 
 
 @pytest.mark.parametrize(
-    "gate, mlp_layers, stream_channels, tensor_invariants, fold_norm", VARIANTS
+    "gate, mlp_layers, stream_channels, tensor_invariants, fold_norm, axis_offset",
+    VARIANTS,
 )
 def test_the_port_copies_a_float_vn_so_keras_and_torch_agree(
     tmp_path: Path,
@@ -214,14 +224,18 @@ def test_the_port_copies_a_float_vn_so_keras_and_torch_agree(
     stream_channels: int,
     tensor_invariants: int,
     fold_norm: bool,
+    axis_offset: bool,
 ) -> None:
     # A float vn of random weights saved as train.py leaves a run, a checkpoint and the
     # manifest naming it, which init_from reaches through the run directory.
+    features = AXIS_FEATURES if axis_offset else PT_ETA_PHI
     variant = dict(
         gate=gate,
         mlp_layers=mlp_layers,
         stream_channels=stream_channels,
         tensor_invariants=tensor_invariants,
+        axis_offset=axis_offset,
+        nbr_feats=len(features),
     )
     torch.manual_seed(0)
     float_row = algorithm("vn", N_SLOTS, **(ARCHITECTURE | variant))
@@ -234,8 +248,8 @@ def test_the_port_copies_a_float_vn_so_keras_and_torch_agree(
     torch.save(state | {"state_dict": float_row.state_dict()}, path)
     run = ManifestRun("main", None, str(path))
     write_manifest(Manifest(0, str(tmp_path), "test", [run]), tmp_path)
-    datamodule = _Record()
-    x = datamodule.splits["test"][0][..., COLUMNS]
+    datamodule = _Record(features)
+    x = datamodule.splits["test"][0][..., datamodule.columns]
     with torch.no_grad():
         expected = float_row.double().eval()(x)
     quantisation = {"float_mode": True, "fold_norm": fold_norm}
@@ -373,6 +387,39 @@ def test_synthesise_vn_emulates_the_export_bit_for_bit(
     old.write_text(",".join(SYNTHESIS_COLUMNS[:-1]) + "\n")
     with pytest.raises(SystemExit, match="another header"):
         synth.main(["--out", str(out), "--report-only", "--csv", str(old)])
+
+
+@pytest.fixture(scope="module")
+def axis_evaluated(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
+    # A port reading the leader's offset from the full jet's axis, its bits seeded as a
+    # fit seeds them and left untrained, then tested as eval.py tests a checkpoint.
+    root = tmp_path_factory.mktemp("axis")
+    probe = InvarianceMetricCallback(probe=False)
+    probe.subdir = "main"
+    datamodule = _Record(AXIS_FEATURES)
+    port = _port(axis_offset=True, nbr_feats=len(AXIS_FEATURES))
+    attach(port, datamodule)
+    trainer = _trainer(root, probe, enable_checkpointing=False)
+    trainer.test(port, datamodule=datamodule)
+    outputs = root / "outputs"
+    return SimpleNamespace(export=outputs / "main_hgq", npz=outputs / "main.npz")
+
+
+def test_synthesise_vn_emulates_the_axis_offset_port_bit_for_bit(
+    synth, axis_evaluated: SimpleNamespace, tmp_path: Path
+) -> None:
+    out = tmp_path / "synth"
+    check = _synthesise(synth, axis_evaluated, out, "--no-cosim", "--no-vivado")
+    with np.load(axis_evaluated.export / "inputs.npz") as stored:
+        words = stored["inputs_clean"]
+
+    # The leader's two offset words, and zeros that nothing reads below them.
+    assert words.shape == (SIZES["test"], N_SLOTS, 5)
+    assert np.any(words[:, 0, 3:]) and not np.any(words[:, 1:, 3:])
+    # The reloaded model.keras on the stored words and alkaid's emulation both give the
+    # probe's logits.
+    assert (check["n_mismatch"], check["n_mismatch_keras"]) == (0, 0)
+    assert check["n_test"] == SIZES["test"]
 
 
 @pytest.mark.skipif(shutil.which("verilator") is None, reason="no Verilator")

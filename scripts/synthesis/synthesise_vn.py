@@ -303,7 +303,7 @@ def load_model(export_dir: Path, floatx: str) -> Any:
 def load_reference(
     export_dir: Path, outputs_npz: Path
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return the quantised words (jets, N, 3) in the evaluation's jet order, the
+    """Return the quantised words (jets, N, F) in the evaluation's jet order, the
     probe's clean logits (jets, classes) and the class labels (jets,)."""
     with np.load(export_dir / "inputs.npz") as inputs, np.load(outputs_npz) as outputs:
         words = inputs["inputs_clean"].astype(np.float64)
@@ -315,7 +315,7 @@ def load_reference(
 
 
 def split_inputs(model: Any, words: np.ndarray) -> list[np.ndarray]:
-    """Split the words (jets, N, 3) along the feature axis into the model's inputs.
+    """Split the words (jets, N, F) along the feature axis into the model's inputs.
 
     An input of shape (N,) takes one feature and one of shape (N, k) takes k, in the
     order of ``model.inputs``, which is also the order in which alkaid flattens them.

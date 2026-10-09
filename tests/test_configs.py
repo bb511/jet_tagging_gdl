@@ -127,8 +127,7 @@ COPIES = [
         "algorithm/vn",
         "algorithm/vn_hgq",
         "_target_ name units optimizer scheduler quantisation beta beta_schedule "
-        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction "
-        "axis_offset",
+        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
     ),
     (
         "search/deepsets",

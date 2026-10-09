@@ -3,7 +3,8 @@
 The port reproduces ``VectorNeuronsClassifier`` (components/vector_neurons.py). The pT
 sort, the leader constituent subtraction and the wrap of phi stay outside the model and
 hence are not counted in latency or resources. The first two layers quantise p_T and the
-angles. Every later product, sum and affine map reads its inputs through a quantiser of
+angles, and under the axis offset a third the leader's eta and phi from the full jet's
+axis. Every later product, sum and affine map reads its inputs through a quantiser of
 its own.
 
 Vectors are stored (jets, 4, channels) such that every channel mixing is a dense layer
@@ -246,15 +247,36 @@ def _dropout(port: _Port, x, name: str):
 
 
 def _words(port: _Port, x):
-    """Quantise rows (jets, N, 3) to p_T words (jets, N) and angle words (jets, N, 2).
+    """Quantise the first three columns of rows (jets, N, F) to p_T words (jets, N) and
+    angle words (jets, N, 2).
 
     The words wrap: alkaid traces nothing but WRAP on a model input, so the caller
     clamps the rows to the words' ranges.
     """
     q = port.q
     pt = Quantizer(q.fixed(q.pt_kif, "WRAP"), name="pt_word")(x[:, :, 0])
-    angles = Quantizer(q.fixed(q.angle_kif, "WRAP"), name="angle_word")(x[:, :, 1:])
+    angles = Quantizer(q.fixed(q.angle_kif, "WRAP"), name="angle_word")(x[:, :, 1:3])
     return pt, angles
+
+
+def _offset_words(port: _Port, x):
+    """Quantise the leader's eta and phi from the full jet's axis, columns 3:5 of row 0
+    of rows (jets, N, 5), to angle words (jets, 2), which wrap as ``_words`` do."""
+    q = port.q
+    # In hardware each is the leader's word minus the jet axis's, phi wrapped, computed
+    # outside the block as the leader subtraction is.
+    return Quantizer(q.fixed(q.angle_kif, "WRAP"), name="offset_word")(x[:, 0, 3:])
+
+
+def _word_rows(port: _Port, pt, angles, offset):
+    """The words the port reads, (jets, N, 3) [p_T, eta, phi]; under the axis offset
+    (jets, N, 5), the two offset words in row 0 and zeros, which nothing reads, below
+    them."""
+    columns = [ops.expand_dims(pt, -1), angles]
+    if offset is not None:
+        below = [[0, 0], [0, port.nconstituents - 1], [0, 0]]
+        columns.append(ops.pad(ops.expand_dims(offset, 1), below))
+    return ops.concatenate(columns, axis=-1)
 
 
 def _lift(port: _Port, pt, angles):
@@ -311,10 +333,10 @@ def _tensor_invariants(port: _Port, u, tail) -> list:
     return [_chain(port, u, gm0), pair4, triangle]
 
 
-def _first_scalars(port: _Port, p, keep, tail, u):
+def _first_scalars(port: _Port, p, keep, tail, u, offset):
     """The first block's input scalars [p, f, sum p, B(U, U), stream, chain, pair4,
-    triangle], where torch interleaves p and f; no stream and no tensor invariants at
-    width 0."""
+    triangle, offset], where torch interleaves p and f; no stream and no tensor
+    invariants at width 0, and no offset words when *offset* is None."""
     jet = _sum(port, "jet_sum", u)
     g_jet = _metric(jet, 1)
     f = _einsum(port, "bnm,bm->bn", "rank_form", u, g_jet)
@@ -323,7 +345,8 @@ def _first_scalars(port: _Port, p, keep, tail, u):
     jet_form = ops.expand_dims(_einsum(port, "bm,bm->b", "jet_form", jet, g_jet), -1)
     stream = [_stream(port, r, keep)] if port.stream > 0 else []
     tensors = _tensor_invariants(port, u, tail) if port.tensors > 0 else []
-    return ops.concatenate([p, f, p_sum, jet_form, *stream, *tensors], axis=-1)
+    axis = [] if offset is None else [offset]
+    return ops.concatenate([p, f, p_sum, jet_form, *stream, *tensors, *axis], axis=-1)
 
 
 def _read(port: _Port, v, n, s, prefix: str):
@@ -401,6 +424,7 @@ def build_port(
     gate: bool = True,
     dropout: float = 0.0,
     units: float = 16.0,
+    axis_offset: bool = False,
     n_class: int = 5,
     quantisation: Quantisation | None = None,
 ) -> tuple[keras.Model, keras.Model]:
@@ -410,8 +434,11 @@ def build_port(
     Call ``configure_jax`` first: the layers take Keras's floatx at construction.
 
     :param units: GeV per unit of p_T, a power of two so that p is a shift of the word.
-    :return: the network, (jets, N, 3) rows to (jets, n_class) logits, and the model of
-        its inputs, the same rows to the quantised words [p_T, eta, phi] it reads.
+    :param axis_offset: read rows 5 wide and give the first block the leader's eta and
+        phi from the full jet's axis, columns 3:5 of row 0, as its last two scalars.
+    :return: the network, (jets, N, 3) rows (5 wide under the axis offset) to (jets,
+        n_class) logits, and the model of its inputs, the same rows to the quantised
+        words it reads, of their shape.
     :raises ValueError: when *units* is not a power of two.
     """
     if not log2(units).is_integer():
@@ -430,14 +457,16 @@ def build_port(
         units=units,
     )
     with LayerConfigScope(beta0=0.0, enable_ebops=True):
-        x = keras.Input((nconstituents, 3), name="constituents")
+        x = keras.Input((nconstituents, 5 if axis_offset else 3), name="constituents")
         pt, angles = _words(port, x)
+        offset = _offset_words(port, x) if axis_offset else None
         p, keep, n, tail, u = _lift(port, pt, angles)
-        v, s = _first_block(port, u, _first_scalars(port, p, keep, tail, u), n)
+        s = _first_scalars(port, p, keep, tail, u, offset)
+        v, s = _first_block(port, u, s, n)
         for b in range(1, num_blocks):
             v, s = _later_block(port, v, s, n, b)
         logits = _head(port, v, s, n, head_layers, n_class)
-    words = ops.concatenate([ops.expand_dims(pt, -1), angles], axis=-1)
+    words = _word_rows(port, pt, angles, offset)
     return keras.Model(x, logits, name="vn_hgq"), keras.Model(x, words, name="words")
 
 
@@ -455,14 +484,15 @@ class KerasNetwork(nn.Module):
         self.inputs_model = inputs_model
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Return the (jets, n_class) logits of prepared (jets, N, 3) rows, in Keras's
+        """Return the (jets, n_class) logits of prepared (jets, N, F) rows, in Keras's
         float type, on the device of *x*."""
         rows = x.detach().cpu().numpy().astype(self.keras_model.inputs[0].dtype)
         logits = self.keras_model.predict_on_batch(rows)
         return torch.from_numpy(np.array(logits)).to(x.device)
 
     def quantised_inputs(self, x: np.ndarray) -> np.ndarray:
-        """The (jets, N, 3) words [p_T, eta, phi] the network reads from rows *x*."""
+        """The (jets, N, F) words the network reads from rows *x*, as ``build_port``
+        describes them."""
         return np.array(self.inputs_model.predict_on_batch(x))
 
     def compile_keras(self, optimizer: keras.optimizers.Optimizer) -> None:
@@ -597,7 +627,7 @@ def export_port(
     meta: dict[str, Any],
 ) -> Path:
     """Write what synthesis reads: ``model.keras``, ``inputs.npz`` (``inputs_clean``,
-    the (jets, N, 3) words, exact in float32) and ``export.json`` (*meta*).
+    the (jets, N, F) words, exact in float32) and ``export.json`` (*meta*).
 
     :return: *directory*, created if missing.
     """
