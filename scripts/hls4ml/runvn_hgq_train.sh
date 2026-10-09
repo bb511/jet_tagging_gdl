@@ -2,9 +2,10 @@
 # ========================================================================
 # VN_HGQ TRAINING COMMANDS
 # ========================================================================
-# Twenty-eight train runs at 16 constituents: the float reference, one block per
-# beta, then the latency ablation. Hand-written: vn_hgq has no study and the
-# reference is a variant of a study's best, so
+# Thirty-six train runs: twenty-eight at 16 constituents (the float reference,
+# one block per beta, the latency ablation, the full-axis designs and the beta
+# scan of the chosen two), then eight at 50 and 150. Hand-written: vn_hgq has
+# no study and the reference is a variant of a study's best, so
 # scripts/optuna/make_train_catalogues.py neither writes nor regenerates
 # this file.
 # Baseline only: the vector neurons embed the symmetry, so the augmentation
@@ -61,6 +62,13 @@
 # and D2 at beta=3e-07 with the fine-tune starting at a third of its learning
 # rate (algorithm.scheduler.initial_learning_rate=3e-04), to see what the first
 # epoch's drop costs (baseline_<tag>_foldtrn[_lr3e-04]_beta<beta>).
+# Blocks 29 to 32 train the designs at 50 and 150 constituents, each the best
+# trial with head [32] and 32 scalar channels, D2's latency class, of the cheap
+# search at that count: without the offset (vn_cheap_optuna.yaml, tag
+# cheap_h32) and with it (vn_cheap_axis_optuna.yaml, tag cheap_axis_h32), in
+# logs/train/hls4ml/vn/nconst<N>/baseline_1block_<tag>. Blocks 33 to 36
+# fine-tune them at beta=3e-07 with folded normalisations and truncating data
+# lanes (baseline_<tag>_foldtrn_beta3e-07), each after its float run.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/cluster/submit_train.sh, which queues them on a GPU or slurm.
@@ -837,3 +845,237 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_lr3e-04_beta3e-07
+
+# ========================================================================
+# vn  nconst=50 and 150  (the cheap search's head-[32] designs, without and with the offset)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn nconst=50 baseline, one block, cheap_h32:
+# no gate, no stream, head [32], 32 scalar channels
+# hand-written: trial 123 of vn_cheap_nconst50_augmentation_none
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=32 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.008837575109767657 \
+#     algorithm.optimizer.weight_decay=0.01 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=8 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst50/baseline_1block_cheap_h32
+
+# ------------------------------------------------------------------------
+# vn nconst=50 baseline, one block, cheap_axis_h32:
+# no gate, no stream, head [32], 32 scalar channels, the leader's eta and
+# phi from the full jet's axis as two more first-block scalars
+# hand-written: trial 130 of vn_cheap_axis_nconst50_augmentation_none
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.axis_offset=true \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.00599615570775775 \
+#     algorithm.optimizer.weight_decay=0.01 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=8 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst50/baseline_1block_cheap_axis_h32
+
+# ------------------------------------------------------------------------
+# vn nconst=150 baseline, one block, cheap_h32:
+# no gate, no stream, head [32], 32 scalar channels
+# hand-written: trial 153 of vn_cheap_nconst150_augmentation_none
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=8 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.009926512074188387 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst150/baseline_1block_cheap_h32
+
+# ------------------------------------------------------------------------
+# vn nconst=150 baseline, one block, cheap_axis_h32:
+# no gate, no stream, head [32], 32 scalar channels, the leader's eta and
+# phi from the full jet's axis as two more first-block scalars
+# hand-written: trial 162 of vn_cheap_axis_nconst150_augmentation_none
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.axis_offset=true \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.invariants=32 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.lr=0.006499577920199478 \
+#     algorithm.optimizer.weight_decay=0.01 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst150/baseline_1block_cheap_axis_h32
+
+# ========================================================================
+# vn_hgq  nconst=50 and 150  (their fine-tunes, beta=3e-07, fold+TRN)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=50  baseline  (method=augmentation, group=none)  beta=3e-07
+# cheap_h32_foldtrn: the design of block 29, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_hgq_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst50/baseline_1block_cheap_h32 \
+#     algorithm.invariants=32 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=8 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst50/baseline_cheap_h32_foldtrn_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=50  baseline  (method=augmentation, group=none)  beta=3e-07
+# cheap_axis_h32_foldtrn: the design of block 30, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_hgq_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.axis_offset=true \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst50/baseline_1block_cheap_axis_h32 \
+#     algorithm.invariants=8 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=8 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst50/baseline_cheap_axis_h32_foldtrn_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=150  baseline  (method=augmentation, group=none)  beta=3e-07
+# cheap_h32_foldtrn: the design of block 31, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_hgq_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst150/baseline_1block_cheap_h32 \
+#     algorithm.invariants=8 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst150/baseline_cheap_h32_foldtrn_beta3e-07
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=150  baseline  (method=augmentation, group=none)  beta=3e-07
+# cheap_axis_h32_foldtrn: the design of block 32, folded normalisations, truncating data lanes
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_hgq_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.axis_offset=true \
+#     algorithm.beta=3e-07 \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst150/baseline_1block_cheap_axis_h32 \
+#     algorithm.invariants=32 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst150/baseline_cheap_axis_h32_foldtrn_beta3e-07
