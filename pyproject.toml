@@ -25,7 +25,6 @@ dependencies = [
     "hydra-colorlog (>=1.2,<2)",
     "hydra-optuna-sweeper (>=1.2,<2)",
     "optuna (>=2.10,<3)",
-    "hydra-submitit-launcher (>=1.2,<2)",
     "sqlalchemy (<2)",
     "rootutils (>=1.0.7,<2)",
     "rich (>=13)",
@@ -39,6 +38,12 @@ dependencies = [
     "mplhep (>=0.4)",
     "mlflow (>=3.2,<4)",
     "huggingface-hub (>=1.0)",
+    # The 2019 top-tagging record (Zenodo 2603256) is three pandas HDFStore tables, which
+    # pandas reads through PyTables; src/data/components/top_tagging.py converts them once.
+    "tables (>=3.9,<4)",
+    # Lion, the optimiser of the published L-GATr-slim and LLoCa recipes, which the
+    # top-tagging experiments of those rows follow.
+    "lion-pytorch (>=0.2,<1)",
     # The L-GATr-slim network itself (src/algorithms/components/lgatr_slim.py wraps it);
     # padding goes through a dense mask, so none of its attention extras is needed.
     "lgatr (>=2.0.0,<3)",

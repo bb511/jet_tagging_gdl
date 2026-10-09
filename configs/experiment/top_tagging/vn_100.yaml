@@ -1,0 +1,45 @@
+# @package _global_
+# Vector neurons on the lifts of (pt, eta, phi) at 100 constituents of the top-tagging set, at the
+# optimum of the hls4ml N = 150 study (trial 195, val/acc_best 0.8269; block of
+# scripts/hls4ml/runvn_train.sh): the transfer point the top-tagging search starts from.
+# Symmetry-embedded, so it runs the baseline regime only.
+defaults:
+  - override /data: top_tagging
+  - override /algorithm: vn
+  - override /trainer: gpu
+  - override /results_table: top_tagging
+
+tags: ["top_tagging", "vn", "nconst-100"]
+
+experiment_name: top_tagging_vn_nconst100
+
+# The batch of configs/experiment/hls4ml/vn_150.yaml, the hls4ml record's 2048.
+data:
+  nconstituents: 100
+  # The network's own columns; required_features makes setup() refuse any other list.
+  features: [pt, eta, phi]
+  batch_size: 2048
+
+algorithm:
+  output_dim: 2
+  dropout: 0.0
+  head_layers: [32]
+  invariants: 32
+  num_blocks: 3
+  scalar_channels: 32
+  stream_channels: 32
+  tensor_invariants: 2
+  vector_channels: 32
+  optimizer:
+    lr: 4.9250827523425545e-3
+    weight_decay: 0.05
+
+# fp32 without TF32, as configs/experiment/hls4ml/vn_150.yaml: the forms of the learned channels
+# cancel to a small fraction of their terms, and TF32 would round a transformed jet otherwise than
+# the clean one, so that the embedded group would hold to 5e-4 only.
+trainer:
+  precision: 32
+
+# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
+results_table:
+  subdir: embedded

@@ -20,6 +20,7 @@ class LLoCa(FourMomentumModule):
         mlp_factor: int = 2,
         dropout: float = 0.0,
         framesnet_hidden: int = 32,
+        framesnet_dropout: float = 0.0,
         mass_reg: float = 2.5e-4,
         units: float = 20.0,
     ) -> nn.Module:
@@ -34,6 +35,7 @@ class LLoCa(FourMomentumModule):
             mlp_factor=mlp_factor,
             dropout=dropout,
             framesnet_hidden=framesnet_hidden,
+            framesnet_dropout=framesnet_dropout,
             mass_reg=mass_reg,
             units=units,
             n_class=self.hparams.output_dim,

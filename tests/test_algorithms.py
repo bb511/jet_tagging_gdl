@@ -31,7 +31,7 @@ from src.algorithms.utils.bitops import BitOps, count_ebops
 from src.algorithms.utils.flops import count_flops
 from src.data.components.augmentation import make_transform
 from src.data.hls4ml_jet_level_datamodule import JetLevelDataModule
-from src.symmetry import GROUPS
+from src.symmetry import CLASS_NAMES_OF, GROUPS
 from tests.conftest import (
     FOUR_MOMENTUM,
     JET_LEVEL_SIZES,
@@ -106,6 +106,23 @@ def test_every_row_reads_its_own_columns_at_either_width(
     assert count_ebops(module, narrow).unclassified == frozenset()
     with torch.no_grad():
         assert torch.allclose(module.eval()(wide), module(narrow), atol=1e-6)
+
+
+@pytest.mark.parametrize("row", MODELS)
+def test_every_row_tags_two_classes_and_refuses_a_class_count_mismatch(
+    row: str,
+) -> None:
+    features = READS.get(row, FOUR_MOMENTUM)
+    module = algorithm(row, features=features, output_dim=2)
+    two_classes = StubDataModule(features, class_names=CLASS_NAMES_OF["top_tagging"])
+    with pytest.raises(ValueError, match="output_dim"):
+        attach(module, StubDataModule(features))
+    attach(module, two_classes)
+    batch = jets(8, 8, 6)[..., : len(features)].contiguous()
+
+    out = module.model_step((batch, labels(8, n_classes=2)))
+
+    assert torch.isfinite(out["loss"]) and out["logits"].shape == (8, 2)
 
 
 @pytest.mark.parametrize(

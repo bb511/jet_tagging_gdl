@@ -67,6 +67,8 @@ class LLoCaClassifier(nn.Module):
     :param attn_scalars: scalar channels of each attention head.
     :param attn_vectors: four-vector channels of each attention head.
     :param framesnet_hidden: width of the two hidden layers of the frames-net MLP.
+    :param framesnet_dropout: dropout probability after each hidden layer of the edge
+        MLP of the frames-net.
     :param mass_reg: mass floor in ``units``, applied inside the frames-net: a lighter
         constituent is given this mass there, which keeps the pair sums the frames-net
         normalises off the light cone.
@@ -86,6 +88,7 @@ class LLoCaClassifier(nn.Module):
         mlp_factor: int = 2,
         dropout: float = 0.0,
         framesnet_hidden: int = 32,
+        framesnet_dropout: float = 0.0,
         mass_reg: float = 2.5e-4,
         units: float = 20.0,
         n_class: int = 5,
@@ -94,11 +97,14 @@ class LLoCaClassifier(nn.Module):
         if frames not in FRAMES:
             raise ValueError(f"frames must be one of {list(FRAMES)}, got {frames!r}.")
         self.units = units
+        # 0 becomes None: the package adds dropout layers to its MLP for any probability
+        # but None, and they renumber the later linear layers in the state dict.
         equivectors = partial(
             MLPVectors,
             num_scalars=0,
             hidden_channels=framesnet_hidden,
             num_layers_mlp=2,
+            dropout_prob=framesnet_dropout or None,
         )
         self.framesnet = FRAMES[frames](
             equivectors=equivectors,

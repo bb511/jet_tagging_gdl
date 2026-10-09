@@ -66,11 +66,14 @@ def _standardiser(x_train: np.ndarray) -> Scale:
     return x_train.mean(axis=0), np.where(std > 0, std, 1.0)
 
 
-def _tensors(split: Split, scale: Scale) -> tuple[torch.Tensor, torch.Tensor]:
-    """The standardised jets (jets, 1, features) and the one-hot labels (jets, 5)."""
+def _tensors(
+    split: Split, scale: Scale, n_classes: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The standardised jets (jets, 1, features) and the one-hot labels (jets,
+    n_classes)."""
     (x, labels), (mean, std) = split, scale
     jets = torch.from_numpy(((x - mean) / std).astype(np.float32)).unsqueeze(1)
-    return jets, torch.eye(len(CLASS_NAMES))[torch.from_numpy(labels)]
+    return jets, torch.eye(n_classes)[torch.from_numpy(labels)]
 
 
 def _take(split: Split, indices: np.ndarray) -> Split:
@@ -125,6 +128,7 @@ class JetLevelDataModule(LightningDataModule):
     # The batches have the row's observables alone, nothing for a probe to transform.
     keep_full_features_at_test = False
     norm_scales = None
+    class_names = CLASS_NAMES
 
     def __init__(
         self,
@@ -245,5 +249,5 @@ class JetLevelDataModule(LightningDataModule):
         return _take(pool, train_idx), _take(pool, val_idx)
 
     def _dataset(self, split: Split, **kwargs) -> HLS4MLDataset:
-        jets, labels = _tensors(split, self.scale)
+        jets, labels = _tensors(split, self.scale, len(self.class_names))
         return HLS4MLDataset(jets, labels, batch_size=self.batch_size, **kwargs)

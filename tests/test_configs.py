@@ -1,13 +1,17 @@
 import hashlib
 import math
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import hydra
 import pytest
 import torch
 from hydra.core.hydra_config import HydraConfig
+from hydra.core.override_parser.overrides_parser import OverridesParser
+from hydra.core.override_parser.types import IntervalSweep
 from omegaconf import DictConfig, OmegaConf
+from torch.optim.lr_scheduler import LambdaLR
 
 from src.utils.omegaconf import short_hash
 from tests.conftest import (
@@ -21,6 +25,9 @@ from tests.conftest import (
     PT_ETA_PHI,
     QUANTISED,
     ROOT,
+    TOP_TAGGING,
+    TOP_TAGGING_NCONSTITUENTS,
+    TOP_TAGGING_RECIPES,
     algorithm_yaml,
     compose_root,
     point_into,
@@ -30,6 +37,10 @@ from tests.conftest import (
 EXPERIMENT_DIR = ROOT / "configs" / "experiment" / "hls4ml"
 SEARCH_DIR = ROOT / "configs" / "hparams_search" / "hls4ml"
 EXPERIMENTS = sorted(path.stem for path in EXPERIMENT_DIR.glob("*.yaml"))
+TOP_EXPERIMENT_DIR = ROOT / "configs" / "experiment" / "top_tagging"
+TOP_EXPERIMENTS = sorted(path.stem for path in TOP_EXPERIMENT_DIR.glob("*.yaml"))
+TOP_SEARCH_DIR = ROOT / "configs" / "hparams_search" / "top_tagging"
+TOP_SEARCHES = sorted(path.stem for path in TOP_SEARCH_DIR.glob("*.yaml"))
 SEARCHES = sorted(path.stem for path in SEARCH_DIR.glob("*.yaml"))
 # The searches of the cheap vector neurons with and without the full jet's axis, which
 # belong to no row.
@@ -215,6 +226,12 @@ def test_the_configs_are_those_the_row_lists_name() -> None:
 
     assert set(EXPERIMENTS) == experiments | {f"{row}_150" for row in JET_LEVEL}
     assert set(SEARCHES) == searches | set(CHEAP_SEARCHES)
+    assert set(TOP_EXPERIMENTS) == {
+        f"{row}_{n}" for row in TOP_TAGGING for n in TOP_TAGGING_NCONSTITUENTS
+    }
+    assert set(TOP_SEARCHES) == {
+        f"{row}_optuna" for row in set(TOP_TAGGING) - set(TOP_TAGGING_RECIPES)
+    }
 
 
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
@@ -351,6 +368,68 @@ def test_the_fpga_rows_search_relu_and_the_three_pools_alone(row: str) -> None:
     assert not any("activation" in key for key in params)
     assert params.get("algorithm.aggregation", FPGA_POOLS) == FPGA_POOLS
     assert algorithm_yaml(row).get("activation", "relu") == "relu"
+
+
+def _arithmetic(path: Path) -> tuple[Any, Any]:
+    cfg = OmegaConf.to_container(OmegaConf.load(path))
+    trainer, extras = (cfg.get(node) or {} for node in ("trainer", "extras"))
+    return trainer.get("precision"), extras.get("matmul_precision")
+
+
+@pytest.mark.parametrize("experiment", TOP_EXPERIMENTS)
+def test_every_top_tagging_experiment_builds_a_two_class_row(
+    experiment: str, tmp_path: Path
+) -> None:
+    model, n = experiment.rsplit("_", 1)
+    overrides = (f"experiment=top_tagging/{experiment}", "trainer=cpu", "logger=none")
+    cfg = compose_root("train.yaml", *overrides)
+    HydraConfig().set_config(point_into(cfg, tmp_path))
+    module = hydra.utils.instantiate(cfg.algorithm)
+    datamodule = hydra.utils.instantiate(cfg.data)
+
+    assert model in TOP_TAGGING and int(n) in TOP_TAGGING_NCONSTITUENTS
+    assert (module.hparams.output_dim, datamodule.class_names) == (2, ("qcd", "top"))
+    assert module.hparams.nconstituents == datamodule.nconstituents == int(n)
+    assert cfg.results_table.output_path.endswith("top_tagging/results_table.csv")
+    assert cfg.results_table.subdir == ("embedded" if model in EMBEDDED else None)
+    assert "top_tagging" in cfg.tags
+    # The arithmetic of the row's hls4ml experiment at N = 150.
+    assert _arithmetic(TOP_EXPERIMENT_DIR / f"{experiment}.yaml") == _arithmetic(
+        EXPERIMENT_DIR / f"{model}_150.yaml"
+    )
+    # The optimiser and the scheduler are built once the trainer knows the run's length;
+    # a recipe's schedule replaces the algorithm's whole, none of its keys surviving.
+    module._trainer = SimpleNamespace(estimated_stepping_batches=100)
+    scheduler = module.configure_optimizers()["lr_scheduler"]["scheduler"]
+    assert isinstance(scheduler, LambdaLR) == (model in TOP_TAGGING_RECIPES)
+
+
+@pytest.mark.parametrize("search", TOP_SEARCHES)
+def test_every_top_tagging_search_holds_its_experiments_point(
+    search: str, tmp_path: Path
+) -> None:
+    model = search.removesuffix("_optuna")
+    overrides = (
+        f"experiment=top_tagging/{model}_100",
+        f"hparams_search=top_tagging/{search}",
+    )
+    cfg = compose_root("train.yaml", *overrides, "trainer=cpu", "logger=none")
+    HydraConfig().set_config(point_into(cfg, tmp_path))
+    found = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
+    point = _flat({"algorithm": OmegaConf.to_container(cfg.algorithm, resolve=True)})
+    parser = OverridesParser.create()
+    database = f"logs/optuna/top_tagging/{model}.db"
+
+    assert found["study_name"] == f"top_tagging_{model}_nconst100_augmentation_none"
+    assert found["storage"] == f"sqlite:///{database}?timeout=600"
+    # The experiment's values, which a campaign enqueues as trial 0 under these names,
+    # lie in the space, and the learning rate spans a factor 3 either side at most.
+    for key, spec in found["params"].items():
+        sweep = parser.parse_override(f"{key}={spec}").value()
+        if isinstance(sweep, IntervalSweep):
+            assert sweep.start < point[key] < sweep.end <= 9 * sweep.start
+        else:
+            assert point[key] in sweep.list
 
 
 def test_the_resolvers_count_features_hash_runs_and_label_folds(tmp_path: Path) -> None:

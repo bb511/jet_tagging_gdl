@@ -18,13 +18,25 @@ from src.data.components.augmentation import (
     make_transform,
     resolve_feature_indices,
 )
+from src.symmetry import class_names_of
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__)
 
 
+def _check_classes(output_dim: int, datamodule: object) -> None:
+    """Raise a ValueError unless the network has one logit per class of the data."""
+    class_names = class_names_of(datamodule)
+    if len(class_names) != output_dim:
+        raise ValueError(
+            f"The network has output_dim={output_dim} logits, but the data have "
+            f"{len(class_names)} classes {class_names}. Set algorithm.output_dim to "
+            f"{len(class_names)}."
+        )
+
+
 class JetTaggingModule(LightningModule):
-    """Classify jets into five originating particles, under either training method.
+    """Classify jets into the datamodule's classes, under either training method.
 
     Subclasses set `required_features` when the network needs specific features. These
     need to be present in the data, otherwise an error is thrown.
@@ -244,12 +256,14 @@ class JetTaggingModule(LightningModule):
         )
 
     def setup(self, stage: str) -> None:
-        """Resolve the feature layout from the datamodule and, under the SCL, build the
-        transform of its partner batches, which draws only when called."""
+        """Check the classes and resolve the feature layout of the datamodule and, under
+        the SCL, build the transform of its partner batches, which draws only when
+        called."""
         # _trainer rather than trainer: the public property raises when the module stands alone.
         datamodule = getattr(self._trainer, "datamodule", None)
         if datamodule is None:
             return
+        _check_classes(self.hparams.output_dim, datamodule)
         self._resolve_features(datamodule)
         self.norm_scales = datamodule.norm_scales
         if self.symm_loss is not None:

@@ -1,0 +1,40 @@
+# @package _global_
+# DeepSets with the jet moments at 100 constituents of the top-tagging set, on [pt, etarel,
+# phirel], at the optimum of the hls4ml N = 150 study (trial 194, val/acc_best 0.8227; block of
+# scripts/hls4ml/rundeepsets_moments_train.sh): the transfer point the top-tagging search starts
+# from. Pinned to its columns and filed with the embedded rows, so it runs the baseline regime only.
+defaults:
+  - override /data: top_tagging
+  - override /algorithm: deepsets_moments
+  - override /trainer: gpu
+  - override /results_table: top_tagging
+
+tags: ["top_tagging", "deepsets_moments", "nconst-100"]
+
+experiment_name: top_tagging_deepsets_moments_nconst100
+
+# The batch of configs/experiment/hls4ml/deepsets_moments_150.yaml, the hls4ml record's 2048.
+data:
+  nconstituents: 100
+  # The network's own columns; required_features makes setup() refuse any other list.
+  features: [pt, etarel, phirel]
+  batch_size: 2048
+
+algorithm:
+  output_dim: 2
+  aggregation: sum
+  moments: rankcut
+  phi_layers: [64, 64, 64]
+  rho_layers: [64, 32]
+  optimizer:
+    lr: 2.7931828696334776e-3
+    weight_decay: 0.0
+
+# The trainer's 16-mixed and no extras.matmul_precision, as
+# configs/experiment/hls4ml/deepsets_moments_150.yaml: the moments leave autocast in float32
+# themselves, and TF32 would round the inputs of their products while pair, chain and triangle
+# cancel between large terms.
+
+# Filed with the embedded rows, so its rows skip the <features>/ directory.
+results_table:
+  subdir: embedded

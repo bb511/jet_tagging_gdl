@@ -1,6 +1,6 @@
 """Measure the invariance of a trained classifier under various symmetry groups."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,7 @@ from src.symmetry import (
     TOTAL_VARIATION,
     WORKING_POINTS,
     WorkingPoint,
+    class_names_of,
     clean_family,
     diagnostic_family,
     key,
@@ -211,9 +212,11 @@ def _class_auc(signal_c: np.ndarray, score_c: np.ndarray) -> float:
     return float(roc_auc_score(signal_c, score_c))
 
 
-def _macro(group: str | None, family: str, values: np.ndarray) -> dict[str, float]:
+def _macro(
+    group: str | None, family: str, values: np.ndarray, class_names: Sequence[str]
+) -> dict[str, float]:
     """The macro mean of a per-class family, then one key per class."""
-    per_class = zip(CLASS_NAMES, values, strict=True)
+    per_class = zip(class_names, values, strict=True)
     results = {key(group, family): float(np.mean(values))}
     return results | {key(group, family, name): float(v) for name, v in per_class}
 
@@ -242,16 +245,20 @@ def _totals(signal: np.ndarray) -> Counts:
 
 
 def _clean_metrics(
-    scores: np.ndarray, signal: np.ndarray, points: list[FrozenPoint], totals: Counts
+    scores: np.ndarray,
+    signal: np.ndarray,
+    points: list[FrozenPoint],
+    totals: Counts,
+    class_names: Sequence[str],
 ) -> dict[str, float]:
     """The groupless families: each point's clean rejection or TPR, and the AUC."""
     results: dict[str, float] = {}
     for frozen in points:
         values = _clean_value(frozen.point, frozen.counts, totals)
-        results |= _macro(None, clean_family(frozen.point), values)
+        results |= _macro(None, clean_family(frozen.point), values, class_names)
     columns = range(scores.shape[1])
     auc = [_class_auc(signal[:, c], scores[:, c]) for c in columns]
-    return results | _macro(None, AUC, np.array(auc))
+    return results | _macro(None, AUC, np.array(auc), class_names)
 
 
 def _finite(logits: np.ndarray, name: str) -> np.ndarray | None:
@@ -274,27 +281,35 @@ def _clean_reading(
     return scores, signal, _frozen_points(scores, signal), _totals(signal)
 
 
-def clean_metrics(logits: np.ndarray, labels: np.ndarray) -> dict[str, float]:
+def clean_metrics(
+    logits: np.ndarray, labels: np.ndarray, class_names: Sequence[str] = CLASS_NAMES
+) -> dict[str, float]:
     """The groupless ``performance/`` keys of one set of logits, as `output_metrics`
     reads them off the clean ones; empty if a logit is not finite.
 
-    :param logits: shape (jets, classes), the columns in the order of
-        `src.symmetry.CLASS_NAMES`.
+    :param logits: shape (jets, classes), the columns in the order of *class_names*.
     :param labels: the class index of each jet, shape (jets,).
+    :param class_names: the suffixes of the per-class keys.
     """
     clean = _finite(logits, "clean")
-    return {} if clean is None else _clean_metrics(*_clean_reading(clean, labels))
+    if clean is None:
+        return {}
+    return _clean_metrics(*_clean_reading(clean, labels), class_names)
 
 
 def _point_metrics(
-    group: str, frozen: FrozenPoint, transformed: Counts, totals: Counts
+    group: str,
+    frozen: FrozenPoint,
+    transformed: Counts,
+    totals: Counts,
+    class_names: Sequence[str],
 ) -> dict[str, float]:
     """The retention and the diagnostic of one working point under *group*."""
     point = frozen.point
     retention = _retention(point, frozen.counts, transformed)
     diagnostic = _diagnostic(point, transformed, totals)
-    results = _macro(group, retention_family(point), retention)
-    return results | _macro(group, diagnostic_family(point), diagnostic)
+    results = _macro(group, retention_family(point), retention, class_names)
+    return results | _macro(group, diagnostic_family(point), diagnostic, class_names)
 
 
 def _group_metrics(
@@ -304,6 +319,7 @@ def _group_metrics(
     signal: np.ndarray,
     points: list[FrozenPoint],
     totals: Counts,
+    class_names: Sequence[str],
 ) -> dict[str, float]:
     """The TV under *group* and, per working point, its retention and diagnostic."""
     logits = _finite(logits, group)
@@ -314,14 +330,18 @@ def _group_metrics(
     results = {key(group, TOTAL_VARIATION): float(tv)}
     for frozen in points:
         transformed = _passing(scores, signal, frozen.thresholds)
-        results |= _point_metrics(group, frozen, transformed, totals)
+        results |= _point_metrics(group, frozen, transformed, totals, class_names)
     return results
 
 
-def output_metrics(arrays: dict[str, np.ndarray]) -> dict[str, float]:
+def output_metrics(
+    arrays: dict[str, np.ndarray], class_names: Sequence[str] = CLASS_NAMES
+) -> dict[str, float]:
     """Every metric read off the stored outputs of one test pass, in float64.
 
     :param arrays: the ``.npz`` layout of `OutputStore.arrays`.
+    :param class_names: the classes of the logit columns, in their order: the suffixes
+        of the per-class keys.
     :return: the groupless ``performance/`` keys and, per group, the TV, the retentions
         and the diagnostics. Non-finite clean logits leave every one of them out; those
         of one group leave that group's out.
@@ -330,10 +350,13 @@ def output_metrics(arrays: dict[str, np.ndarray]) -> dict[str, float]:
     if clean is None:
         return {}
     scores, signal, points, totals = _clean_reading(clean, arrays["labels"])
-    results, p_clean = _clean_metrics(scores, signal, points, totals), _softmax(clean)
+    results = _clean_metrics(scores, signal, points, totals, class_names)
+    p_clean = _softmax(clean)
     for group in GROUPS:
         logits = arrays[f"logits_{group}"]
-        results |= _group_metrics(group, p_clean, logits, signal, points, totals)
+        results |= _group_metrics(
+            group, p_clean, logits, signal, points, totals, class_names
+        )
     return results
 
 
@@ -384,7 +407,8 @@ class InvarianceMetricCallback(Callback):
     threshold frozen on the clean one-vs-rest scores, with the efficiency that threshold
     fixed as read on the transformed scores. Groupless, they are the clean rejection or
     TPR of each working point and the one-vs-rest AUC. The working-point and AUC
-    families are logged per class and as the macro mean over the classes.
+    families are logged per class, named by the datamodule's ``class_names``, and as the
+    macro mean over the classes.
 
     The logits are recomputed here in fp32, so the AUC can differ from the ROC plot's,
     which reads the step's autocast logits under 16-mixed.
@@ -411,16 +435,17 @@ class InvarianceMetricCallback(Callback):
         self.subdir: str | None = None
         self._reset()
 
-    def _reset(self) -> None:
+    def _reset(self, class_names: tuple[str, ...] = CLASS_NAMES) -> None:
         """Drop the state of the previous test pass; a fold reuses the same callback."""
+        self._class_names = class_names
         self._transforms: dict[str, DrawingTransform] = {}
         self._flip = FlipProbe()
         self._store = OutputStore()
 
     def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Build the pass's transforms on the datamodule's columns, unless the probe is
-        off."""
-        self._reset()
+        """Read the datamodule's classes and build the pass's transforms on its columns,
+        unless the probe is off."""
+        self._reset(class_names_of(trainer.datamodule))
         if not self.probe:
             log.info("Invariance probe off: the clean metrics alone are logged.")
             return
@@ -476,7 +501,7 @@ class InvarianceMetricCallback(Callback):
         arrays = self._store.arrays()
         results = self._results(arrays)
         pl_module.log_dict(results, prog_bar=False, on_epoch=True, sync_dist=True)
-        macro = [n for n in results if n.rsplit("_", 1)[-1] not in CLASS_NAMES]
+        macro = [n for n in results if n.rsplit("_", 1)[-1] not in self._class_names]
         log.info(" | ".join(f"{n}: {results[n]:.4f}" for n in macro))
         if self.subdir is not None:
             path = Path(trainer.default_root_dir) / "outputs" / f"{self.subdir}.npz"
@@ -485,6 +510,7 @@ class InvarianceMetricCallback(Callback):
     def _results(self, arrays: dict[str, np.ndarray]) -> dict[str, float]:
         """Every metric of the pass: the groupless ones alone when nothing was
         probed."""
+        names = self._class_names
         if not self.probe:
-            return clean_metrics(arrays["logits_clean"], arrays["labels"])
-        return self._flip.metrics() | output_metrics(arrays)
+            return clean_metrics(arrays["logits_clean"], arrays["labels"], names)
+        return self._flip.metrics() | output_metrics(arrays, names)

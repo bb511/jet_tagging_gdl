@@ -26,6 +26,7 @@ from src.data.components.augmentation import (
     compute_pt,
     rebase_on_kept_axis,
 )
+from src.symmetry import CLASS_NAMES
 from src.utils.checkpoints import MANIFEST_FILENAME, read_manifest
 from src.utils.omegaconf import register_resolvers
 
@@ -107,10 +108,12 @@ class StubDataModule:
         features: list[str] = FOUR_MOMENTUM,
         norm_scales: dict[str, float] | None = None,
         keep_full_features_at_test: bool = True,
+        class_names: tuple[str, ...] = CLASS_NAMES,
     ) -> None:
         self.features = list(features)
         self.norm_scales = norm_scales
         self.keep_full_features_at_test = keep_full_features_at_test
+        self.class_names = class_names
 
 
 def jets(
@@ -131,9 +134,10 @@ def jets(
     return batch
 
 
-def labels(n_jets: int, seed: int = 1) -> torch.Tensor:
+def labels(n_jets: int, seed: int = 1, n_classes: int = 5) -> torch.Tensor:
     generator = torch.Generator().manual_seed(seed)
-    return torch.eye(5)[torch.randint(0, 5, (n_jets,), generator=generator)]
+    drawn = torch.randint(0, n_classes, (n_jets,), generator=generator)
+    return torch.eye(n_classes)[drawn]
 
 
 def wrap_phi(phi: torch.Tensor) -> torch.Tensor:
@@ -453,3 +457,69 @@ def results_header() -> list[str]:
         "test_acc_folds",
         "selected_inv_folds",
     ]
+
+
+# The rows of the top-tagging replica that follow a published recipe rather than a
+# search.
+TOP_TAGGING_RECIPES = tuple(
+    "lorentznet pelican pelican_lorentz lgatr_slim lgatr_slim_lorentz lloca_lorentz "
+    "lloca_z lloca_so2 lloca_so3".split()
+)
+# Every row of the replica, at N = 100 in the baseline regime alone: the embedded rows,
+# the five grid rows on [pt, etarel, phirel] and the moment rows.
+TOP_TAGGING = (
+    *TOP_TAGGING_RECIPES,
+    "vn",
+    *"deepsets mlp jetformer jedi_linear linformer".split(),
+    *MOMENT_ROWS,
+)
+TOP_TAGGING_NCONSTITUENTS = (100,)
+# The columns of the converted cache, in its order.
+TOP_TAGGING_COLUMNS = ("px", "py", "pz", "e", "pt", "eta", "phi", "etarel", "phirel")
+# Jets per raw file of the synthetic record, read in chunks of 32: the training file in
+# three, the test split ending in a partial batch of 16. N = 8 truncates the jets of
+# more constituents.
+TOP_TAGGING_SIZES = {"train.h5": 96, "val.h5": 32, "test.h5": 40}
+TOP_TAGGING_N = 8
+# The jets of every synthetic file whose first two constituents are swapped.
+TOP_TAGGING_PLANTED = (1, 3)
+
+
+@functools.cache
+def top_tagging_raw(name: str) -> tuple[np.ndarray, np.ndarray]:
+    # The raw file *name* as the record stores it: [E, px, py, pz] in GeV (jets, 200, 4)
+    # of 1 to 20 massless constituents at p_T U(1, 100) GeV in falling p_T but in the
+    # planted jets, zero-padded, and is_signal_new alternating from 0.
+    n_jets = TOP_TAGGING_SIZES[name]
+    rng = np.random.default_rng(list(TOP_TAGGING_SIZES).index(name))
+    pt = -np.sort(-rng.uniform(1.0, 100.0, (n_jets, 20)), axis=1)
+    eta, phi = (rng.normal(centre, 0.3, (n_jets, 20)) for centre in (0.5, 0.2))
+    p4 = np.stack(
+        [pt * np.cosh(eta), pt * np.cos(phi), pt * np.sin(phi), pt * np.sinh(eta)], -1
+    )
+    multiplicity = rng.integers(1, 21, n_jets)
+    multiplicity[list(TOP_TAGGING_PLANTED)] = 20
+    p4[np.arange(20) >= multiplicity[:, None]] = 0.0
+    p4[list(TOP_TAGGING_PLANTED), :2] = p4[list(TOP_TAGGING_PLANTED), 1::-1]
+    padded = np.zeros((n_jets, 200, 4), dtype=np.float32)
+    padded[:, :20] = p4
+    return padded, np.arange(n_jets) % 2
+
+
+def _read_top_tagging(path: Path) -> Any:
+    p4, flags = top_tagging_raw(path.name)
+    for start in range(0, len(p4), 32):
+        yield p4[start : start + 32], flags[start : start + 32]
+
+
+@pytest.fixture
+def top_tagging_cache(tmp_path: Path) -> Path:
+    # The cache root of the synthetic record at N = TOP_TAGGING_N, as the datamodule's
+    # cache_dir: the cache exists, so nothing is downloaded.
+    from src.data.components.top_tagging import convert
+
+    def count(path: Path) -> int:
+        return TOP_TAGGING_SIZES[path.name]
+
+    convert(tmp_path / "raw", tmp_path, TOP_TAGGING_N, _read_top_tagging, count, 50)
+    return tmp_path

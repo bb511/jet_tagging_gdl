@@ -21,7 +21,9 @@ gradient-boosted trees on the same observables, `jet_level_bdt_all53` and `jet_l
 in a module of their own, `src/algorithms/bdt.py`, which wraps scikit-learn rather than a network.
 A quantised twin of the vector neurons, `vn_hgq`, joined the same day in modules of its own, which
 train the `vn` network quantisation-aware with HGQ2 on Keras for synthesis with alkaid (see "Vector
-neurons trained quantisation-aware").
+neurons trained quantisation-aware"). On 2026-10-09 a replica of 18 rows on a second data set, the
+top-quark tagging reference set, joined with no architecture of its own (see "Top-tagging
+replica").
 PELICAN, a plain
 Transformer encoder, a Lipschitz-constrained MLP and an IRC-safe DeepSets were removed at the
 refactor; nano-PELICAN, which existed as configuration only, went with them, and so did the
@@ -54,8 +56,10 @@ supplies `build_net(**net_kwargs) -> nn.Module` and, where the architecture is p
 inputs, two hooks. The steps:
 
 - Write the network as an `nn.Module` under `src/algorithms/components/<name>.py`. It takes
-  `(B, N, F)` float32, with padded constituents as all-zero rows, and returns `(B, 5)`
-  logits. The masking convention the kept components use is `x.abs().sum(-1) > 0`.
+  `(B, N, F)` float32, with padded constituents as all-zero rows, and returns `(B, n_class)`
+  logits, `n_class` being the algorithm's `output_dim` (5 on hls4ml, 2 on top tagging), which
+  `setup()` checks against the datamodule's `class_names`. The masking convention the kept
+  components use is `x.abs().sum(-1) > 0`.
 - Write `src/algorithms/<name>.py`, a `JetTaggingModule` subclass whose only required member
   is `build_net`. Do not give it an `__init__`: `save_hyperparameters` walks the caller frame
   to collect `**net_kwargs`, and an intervening constructor that does not forward every
@@ -92,6 +96,14 @@ inputs, two hooks. The steps:
 - Extend `tests/test_algorithms.py`, which steps every row of `MODELS` in `tests/conftest.py` and
   reads its columns out of a full-width batch, and add the row's state-dict digests to `LAYOUTS`
   in `tests/test_configs.py`, which builds every experiment and holds its layout to them.
+- To join the top-tagging replica, a row needs `configs/experiment/top_tagging/<name>_100.yaml` on
+  the pattern of the 18 there (`output_dim: 2`, the `top_tagging` data and results-table
+  overrides, the trainer precision and TF32 setting of its hls4ml experiment at N = 150) and its
+  name in `TOP_TAGGING` in both `scripts/optuna/make_train_catalogues.py` and `tests/conftest.py`.
+  A row on a published recipe also goes in `TOP_TAGGING_RECIPES` and carries the recipe in its
+  experiment; a searched row gets `configs/hparams_search/top_tagging/<name>_optuna.yaml` and the
+  hand-written `scripts/top_tagging/run<name>_search.sh`. The generator then writes its train and
+  eval catalogues under `--dataset top_tagging`.
 
 Every one of the removed modules will need two things on the way in. They import
 `pytorch_lightning.utilities.memory.garbage_collection_cuda`; the `pytorch_lightning`
@@ -259,7 +271,9 @@ run the network on the CPU at construction, where the LLoCa-Transformer's
 `F.scaled_dot_product_attention` dispatches `aten._scaled_dot_product_flash_attention_for_cpu`, a
 kernel torch's FLOP counter does not know. `utils/flops.py` prices it through a custom mapping,
 which restores the attention's 524 288 multiply-adds per jet at N = 16 (about 3 % of the row's
-FLOPs), and `utils/bitops.py` prices it as the math path would compute it.
+FLOPs), and `utils/bitops.py` prices it as the math path would compute it. The wrapper's
+`framesnet_dropout`, 0 and without a layer in every hls4ml row, serves the top-tagging recipe (see
+"Top-tagging replica").
 
 The frames class sets the exact group, and the switch `frames` picks the class, one per row.
 `LearnedPDFrames`, the class of the `lloca_lorentz` row, predicts a general Lorentz
@@ -1428,6 +1442,167 @@ checkpoint. `tests/test_configs.py` checks the copies, the shared search space a
 fp32, absent clipping, disabled probe and subdirectory, and exempts the two rows from the cost
 inequality, and `tests/test_scripts.py` checks `CPU_ROWS` against `tests/conftest.py` and that the
 blocks of the two rows carry `trainer=cpu` without a device, in the default layout alone.
+
+## Top-tagging replica
+
+Added on 2026-10-09: 18 of the rows on a second data set, the top-quark tagging reference set of
+arXiv:1902.09914 (Zenodo 2603256), on which LorentzNet, PELICAN, L-GATr-slim and LLoCa published
+their figures. The nine rows of those four architectures train on the published recipes, so that
+their figures test the ports against the papers'; `vn`, the five grid rows and the three moment rows
+are searched around their hls4ml optimum. Every row runs at N = 100 in the baseline regime with two
+classes, `qcd` and `top`. CLAUDE.md ("Top-tagging replica") describes the record, its conversion,
+the datamodule, the configs and the catalogues; this section holds the recipes and their sources,
+where the ports depart from the references, the measured costs and the published figures. The
+literature verification behind the recipes and the figures (2026-10-08), with verbatim quotes, is
+`~/Research/local/claude/scratchpad/jet_tagging_gdl/toptagging_2026-10-08/literature_toptagging.md`
+on the Mac. Around the existing modules sit `src/data/components/top_tagging.py`,
+`src/data/top_tagging_datamodule.py`, `src/algorithms/utils/schedules.py`,
+`scripts/data/prepare_top_tagging.py`, `configs/data/top_tagging.yaml`,
+`configs/results_table/top_tagging.yaml`, the 18 experiment configs
+`configs/experiment/top_tagging/<row>_100.yaml`, the nine search configs
+`configs/hparams_search/top_tagging/<row>_optuna.yaml`, the catalogues under `scripts/top_tagging/`,
+`scripts/analysis/top_tagging_summary.py` and `tests/test_top_tagging.py`.
+
+The training jets hold 49.05 constituents on average and 160 at most, so N = 100 truncates 6006 of
+the 1 211 000 (0.5 %) and leaves 49.01 on average; the references read every constituent, except
+the 208k PELICAN paper, which caps the jets at 80. The classes are balanced to within 172 jets per
+split (605 523 QCD and 605 477 top jets in training). The conversion's stable sort reordered 7
+training jets, p_T ties at float32 precision (2026-10-09).
+
+The recipes, as the experiment configs set them:
+
+| row                                | network                                                                                             | optimiser                                      | schedule                      | batch, epochs | clipping |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------- | ------------- | -------- |
+| `lorentznet`                       | 6 blocks of width 72, c = 5e-3, dropout 0.2                                                         | AdamW, 1e-3, weight decay 0.01                 | `warmup_restarts_decay`       | 128, 35       | none     |
+| `pelican`, `pelican_lorentz`       | 5 blocks, `n_message` 60, `n_hidden` 35, dropout 0.01, `nbar` 51 and 49                             | AdamW, 2.5e-3, weight decay 0.005              | `warmup_restarts_decay`       | 100, 35       | norm 1   |
+| `lgatr_slim`, `lgatr_slim_lorentz` | the algorithm's 12 blocks, 32 vector and 96 scalar channels, 8 heads, `mlp_ratio` 4                 | Lion, 3e-5, weight decay 2, betas (0.9, 0.99)  | `cosine`                      | 128, 21       | norm 1   |
+| the four `lloca_*`                 | 12 blocks, 8 heads of 12 scalars and 1 vector, `mlp_factor` 2, frames-net 128 wide with dropout 0.1 | Lion, 3e-5, weight decay 2, betas (0.9, 0.999) | `cosine_restarts`, two cycles | 128, 32       | norm 1   |
+
+The sources are arXiv:2201.08187 §3.3 and the LorentzNet-release script `top_tagging.py` for
+LorentzNet; arXiv:2211.00454 §4, arXiv:2307.16506 Table 2 and the PELICAN repository's
+`config/48k.yaml` and `slurm/` commands for PELICAN; arXiv:2512.17011 App. A and the
+tagger-quantization repository's config for L-GATr-slim; and arXiv:2508.14898 App. A with the
+lloca-experiments files `config/model/tag_top_transformer.yaml` and
+`config/training/tag_default.yaml` for LLoCa. The twins without spurions (`pelican_lorentz`,
+`lgatr_slim_lorentz`) and the three LLoCa rows of another frames class take their partner's recipe.
+
+Where the sources disagree or are silent, the replica chooses as follows. LorentzNet warms up for
+the paper's 4 epochs, where the repository's README and its shipped `args.json` say 5; its batch of
+128 is the paper's 32 per GPU on four V100s, and its experiment sets
+`trainer.gradient_clip_val: null`, since the reference script clips no gradient. PELICAN takes the
+learning rate of 2.5e-3 and the dropout of 0.01 of the 45k paper (arXiv:2211.00454), which the
+repository's top-tagging commands share, against the 1e-3 and 0.025 of the 208k paper, the weight
+decay of 0.005 of arXiv:2307.16506 and the repository, and the widths of the 48k row
+(`config/48k.yaml`: `num_channels_m` 60 for the messaging MLP, `num_channels_2to2` 35 for the pair
+tensor). No source states a gradient clipping, so the trainer's norm of 1 stays. The 208k paper
+caps the jets at 80 constituents and fills every batch with equal numbers of signal and background
+jets; the replica does neither. The port has 179 023 parameters with the beams and 179 027 without,
+against the reference's 48k, because the rewrite does not factorise the aggregation weights (see
+"PELICAN"); its `nbar` is the training jets' mean multiplicity at N = 100, 49.01, plus the two
+beams, 51 for `pelican` and 49 for `pelican_lorentz`. The L-GATr-slim paper states no Lion betas,
+so the experiments write out the package's default (0.9, 0.99); 200 000 steps at a batch of 128
+are 21 epochs of the training split. The LLoCa paper states its betas, (0.9, 0.999), and a dropout
+of 0.1 in the frames-net alone, which the wrapper's `framesnet_dropout` carries while the
+backbone's `dropout` stays 0. At 0, the default of every hls4ml row, the package builds no dropout
+layer; a nonzero value inserts layers that renumber the later linear layers of the frames-net in
+the state dict, so the hls4ml checkpoints load at 0 alone. 300 000 steps at a batch of 128 are 32
+epochs, and the restart after 150 000 falls at epoch 16. The paper puts its weight decay of 2 on
+"the main network"; the replica's one optimiser applies it to every parameter, the frames-net's
+included.
+
+`warmup_restarts_decay` multiplies the initial rate by
+
+```
+f(t) = t / 4                          0 ≤ t < 4
+f(t) = ½ (1 + cos π u)                4 ≤ t < 32
+f(t) = f(31) · 0.5^(⌊t − 32⌋ + 1)     32 ≤ t < 35
+```
+
+with t the epoch, fractional within an epoch, and u the fraction of the current cosine cycle run
+through, the cycles lasting 4, 8 and 16 epochs from epoch 4 (`t0` 4, `t_mult` 2) as those of
+`CosineAnnealingWarmRestarts` do. The warm-up and the cosine are evaluated at every step. The decay
+is anchored at f(31) ≈ 0.0096, the factor at the start of the last cosine epoch, and halves it once
+per epoch: the LorentzNet reference steps its scheduler once per epoch, so its last cosine rate is
+that of epoch 31. `cosine` anneals to zero over the run, and `cosine_restarts` does so `cycles`
+times, restarting at the initial rate. Each is a `LambdaLR` stepped per batch (`interval: step`),
+its `total_steps` injected by `_set_up_scheduler`; `warmup_restarts_decay` also takes
+`epochs: ${trainer.max_epochs}`, which splits the steps into epochs. An experiment cannot replace
+the algorithm's scheduler by merging into `algorithm.scheduler`, since the keys of the algorithm
+config's `ReduceLROnPlateau` or `OneCycleLR` (`factor`, `patience`, `max_lr`, `pct_start`) would
+survive the merge and reach a factory that takes none of them. The recipe experiments therefore
+define the schedule as a top-level `scheduler:` node and assign it whole with
+`algorithm.scheduler: ${scheduler}`, and `tests/test_configs.py` checks that the recipe rows, and
+they alone, build a `LambdaLR`.
+
+The replica copies the published widths and optimisation; the inputs stay those of the ports. The
+LorentzNet reference appends the two beams as particles and gives every node a one-hot beam flag
+times |m| as its scalars (arXiv:2201.08187 §3.1 and §4.1; `top/collate.py` of its repository). The
+port reads the constituents alone, with ψ(m²) as the one scalar and a tanh gate in place of the
+reference's per-component clamp of the coordinate update at ±100 GeV (see
+`src/algorithms/components/lorentznet.py`), so it embeds the whole Lorentz group, which the
+reference's beam particles reduce to rotations about the beam. The
+L-GATr-slim and LLoCa references boost every jet to its rest frame and give each constituent seven
+ParT-style scalar features (`boost_jet` and `tagging_features` in their configs); the ports read the
+four-momenta in units of 20 GeV alone, L-GATr-slim with one scalar flag on its global token and
+LLoCa with no scalar in its frames-net. The LLoCa reference's frames-net also reads the beam and
+time spurions, so its exact group is SO(2) about the beam, an inference of the literature
+verification rather than a statement of the paper, where `lloca_lorentz` holds the Lorentz group.
+PELICAN's beams (1, 0, 0, ±1) and L-GATr-slim's time and lightlike beam tokens are those of the
+references.
+
+Smokes on a V100 of olgpu (2026-10-09), each one epoch cut to the training batches below and five
+validation batches at the recipe's batch, gave the step rates below. The peak memory is
+nvidia-smi's, the CUDA context included, and the parameters were counted on the built modules. The
+minutes per epoch and the hours per recipe extrapolate the training steps alone (9461 per epoch at
+a batch of 128, 12 110 at 100) and leave out the validation of 403 000 jets after every epoch, the
+compilation of L-GATr-slim and LLoCa (15 s to 1.5 min per fit), and the five folds, each a training
+of its own. LorentzNet's rate comes from 20 batches and is the roughest of the four.
+
+| row                       | batches | steps per s | min per epoch | h per recipe | peak memory | parameters |
+| ------------------------- | ------- | ----------- | ------------- | ------------ | ----------- | ---------- |
+| `lorentznet`              | 20      | 8.0         | 20            | 11.5         | 12.6 GiB    | 223 568    |
+| `pelican`, two chunks     | 220     | 7.9         | 26            | 15           | 7.3 GiB     | 179 023    |
+| `lgatr_slim`, compiled    | 220     | 15.9        | 10            | 3.5          | 4.6 GiB     | 2 013 826  |
+| `lloca_lorentz`, compiled | 220     | 13.9        | 11            | 6.0          | 6.3 GiB     | 1 601 669  |
+
+The counts of LorentzNet, L-GATr-slim and LLoCa match the papers' 224k, 2.0M and 1.6M. The
+published figures the replica is measured against, as `scripts/analysis/top_tagging_summary.py`
+prints them:
+
+| tagger             | source                                 | accuracy        | AUC             | 1/ε_B at ε_S = 30 % | 1/ε_B at ε_S = 50 % | parameters |
+| ------------------ | -------------------------------------- | --------------- | --------------- | ------------------- | ------------------- | ---------- |
+| LorentzNet         | arXiv:2201.08187, Table 1, 6 runs      | 0.942           | 0.9868          | 2195 ± 173          | 498 ± 18            | 224k       |
+| PELICAN, 60/35     | arXiv:2307.16506, Table 2, 5 seeds     | 0.9424 ± 0.0001 | 0.9868 ± 0.0001 | 2148 ± 125          | not reported        | 48k        |
+| L-GATr-slim        | arXiv:2512.17011, Table 1, 5 trainings | 0.9420          | 0.9869 ± 0.0001 | 2264 ± 93           | 546 ± 7             | 2.0M       |
+| LLoCa-Transformer  | arXiv:2508.14898, Table 5, 5 seeds     | 0.9416 ± 0.0001 | 0.9866 ± 0.0001 | 2150 ± 130          | 492 ± 15            | 1.6M       |
+| ParT, from scratch | arXiv:2202.03772                       | 0.940           | 0.9858          | 1602 ± 81           | 413 ± 16            | 2.1M       |
+
+The papers' uncertainties are spreads over repeated trainings on the record's split, whereas the
+folds of this repository share their seed and differ in their split, so the summary's fold spread
+measures something else. The record carries no jet-level observables, so the replica
+computes no ceiling of its own as "Jet-level ceiling" does on hls4ml, and the literature supplies
+it: the taggers on expert variables reach accuracies of 0.892 to 0.932 and rejections at
+ε_S = 30 % of 151 to 1249, namely the multi-body N-subjettiness DNNs (0.922 and 0.929, 792 ± 18
+and 867 ± 15), LDA (0.892, 151) and the linear EFP discriminant (0.932, 384) of arXiv:1902.09914
+Table 1, and BIP (0.929 and 0.931, 600 ± 47 and 853 ± 68) and DisCo-FFS (AUC 0.982, 1249 ± 43) as
+arXiv:2307.16506 Table 1 quotes them. The summary script prints these too.
+
+`tests/test_top_tagging.py` converts a synthetic record of three small raw files at N = 8, with two
+jets planted out of p_T order, and checks the sort, the truncation, the scales and the labels of
+the cache and its `meta.json`; that the datamodule serves training batches at the width of
+`data.features` and test batches at nine columns, with the cache's `class_names`, scales and axis
+columns and the folds of `fold_indices`; that a cache is built once and that a stale
+`format_version`, an md5 mismatch and `full_axis` are refused; the LorentzNet schedule over 35
+epochs; and `deepsets_100` and `lorentznet_100` end to end on the CPU, a main run and fold 1 of 2
+trained and evaluated into `results/top_tagging/{pt_etarel_phirel,embedded}/` with two-column
+logits. Under `slow`, with `TOP_TAGGING_RAW` naming the directory of the raw files, it reads the
+first 10 000 jets of `val.h5` and checks their labels and balance, E ≥ |p|, the jet p_T and η
+windows and the p_T order. `tests/test_configs.py` builds every top-tagging experiment and search
+config, `tests/test_algorithms.py` steps every row at `output_dim=2` and checks the refusal of a
+class-count mismatch, `tests/test_evaluation.py` checks the two-class probe keys and plots, and
+`tests/test_scripts.py` the generator's top-tagging layout, the submitters' reading of its
+catalogues and the summary script against the probe. The fast suite passed at 403 tests on olgpu
+(2026-10-09).
 
 ## Vector neurons on the four-momentum
 

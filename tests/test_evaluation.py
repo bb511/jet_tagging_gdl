@@ -14,15 +14,23 @@ from src.callbacks.invariance import (
     clean_metrics,
     output_metrics,
 )
+from src.callbacks.plotting import PlottingCallback
 from src.symmetry import (
     ACCURACY_TRANSFORMED,
+    AUC,
     CLASS_NAMES,
+    CLASS_NAMES_OF,
+    DIAGNOSTIC_FAMILIES,
     FLIP,
+    FLIP_FAMILIES,
     FLIP_RECOVER,
     FLIP_STABLE,
     GROUPS,
+    PERFORMANCE_FAMILIES,
+    RETENTION_FAMILIES,
     TABULATED_FAMILIES,
     TABULATED_GROUPS,
+    TOTAL_VARIATION,
     key,
 )
 from src.utils.checkpoints import (
@@ -66,21 +74,23 @@ FOLD_VALUES = [
     (0.2, 0.3, 0.4),
     (math.nan, 0.25, 0.35),
 ]
+TOP_TAGGING = CLASS_NAMES_OF["top_tagging"]
 
 
 class _StubModule(torch.nn.Module):
     # The network of a [pt, eta, phi] run: it reads those three of the record's columns
     # off a full-width test batch, the layout the probe transforms.
-    def __init__(self) -> None:
+    def __init__(self, mixing: torch.Tensor = MIXING) -> None:
         super().__init__()
         self.device = torch.device("cpu")
         self.logged: dict[str, float] = {}
+        self.mixing = mixing
 
     def log_dict(self, metrics: dict[str, float], **kwargs) -> None:
         self.logged |= metrics
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, [5, 7, 10]].sum(dim=1) @ MIXING
+        return x[:, :, [5, 7, 10]].sum(dim=1) @ self.mixing
 
 
 def _flips(arrays: dict[str, np.ndarray]) -> dict[str, float]:
@@ -104,7 +114,7 @@ def test_the_probe_logs_what_its_stored_outputs_give(
 ) -> None:
     # Two batches of unequal size, so that a rate over the jets differs from a mean of
     # the per-batch rates. Without the probe (the jet-level rows) nothing is transformed
-    # and the datamodule, here without a single attribute, is never read.
+    # and the datamodule, here without a single attribute, gives the hls4ml classes.
     full = record_jets(48, 6, 6).float()
     batches = [(full[:32], labels(32, seed=1)), (full[32:], labels(16, seed=2))]
     module, callback = _StubModule(), InvarianceMetricCallback(probe=probe)
@@ -141,6 +151,48 @@ def test_the_probe_logs_what_its_stored_outputs_give(
     )
     with pytest.raises(ValueError, match="every record column"):
         InvarianceMetricCallback().on_test_start(reduced, _StubModule())
+
+
+@pytest.mark.parametrize("probe", [True, False])
+def test_two_classes_are_named_by_the_datamodule(probe: bool) -> None:
+    batch = (record_jets(48, 6, 6).float(), labels(48, n_classes=2))
+    module, callback = _StubModule(MIXING[:, :2]), InvarianceMetricCallback(probe=probe)
+    datamodule = StubDataModule(PT_ETA_PHI, class_names=TOP_TAGGING)
+    trainer = SimpleNamespace(datamodule=datamodule)
+
+    callback.on_test_start(trainer, module)
+    callback.on_test_batch_end(trainer, module, None, batch, 0)
+    callback.on_test_epoch_end(trainer, module)
+
+    # None names the macro mean.
+    scopes = (None, *TOP_TAGGING)
+    expected = {key(None, f, c) for f in PERFORMANCE_FAMILIES for c in scopes}
+    if probe:
+        whole = (*FLIP_FAMILIES, TOTAL_VARIATION)
+        per_class = RETENTION_FAMILIES + DIAGNOSTIC_FAMILIES
+        expected |= {key(g, f) for g in GROUPS for f in whole}
+        expected |= {key(g, f, c) for g in GROUPS for f in per_class for c in scopes}
+    assert set(module.logged) == expected
+    # With two classes, each one-vs-rest score is minus the other.
+    auc = [module.logged[key(None, AUC, c)] for c in scopes]
+    assert auc == pytest.approx([auc[0]] * 3, rel=1e-12)
+
+
+def test_the_plots_are_drawn_for_two_classes(tmp_path: Path) -> None:
+    callback = PlottingCallback()
+    datamodule = StubDataModule(class_names=TOP_TAGGING)
+    trainer = SimpleNamespace(
+        datamodule=datamodule, default_root_dir=str(tmp_path), loggers=[]
+    )
+    logits = torch.randn(40, 2, generator=torch.Generator().manual_seed(0))
+    batch = (None, labels(40, n_classes=2))
+
+    callback.on_test_start(trainer, None)
+    callback.on_test_batch_end(trainer, None, {"logits": logits}, batch, 0)
+    callback.on_test_epoch_end(trainer, None)
+
+    written = sorted(path.name for path in (tmp_path / "plots").iterdir())
+    assert written == ["confusion_matrix_test.png", "roc_curves_test.png"]
 
 
 def _class_g(

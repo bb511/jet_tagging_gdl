@@ -7,9 +7,12 @@ whether a driver is still alive to produce the rest. Prints a table, then the la
     python3 scripts/cluster/sweep_status.py            # table + commands
     python3 scripts/cluster/sweep_status.py --commands # commands only
     python3 scripts/cluster/sweep_status.py --features pt,eta,phi  # one feature set
+    python3 scripts/cluster/sweep_status.py --dataset top_tagging  # the replica
 
 Each feature set other than the four-momentum keeps its catalogues, its study databases
-and its driver logs in a subdirectory of its own, named by the joined feature list.
+and its driver logs in a subdirectory of its own, named by the joined feature list. The
+top-tagging data set has trees of its own (scripts/top_tagging, logs/optuna/top_tagging)
+and no feature sets, and its study names carry the prefix ``top_tagging_``.
 
 Liveness comes from the driver log, not from the trial counts, since a dead driver leaves its
 last batch marked RUNNING forever.
@@ -30,7 +33,15 @@ from datetime import datetime
 from pathlib import Path
 
 TAIL = 15
-STEM_RE = re.compile(r"run([a-z0-9]+?)_search")
+DATASETS = ("hls4ml", "top_tagging")
+# A row name as the catalogue names and the experiments spell it. The hls4ml pattern
+# admits no underscore, so its table leaves out jedi_linear and every other such row;
+# four of the nine searched top-tagging rows carry one, so their pattern admits it.
+ROW_OF = {"hls4ml": "[a-z0-9]+", "top_tagging": "[a-z0-9_]+"}
+STEM_RE_OF = {
+    dataset: re.compile(rf"run({row}?)_search") for dataset, row in ROW_OF.items()
+}
+STEM_RE = STEM_RE_OF["hls4ml"]
 ERR = re.compile(
     r"Traceback \(most recent call last\)"
     r"|HYDRA_FULL_ERROR"
@@ -45,9 +56,9 @@ FINISHED = re.compile(r"\[HYDRA\]\s+(Best|Value)", re.M)
 HDR = "%-11s %-38s %6s %8s %6s %7s  %-8s %s"
 
 
-def _regime(block: str) -> tuple[str, str, str, str] | None:
+def _regime(block: str, dataset: str = "hls4ml") -> tuple[str, str, str, str] | None:
     """(model, nconstituents, method, scheme) of one search block."""
-    exp = re.search(r"experiment=hls4ml/([a-z0-9]+)_(\d+)", block)
+    exp = re.search(rf"experiment={dataset}/({ROW_OF[dataset]})_(\d+)", block)
     method = re.search(r"data\.method=(\S+)", block)
     scheme = re.search(r"data\.augmentation_scheme=(\S+)", block)
     if not (exp and method and scheme):
@@ -69,7 +80,14 @@ def _label(model: str, nconst: str, method: str, scheme: str) -> str:
     return f"{model}_nconst{nconst}_{variant}"
 
 
-def blocks(script: str) -> dict[str, tuple[int, int, str]]:
+def study_of(regime: tuple[str, str, str, str], dataset: str = "hls4ml") -> str:
+    """The study name the hparams_search config builds from a block's regime; the
+    studies of a data set other than hls4ml carry its name as a prefix."""
+    prefix = "" if dataset == "hls4ml" else f"{dataset}_"
+    return prefix + "%s_nconst%s_%s_%s" % regime
+
+
+def blocks(script: str, dataset: str = "hls4ml") -> dict[str, tuple[int, int, str]]:
     """Study -> (index, n_trials, label) for each driver block in a run*_search.sh.
 
     The study name is not on the command line: it is rebuilt from the regime, as the
@@ -83,9 +101,10 @@ def blocks(script: str) -> dict[str, tuple[int, int, str]]:
         re.split(r"^# python3 src/train\.py", text, flags=re.M)[1:], 1
     ):
         b = block.replace("\\\n", " ").replace("#", " ")
-        regime, n = _regime(b), re.search(r"hydra\.sweeper\.n_trials=(\d+)", b)
+        regime = _regime(b, dataset)
+        n = re.search(r"hydra\.sweeper\.n_trials=(\d+)", b)
         if regime and n:
-            out["%s_nconst%s_%s_%s" % regime] = (i, int(n.group(1)), _label(*regime))
+            out[study_of(regime, dataset)] = (i, int(n.group(1)), _label(*regime))
     return out
 
 
@@ -181,16 +200,22 @@ def status_of(done: int, target: int, state: str) -> str:
 
 
 def _rows_of(
-    path: Path, script: str, model: str, db_root: str, writable: bool
+    path: Path,
+    script: str,
+    model: str,
+    db_root: str,
+    writable: bool,
+    dataset: str = "hls4ml",
 ) -> list[dict]:
     """One row per study of a single catalogue: its trial count and its workers'
     state."""
     db = f"{db_root}/{model}.db"
     # submit_search.sh names a driver log directory after the catalogue's parent
-    # directory and its stem, which is 'hls4ml_<stem>' for the four-momentum files.
+    # directory and its stem, which is 'hls4ml_<stem>' for the four-momentum files
+    # and 'top_tagging_<stem>' for the replica's.
     logdir = f"logs/searches/{path.parent.name}_{path.stem}"
     rows = []
-    for study, (idx, target, label) in blocks(script).items():
+    for study, (idx, target, label) in blocks(script, dataset).items():
         done = complete_of(db, study, writable=writable)
         logs = worker_logs(logdir, idx, label)
         state, age = classify_workers(logs)
@@ -217,24 +242,29 @@ def features_label(spec: str | None) -> str | None:
     return "_".join(name.strip() for name in spec.split(",")) if spec else None
 
 
-def db_root_of(label: str | None) -> str:
+def db_root_of(label: str | None, dataset: str = "hls4ml") -> str:
     """Where that feature set's study databases are; the default tree has no label."""
-    return f"logs/optuna/hls4ml/{label}" if label else "logs/optuna/hls4ml"
+    root = f"logs/optuna/{dataset}"
+    return f"{root}/{label}" if label else root
 
 
 def collect(
-    repo: Path, db_root: str, writable: bool, label: str | None = None
+    repo: Path,
+    db_root: str,
+    writable: bool,
+    label: str | None = None,
+    dataset: str = "hls4ml",
 ) -> list[dict]:
-    """One row per search block found under scripts/hls4ml/[<feature label>/]."""
+    """One row per search block found under scripts/<dataset>/[<feature label>/]."""
     rows: list[dict] = []
     under = f"{label}/" if label else ""
-    for path in sorted(repo.glob(f"scripts/hls4ml/{under}run*_search.sh")):
-        match = STEM_RE.match(path.stem)
+    for path in sorted(repo.glob(f"scripts/{dataset}/{under}run*_search.sh")):
+        match = STEM_RE_OF[dataset].match(path.stem)
         if not match:
             print(f"skipping unrecognised file name: {path.name}", file=sys.stderr)
             continue
         script = str(path.relative_to(repo))
-        rows += _rows_of(path, script, match.group(1), db_root, writable)
+        rows += _rows_of(path, script, match.group(1), db_root, writable, dataset)
     return sorted(rows, key=lambda r: (r["model"], r["study"]))
 
 
@@ -280,16 +310,25 @@ def _parse_args() -> argparse.Namespace:
         "--commands", action="store_true", help="print only the launch commands"
     )
     parser.add_argument(
+        "--dataset",
+        choices=DATASETS,
+        default="hls4ml",
+        help="report the studies of this data set (default hls4ml)",
+    )
+    parser.add_argument(
         "--db-root",
-        help="read DBs from here instead of logs/optuna/hls4ml (use "
+        help="read DBs from here instead of logs/optuna/<dataset> (use "
         "copies when a crashed driver left a hot -journal)",
     )
     parser.add_argument(
         "--features",
         help="report the studies of this comma-separated feature set, e.g. "
-        "'pt,eta,phi', instead of the four-momentum ones",
+        "'pt,eta,phi', instead of the four-momentum ones; hls4ml alone",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.features and args.dataset != "hls4ml":
+        parser.error("--features applies to the hls4ml data set alone")
+    return args
 
 
 def main() -> int:
@@ -299,8 +338,9 @@ def main() -> int:
     repo = Path(__file__).resolve().parents[2]
     os.chdir(repo)
     label = features_label(args.features)
-    db_root = args.db_root or db_root_of(label)
-    rows = collect(repo, db_root, writable=bool(args.db_root), label=label)
+    db_root = args.db_root or db_root_of(label, args.dataset)
+    writable = bool(args.db_root)
+    rows = collect(repo, db_root, writable, label=label, dataset=args.dataset)
     if not args.commands:
         print_table(rows)
     print_commands(rows)

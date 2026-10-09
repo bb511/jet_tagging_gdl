@@ -14,8 +14,20 @@ SCHEMES = ("none", *GROUPS)
 # LorentzNet  embeds. This latter one is not tabulated.
 TABULATED_GROUPS = ("so2", "so3", "lorentz")
 
-# The flavour classes, in the order of the logit columns.
-CLASS_NAMES = ("g", "q", "W", "Z", "t")
+# The classes of each data set, in the order of the logit columns; a datamodule carries its
+# own as `class_names`. CLASS_NAMES stays the hls4ml vocabulary for the callers that have
+# no datamodule at hand.
+CLASS_NAMES_OF = {
+    "hls4ml": ("g", "q", "W", "Z", "t"),
+    "top_tagging": ("qcd", "top"),
+}
+CLASS_NAMES = CLASS_NAMES_OF["hls4ml"]
+
+
+def class_names_of(datamodule: object) -> tuple[str, ...]:
+    """The classes of *datamodule*, in the order of the logit columns; the hls4ml ones
+    when it names none."""
+    return tuple(getattr(datamodule, "class_names", CLASS_NAMES))
 
 
 class WorkingPoint(NamedTuple):

@@ -1,0 +1,7 @@
+# The top-tagging rows, in tables of their own beside the hls4ml ones: results/top_tagging/ holds
+# the same <features>/ and embedded/ directories.
+defaults:
+  - default
+  - _self_
+
+output_path: ${paths.results_dir}/top_tagging/results_table.csv

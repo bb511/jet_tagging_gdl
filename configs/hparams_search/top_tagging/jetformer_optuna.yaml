@@ -1,0 +1,33 @@
+# @package _global_
+# The top-tagging search at N = 100: the hls4ml space of this name narrowed around its N = 150
+# optimum, each size to that value and its grid neighbours, the lr to a factor 3, the rest kept.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: tpe
+  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+
+# One TPE study on the main run's val/acc_best, paired on the CLI with callbacks=search
+# data.n_folds=1 trainer.max_epochs=50. A campaign enqueues the optimum, the values of the
+# experiment of this name, as trial 0 under these parameter names.
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: sqlite:///logs/optuna/top_tagging/jetformer.db?timeout=600
+    # The regime alone picks the study, never a CLI argument.
+    study_name: top_tagging_jetformer_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
+    n_jobs: 1
+    direction: maximize
+    n_trials: 100
+    sampler:
+      seed: 1234
+      n_startup_trials: 20
+
+    params:
+      algorithm.embed_dim: choice(64, 96)
+      algorithm.num_heads: choice(2, 4)
+      algorithm.num_transformers: choice(3, 4)
+      algorithm.dropout: choice(0.0, 0.1, 0.2)
+      algorithm.optimizer.lr: tag(log, interval(1.53e-3, 1.37e-2))
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-4, 1e-3, 1e-2, 5e-2)

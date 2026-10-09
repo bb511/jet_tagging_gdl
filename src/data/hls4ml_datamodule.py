@@ -27,7 +27,7 @@ from src.data.components.augmentation import (
     resolve_feature_indices,
 )
 from src.data.components.dataset import HLS4MLDataset
-from src.symmetry import SCHEMES
+from src.symmetry import CLASS_NAMES, SCHEMES
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__)
@@ -101,6 +101,7 @@ class HLS4MLDataModule(LightningDataModule):
     # Test batches keep all 16 record columns whatever the model reads, so that the
     # invariance probe finds the momenta it transforms.
     keep_full_features_at_test = True
+    class_names = CLASS_NAMES
 
     def __init__(
         self,
@@ -302,6 +303,9 @@ class HLS4MLDataModule(LightningDataModule):
             return x_train, y_train, x_val, y_val
 
         x_all, y_all = torch.cat([x_train, x_val]), torch.cat([y_train, y_val])
+        # Freed before the folds are sliced out of the pool, lowering the peak by a copy
+        # of both splits.
+        del x_train, x_val
         log.info(f"Pooled training and validation splits: {len(x_all)} jets")
 
         return self._kfold_split(x_all, y_all)

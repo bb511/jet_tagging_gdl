@@ -24,6 +24,9 @@ from tests.conftest import (
     MODELS,
     QUANTISED,
     ROOT,
+    TOP_TAGGING,
+    TOP_TAGGING_NCONSTITUENTS,
+    TOP_TAGGING_RECIPES,
     load_script,
 )
 
@@ -67,6 +70,9 @@ def test_the_generator_names_the_rows_the_tests_do() -> None:
     assert tuple(generator.JET_LEVEL) == JET_LEVEL
     assert generator.CPU_ROWS == set(CPU_ROWS)
     assert tuple(generator.QUANTISED) == QUANTISED
+    assert tuple(generator.TOP_TAGGING) == TOP_TAGGING
+    assert tuple(generator.TOP_TAGGING_RECIPES) == TOP_TAGGING_RECIPES
+    assert tuple(generator.TOP_TAGGING_NCONSTITUENTS) == TOP_TAGGING_NCONSTITUENTS
 
 
 @pytest.mark.parametrize("features", [None, ("pt", "eta", "phi")])
@@ -110,11 +116,11 @@ def test_every_generated_block_parses_back_through_lib_sh(
                 assert (block["trainer"], block.get("trainer.devices")) == device
 
 
-def _study(db: Path, rows: list[float | TrialState]) -> Path:
+def _study(db: Path, rows: list[float | TrialState], name: str = STUDY) -> Path:
     # A float is a completed trial with that value; a RUNNING row is left open through
     # ask(), as a killed driver leaves one.
     study = optuna.create_study(
-        study_name=STUDY, storage=f"sqlite:///{db}", direction="maximize"
+        study_name=name, storage=f"sqlite:///{db}", direction="maximize"
     )
     for row in rows:
         if row == TrialState.RUNNING:
@@ -148,6 +154,39 @@ def test_best_trial_keeps_to_the_first_200_completed_trials(tmp_path: Path) -> N
     assert generator.best_trial(padded, STUDY) == (207, 0.8, {"x": "0.8"})
     assert generator.best_trial(empty, STUDY) is None
     assert generator.best_trial(empty, "absent") is None
+
+
+def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
+    # The MLP's study holds its best, 0.9, at trial 110, past the budget of 100, within
+    # which 0.8 at trial 30 wins. Beside it in the database sits a better study under
+    # the hls4ml name, which the replica must not read.
+    dbs, out = tmp_path / "optuna", tmp_path / "catalogues"
+    dbs.mkdir()
+    study = "top_tagging_mlp_nconst100_augmentation_none"
+    _study(dbs / "mlp.db", [{30: 0.8, 110: 0.9}.get(n, 0.5) for n in range(120)], study)
+    _study(dbs / "mlp.db", [0.9], "mlp_nconst100_augmentation_none")
+    layout = generator.Layout(dataset="top_tagging")
+    generator._generate(dbs, out, ROOT, layout, False)
+    tasks = ("train", "eval")
+
+    assert {p.name for p in out.iterdir()} == {
+        f"run{row}_{task}.sh" for row in TOP_TAGGING for task in tasks
+    }
+    for row in TOP_TAGGING:
+        paths = [out / f"run{row}_{task}.sh" for task in tasks]
+        (trained,), (evaluated,) = (_blocks(path) for path in paths)
+        cell = f"top_tagging/{row}/nconst100/baseline"
+        experiment = f"top_tagging/{row}_100"
+        assert trained["experiment"] == evaluated["experiment"] == experiment
+        assert trained["hydra.run.dir"] == f"logs/train/{cell}"
+        assert evaluated["hydra.run.dir"] == f"logs/eval/{cell}"
+        assert evaluated["checkpoint_manifest_path"] == trained["hydra.run.dir"]
+        assert not any("hls4ml" in path.read_text() for path in paths)
+        recipe = "# published top-tagging recipe" in paths[0].read_text()
+        assert recipe == (row in TOP_TAGGING_RECIPES)
+    mlp = out / "runmlp_train.sh"
+    assert f"# best trial 30 of {study}, val/acc_best=0.800000" in mlp.read_text()
+    assert _blocks(mlp)[0]["x"] == "0.8"
 
 
 def _submit(script: str, *args: str) -> subprocess.CompletedProcess:
@@ -223,6 +262,48 @@ def test_submit_train_lays_the_folds_out_under_the_main_run() -> None:
         layout = f"fold={j} data.n_folds=2 hydra.run.dir={base}/fold_{j}"
         assert fold.endswith(f"{layout} parent_run_id=$parent")
     assert not fold_2.startswith("CUDA_VISIBLE_DEVICES")
+
+
+def test_the_submitters_read_the_top_tagging_catalogues() -> None:
+    # The nine search catalogues are hand-written, one block each, and must keep to the
+    # replica's budget; the train and eval ones are generated.
+    searches = {
+        path.name.removeprefix("run").removesuffix("_search.sh"): path
+        for path in (ROOT / "scripts" / "top_tagging").glob("run*_search.sh")
+    }
+    search = "scripts/top_tagging/rundeepsets_search.sh"
+    listed = _submit("submit_search.sh", "--list", search)
+    folds = ("--folds", "2", "--gpus", "0,1")
+    # Each dry run with the commands it prints: the train one a main run and two folds.
+    runs = [
+        (_submit("submit_search.sh", search), 1),
+        (
+            _submit(
+                "submit_train.sh", *folds, "scripts/top_tagging/runlorentznet_train.sh"
+            ),
+            3,
+        ),
+        (_submit("submit_eval.sh", "scripts/top_tagging/runlorentznet_eval.sh"), 1),
+    ]
+
+    assert set(searches) == set(TOP_TAGGING) - set(TOP_TAGGING_RECIPES)
+    for row, path in searches.items():
+        (block,) = _blocks(path)
+        assert block["experiment"] == f"top_tagging/{row}_100"
+        assert block["hparams_search"] == f"top_tagging/{row}_optuna"
+        assert block["hydra.sweeper.n_trials"] == "100"
+        assert block["trainer.max_epochs"] == "50"
+    assert listed.stdout.splitlines()[1].split() == [
+        "1",
+        "deepsets_nconst100_baseline",
+        "top_tagging/deepsets_optuna",
+        "100",
+        "50",
+    ]
+    for found, count in runs:
+        lines = [line for line in found.stdout.splitlines() if line.startswith("[1/1]")]
+        assert found.returncode == 0, found.stderr
+        assert len(lines) == count and not any("hls4ml" in line for line in lines)
 
 
 def _results_row(directory: Path, scheme: str, tv: float, acc: float) -> Path:
@@ -318,3 +399,47 @@ def test_compare_outputs_passes_an_identical_candidate_alone(tmp_path: Path) -> 
     assert compare_outputs.accuracies(never, seen)["performance/acc"] == pytest.approx(
         expected.item(), abs=1e-6
     )
+
+
+def _top_tagging_outputs(path: Path, top: list[float], qcd: list[float]) -> None:
+    # Five top jets, then five qcd jets, each scored by its logit of top over a zero
+    # logit of qcd; the layout of the probe's .npz.
+    logits = np.zeros((10, 2), dtype=np.float32)
+    logits[:, 1] = top + qcd
+    labels = np.array([1] * 5 + [0] * 5, dtype=np.int8)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, logits_clean=logits, labels=labels)
+
+
+def test_the_top_tagging_summary_counts_as_the_probe_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # Hand-counted on the main run: 4 top and 2 qcd jets on the right side of zero
+    # (accuracy 0.6), 18 of the 25 top-qcd pairs in order (AUC 0.72). The 30 % threshold
+    # is the top score 4, which no qcd jet passes, so the floor reads n_B = 5; the 50 %
+    # one is 3, which the qcd jets at 3.5 and 3.2 pass (5 / 2). Fold 2 is perfect.
+    run = tmp_path / "logs/eval/top_tagging/lorentznet/nconst100/baseline"
+    scores = ([5.0, 4.0, 3.0, 2.0, -1.0], [3.5, 3.2, 0.5, -2.0, -3.0])
+    for name in ("main", "fold_1"):
+        _top_tagging_outputs(run / f"outputs/{name}.npz", *scores)
+    _top_tagging_outputs(
+        run / "outputs/fold_2.npz", [5, 4, 3, 2, 1], [-1, -2, -3, -4, -5]
+    )
+    summary = load_script("scripts/analysis/top_tagging_summary.py")
+    main, folds = summary.run_figures(run)
+    with np.load(run / "outputs/main.npz") as outputs:
+        probe = clean_metrics(
+            outputs["logits_clean"], outputs["labels"], ("qcd", "top")
+        )
+    _main(monkeypatch, "top_tagging_summary", run)
+    printed = capsys.readouterr().out.splitlines()
+
+    assert main == pytest.approx(
+        {"acc": 0.6, "auc": 0.72, "rejection_es30": 5.0, "rejection_es50": 2.5}
+    )
+    perfect = {"acc": 1.0, "auc": 1.0, "rejection_es30": 5.0, "rejection_es50": 5.0}
+    assert folds == [main, perfect]
+    assert main["rejection_es30"] == probe[key(None, "rejection_es30", "top")]
+    assert main["auc"] == pytest.approx(probe[key(None, "auc", "top")])
+    assert printed[2].split()[:5] == ["lorentznet", "folds", "(2)", "0.8000", "±"]
+    assert any("2201.08187" in line for line in printed)

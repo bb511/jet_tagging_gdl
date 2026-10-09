@@ -9,7 +9,7 @@ from lightning import Callback, LightningModule, Trainer
 from lightning.pytorch.loggers import MLFlowLogger
 
 from src.plot import confusion, roc
-from src.symmetry import CLASS_NAMES
+from src.symmetry import class_names_of
 from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__)
@@ -68,8 +68,8 @@ def _log_artifacts(trainer: Trainer, paths: list[Path]) -> None:
 class PlottingCallback(Callback):
     """Write the one-vs-rest ROC curves and the confusion matrix of the test pass.
 
-    The figures go under ``<default_root_dir>/plots``, the classes named by
-    `src.symmetry.CLASS_NAMES`.
+    The figures go under ``<default_root_dir>/plots``, the classes named by the
+    datamodule's ``class_names``.
     """
 
     def __init__(self) -> None:
@@ -101,10 +101,10 @@ class PlottingCallback(Callback):
         if scores is None:
             return
         labels, probs, preds = scores
-        save_dir = self._save_dir(trainer)
+        save_dir, names = self._save_dir(trainer), class_names_of(trainer.datamodule)
         paths = [
-            roc.plot(labels, probs, CLASS_NAMES, save_dir),
-            confusion.plot(labels, preds, CLASS_NAMES, save_dir),
+            roc.plot(labels, probs, names, save_dir),
+            confusion.plot(labels, preds, names, save_dir),
         ]
         _log_artifacts(trainer, paths)
 

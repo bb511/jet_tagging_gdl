@@ -7,7 +7,6 @@ import mplhep as hep
 import numpy as np
 from matplotlib.axes import Axes
 from sklearn.metrics import auc, roc_curve
-from sklearn.preprocessing import label_binarize
 
 from src.plot import save_figure
 
@@ -26,7 +25,8 @@ def plot(
     """
     plt.style.use(hep.style.CMS)
     n_classes = probs.shape[1]
-    one_vs_rest = label_binarize(labels, classes=list(range(n_classes)))
+    # label_binarize would return a single column for two classes.
+    one_vs_rest = labels[:, None] == np.arange(n_classes)
     fig, axes = plt.subplots(
         1,
         n_classes,

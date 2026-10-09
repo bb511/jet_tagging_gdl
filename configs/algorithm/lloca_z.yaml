@@ -29,6 +29,7 @@ attn_vectors: 2 # four-vector channels of each attention head
 mlp_factor: 2
 dropout: 0.0
 framesnet_hidden: 32 # width of the two hidden layers of the frames-net's edge MLP
+framesnet_dropout: 0.0 # in the frames-net's edge MLP; 0 adds no layer, which the checkpoints expect
 mass_reg: 2.5e-4 # in units: the references' 5 MeV, the frames-net's mass floor; never searched
 units: 20.0 # GeV per unit, the L-GATr-slim row's scale; never searched
 

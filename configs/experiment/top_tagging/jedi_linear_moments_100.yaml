@@ -1,0 +1,41 @@
+# @package _global_
+# JEDI-linear with the jet moments at 100 constituents of the top-tagging set, on [pt, etarel,
+# phirel], at the optimum of the hls4ml N = 150 study (trial 117, val/acc_best 0.8245; block of
+# scripts/hls4ml/runjedi_linear_moments_train.sh): the transfer point the top-tagging search
+# starts from. Pinned to its columns and filed with the embedded rows, so it runs the baseline
+# regime only.
+defaults:
+  - override /data: top_tagging
+  - override /algorithm: jedi_linear_moments
+  - override /trainer: gpu
+  - override /results_table: top_tagging
+
+tags: ["top_tagging", "jedi_linear_moments", "nconst-100"]
+
+experiment_name: top_tagging_jedi_linear_moments_nconst100
+
+# The batch of configs/experiment/hls4ml/jedi_linear_moments_150.yaml, the hls4ml record's 2048.
+data:
+  nconstituents: 100
+  # The network's own columns; required_features makes setup() refuse any other list.
+  features: [pt, etarel, phirel]
+  batch_size: 2048
+
+algorithm:
+  output_dim: 2
+  aggregation: sum_over_n
+  head_layers: [64, 32]
+  hidden: 128
+  moments: rankcut
+  optimizer:
+    lr: 7.7387789876816725e-3
+    weight_decay: 0.0
+
+# The trainer's 16-mixed and no extras.matmul_precision, as
+# configs/experiment/hls4ml/jedi_linear_moments_150.yaml: the moments leave autocast in float32
+# themselves, and TF32 would round the inputs of their products while pair, chain and triangle
+# cancel between large terms.
+
+# Filed with the embedded rows, so its rows skip the <features>/ directory.
+results_table:
+  subdir: embedded

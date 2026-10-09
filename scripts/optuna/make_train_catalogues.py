@@ -12,6 +12,11 @@ Symmetry-embedded architectures are trained on the baseline only, and so are the
 rows on the record's jet-level observables, at 150 constituents alone.
 The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 ``logs/optuna/hls4ml/<label>/`` for a feature set other than the four-momentum.
+
+``--dataset top_tagging`` writes the catalogues of the top-tagging replica to
+``scripts/top_tagging``: its 18 rows at 100 constituents in the baseline alone, the
+searched ones tuned on the studies under ``logs/optuna/top_tagging``, the others on the
+published recipes of their experiment configs.
 """
 
 from __future__ import annotations
@@ -117,6 +122,39 @@ N_FOLDS = 5
 # Regimes compare fairly only on an equal trial budget, which multi-driver campaigns overshoot.
 TRIAL_BUDGET = 200
 
+DATASETS = ("hls4ml", "top_tagging")
+# The rows of the top-tagging replica that follow a published recipe, which no study tunes.
+TOP_TAGGING_RECIPES = [
+    "lorentznet",
+    "pelican",
+    "pelican_lorentz",
+    "lgatr_slim",
+    "lgatr_slim_lorentz",
+    "lloca_lorentz",
+    "lloca_z",
+    "lloca_so2",
+    "lloca_so3",
+]
+# Every row of the replica, at one constituent count in the baseline regime alone: the
+# recipe rows, the vector neurons, the five grid rows on [pt, etarel, phirel] and the
+# moment rows.
+TOP_TAGGING = [
+    *TOP_TAGGING_RECIPES,
+    "vn",
+    "deepsets",
+    "mlp",
+    "jetformer",
+    "jedi_linear",
+    "linformer",
+    "deepsets_moments",
+    "jedi_linear_moments",
+    "moments_only",
+]
+TOP_TAGGING_NCONSTITUENTS = [100]
+# The trials of each top-tagging search, in a space narrowed around the row's hls4ml
+# optimum.
+TOP_TAGGING_BUDGET = 100
+
 BANNER = "# " + 72 * "="
 SEP = "# " + 72 * "-"
 
@@ -125,9 +163,13 @@ Trial = tuple[int, float, dict[str, str]]
 Variant = tuple[str, str, str]
 
 
-def study_name(model: str, nconst: int, method: str, scheme: str) -> str:
-    """The study name configs/hparams_search/hls4ml/<model>_optuna.yaml builds."""
-    return f"{model}_nconst{nconst}_{method}_{scheme}"
+def study_name(
+    model: str, nconst: int, method: str, scheme: str, dataset: str = "hls4ml"
+) -> str:
+    """The study name configs/hparams_search/<dataset>/<model>_optuna.yaml builds; the
+    studies of a data set other than hls4ml carry its name as a prefix."""
+    prefix = "" if dataset == "hls4ml" else f"{dataset}_"
+    return f"{prefix}{model}_nconst{nconst}_{method}_{scheme}"
 
 
 def quote(value: str) -> str:
@@ -135,10 +177,10 @@ def quote(value: str) -> str:
     return f"'{value}'" if any(c in value for c in "[]{},") else value
 
 
-def _best_within_budget(complete: list[FrozenTrial]) -> Trial | None:
-    """The best of the first ``TRIAL_BUDGET`` trials by trial number, the earliest on a
-    tie; every study maximises val/acc_best."""
-    window = sorted(complete, key=lambda t: t.number)[:TRIAL_BUDGET]
+def _best_within_budget(complete: list[FrozenTrial], budget: int) -> Trial | None:
+    """The best of the first ``budget`` trials by trial number, the earliest on a tie;
+    every study maximises val/acc_best."""
+    window = sorted(complete, key=lambda t: t.number)[:budget]
     if not window:
         return None
     trial = max(window, key=lambda t: (t.value, -t.number))
@@ -168,14 +210,14 @@ def _complete_trials(db: Path, study: str) -> list[FrozenTrial]:
     return loaded.get_trials(deepcopy=False, states=complete)
 
 
-def best_trial(db: Path, study: str) -> Trial | None:
-    """Best of the first ``TRIAL_BUDGET`` completed trials of ``study``, or None when
-    there is no such study or no completed trial.
+def best_trial(db: Path, study: str, budget: int = TRIAL_BUDGET) -> Trial | None:
+    """Best of the first ``budget`` completed trials of ``study``, or None when there is
+    no such study or no completed trial.
 
     The window holds COMPLETE trials alone, in trial-number order, so failed, pruned and
     waiting trials and the orphan running rows of killed drivers take no place in it.
     """
-    return _best_within_budget(_complete_trials(db, study))
+    return _best_within_budget(_complete_trials(db, study), budget)
 
 
 def overrides_of(params: dict[str, str]) -> list[str]:
@@ -189,20 +231,28 @@ def overrides_of(params: dict[str, str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Layout:
-    """Where one feature set's catalogues, studies and runs live.
+    """Where one data set's and feature set's catalogues, studies and runs live.
 
-    The four-momentum set, which every experiment config reads, sits at the root of each
-    of those three trees; any other set is held apart under its own label, the
-    underscore join of its feature names that ``src/utils/results_table.py`` also uses
-    for ``results/<label>/``.
+    Each data set has trees of its own, named after it. The four-momentum set, which
+    every hls4ml experiment config reads, sits at the root of the hls4ml trees; any
+    other set is held apart under its own label, the underscore join of its feature
+    names that ``src/utils/results_table.py`` also uses for ``results/<label>/``. The
+    experiments of the top-tagging set pin their features, so its trees have the root
+    alone.
     """
 
     features: tuple[str, ...] | None = None
+    dataset: str = "hls4ml"
 
     @property
     def label(self) -> str | None:
         """The directory component of this feature set, None for the four-momentum."""
         return "_".join(self.features) if self.features else None
+
+    @property
+    def budget(self) -> int:
+        """The completed trials of a study within which its best is taken."""
+        return TOP_TAGGING_BUDGET if self.dataset == "top_tagging" else TRIAL_BUDGET
 
     def under(self, root: str) -> str:
         """``root`` itself, or the subdirectory of it this feature set owns."""
@@ -210,7 +260,7 @@ class Layout:
 
     def run_dir(self, task: str, model: str, nconst: int, label: str) -> str:
         """Where one block's hydra run directory goes under logs/."""
-        base = self.under(f"logs/{task}/hls4ml")
+        base = self.under(f"logs/{task}/{self.dataset}")
         return f"{base}/{model}/nconst{nconst}/{label}"
 
     def overrides(self) -> list[str]:
@@ -227,22 +277,45 @@ def _block(header: list[str], entry: str, body: list[str]) -> list[str]:
     return lines
 
 
-def _provenance(trial: Trial | None, study: str) -> str:
+def follows_recipe(model: str, layout: Layout) -> bool:
+    """Whether a row takes its hyperparameters from a published recipe, never from a
+    study."""
+    return layout.dataset == "top_tagging" and model in TOP_TAGGING_RECIPES
+
+
+def counts_of(model: str, layout: Layout) -> list[int]:
+    """The constituent counts a row is trained at in this layout's data set."""
+    if layout.dataset == "top_tagging":
+        return TOP_TAGGING_NCONSTITUENTS
+    return NCONSTITUENTS_OF[model]
+
+
+def variants_of(model: str, layout: Layout) -> list[Variant]:
+    """The regimes a row is trained in: the baseline alone for every top-tagging row."""
+    if layout.dataset == "top_tagging":
+        return VARIANTS[:1]
+    return VARIANTS_OF[model]
+
+
+def _provenance(trial: Trial | None, study: str, recipe: bool) -> str:
     """The header line saying where a block's hyperparameters came from."""
+    if recipe:
+        return "# published top-tagging recipe, from the experiment config"
     if trial is None:
         return "# transferred from experiment config (no study yet)"
     return f"# best trial {trial[0]} of {study}, val/acc_best={trial[1]:.6f}"
 
 
 def _header(
-    model: str, nconst: int, variant: Variant, trial: Trial | None
+    model: str, nconst: int, variant: Variant, trial: Trial | None, layout: Layout
 ) -> list[str]:
     """The two comment lines above a block: its grid cell, and its hyperparameters'
     provenance."""
     label, method, scheme = variant
+    study = study_name(model, nconst, method, scheme, layout.dataset)
     return [
         f"# {model}  nconst={nconst}  {label}  (method={method}, group={scheme})",
-        _provenance(trial, study_name(model, nconst, method, scheme)),
+        _provenance(trial, study, follows_recipe(model, layout)),
     ]
 
 
@@ -257,7 +330,7 @@ def _common_body(
     """
     _, method, scheme = variant
     body = [
-        f"experiment=hls4ml/{model}_{nconst}",
+        f"experiment={layout.dataset}/{model}_{nconst}",
         f"data.method={method}",
         f"data.augmentation_scheme={scheme}",
         f"data.n_folds={N_FOLDS}",
@@ -282,7 +355,8 @@ def train_block(
         *trainer_overrides(model),
         f"hydra.run.dir={layout.run_dir('train', model, nconst, variant[0])}",
     ]
-    return _block(_header(model, nconst, variant, trial), "src/train.py", body)
+    header = _header(model, nconst, variant, trial, layout)
+    return _block(header, "src/train.py", body)
 
 
 def eval_block(
@@ -302,7 +376,8 @@ def eval_block(
         *trainer_overrides(model),
         f"hydra.run.dir={layout.run_dir('eval', model, nconst, label)}",
     ]
-    return _block(_header(model, nconst, variant, trial), "src/eval.py", body)
+    header = _header(model, nconst, variant, trial, layout)
+    return _block(header, "src/eval.py", body)
 
 
 BASELINE_ONLY_NOTE = [
@@ -313,20 +388,33 @@ JET_LEVEL_NOTE = [
     "# Baseline only: the jet-level observables are computed upstream and never",
     "# transformed, so the augmentation and SCL regimes have nothing to act on.",
 ]
+TOP_TAGGING_NOTE = [
+    "# Baseline only: the top-tagging replica (Zenodo 2603256) runs every row in the",
+    "# unaugmented regime, the embedded and the grid rows alike.",
+]
+RECIPE_NOTE = [
+    "# The block follows the published recipe its experiment config holds; no study",
+    "# tunes it.",
+]
 
 
-def regime_note(model: str) -> list[str]:
+def regime_note(model: str, layout: Layout) -> list[str]:
     """Why a catalogue covers the baseline alone; nothing for the full grid."""
+    if layout.dataset == "top_tagging":
+        return TOP_TAGGING_NOTE
     if model in JET_LEVEL:
         return JET_LEVEL_NOTE
     return BASELINE_ONLY_NOTE if model in EMBEDDED else []
 
 
-def tuned_note(layout: Layout) -> list[str]:
+def tuned_note(model: str, layout: Layout) -> list[str]:
     """Where the blocks' hyperparameters were read from, for the reader of one file."""
+    if follows_recipe(model, layout):
+        return RECIPE_NOTE
+    optuna_root = layout.under(f"logs/optuna/{layout.dataset}")
     return [
-        f"# Each block carries the best of the first {TRIAL_BUDGET} completed trials, by trial",
-        f"# number, of its own study under {layout.under('logs/optuna/hls4ml')}/;",
+        f"# Each block carries the best of the first {layout.budget} completed trials, by trial",
+        f"# number, of its own study under {optuna_root}/;",
         "# a block whose study is missing carries none and says so (transferred ablation).",
     ]
 
@@ -347,7 +435,7 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
     """The banner a catalogue opens with, naming the grid it covers and where it came
     from."""
     what = "TRAINING" if task == "train" else "EVALUATION"
-    ncounts, nvariants = len(NCONSTITUENTS_OF[model]), len(VARIANTS_OF[model])
+    ncounts, nvariants = len(counts_of(model, layout)), len(variants_of(model, layout))
     grid = f"{ncounts} x {nvariants} = {ncounts * nvariants}"
     return [
         "#!/usr/bin/env bash",
@@ -357,8 +445,8 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
         f"# One block per (constituent count, regime): {grid} {task} runs. Generated",
         "# by scripts/optuna/make_train_catalogues.py; regenerate rather than edit by hand.",
         *features_note(layout),
-        *regime_note(model),
-        *tuned_note(layout),
+        *regime_note(model, layout),
+        *tuned_note(model, layout),
         "#",
         "# Every command is commented out: copy one to run it by hand, or feed the whole",
         f"# file to scripts/cluster/submit_{task}.sh, which queues them on a GPU or slurm.",
@@ -366,16 +454,24 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
     ]
 
 
+def _tuned(
+    model: str, nconst: int, variant: Variant, dbs: Path, layout: Layout
+) -> Trial | None:
+    """The best trial a block carries; None for a row on a published recipe."""
+    if follows_recipe(model, layout):
+        return None
+    study = study_name(model, nconst, variant[1], variant[2], layout.dataset)
+    return best_trial(dbs / f"{model}.db", study, layout.budget)
+
+
 def render(model: str, task: str, dbs: Path, layout: Layout) -> str:
     """The full text of one catalogue."""
     make_block = train_block if task == "train" else eval_block
     out = file_header(model, task, layout)
-    for nconst in NCONSTITUENTS_OF[model]:
+    for nconst in counts_of(model, layout):
         out += [BANNER, f"# {model}  nconst={nconst}", BANNER, ""]
-        for variant in VARIANTS_OF[model]:
-            study = study_name(model, nconst, variant[1], variant[2])
-            db = dbs / f"{model}.db"
-            trial = best_trial(db, study)
+        for variant in variants_of(model, layout):
+            trial = _tuned(model, nconst, variant, dbs, layout)
             out += make_block(model, nconst, variant, trial, layout)
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -408,8 +504,10 @@ def models_of(layout: Layout) -> list[str]:
     four-momentum for all but ``vn``, whose experiment configs set ``[pt, eta, phi]``,
     and the three moment rows, whose experiment configs set ``[pt, etarel, phirel]``.
     The jet-level rows read no constituent column at all. Only the default layout has
-    catalogues for either.
+    catalogues for either. The top-tagging data set has its own rows.
     """
+    if layout.dataset == "top_tagging":
+        return TOP_TAGGING
     if layout.features is None:
         return [*MODELS, *JET_LEVEL]
     return [model for model in MODELS if model not in EMBEDDED]
@@ -428,34 +526,45 @@ def _generate(dbs: Path, out: Path, repo: Path, layout: Layout, dry_run: bool) -
 
 
 def _parse_args() -> argparse.Namespace:
-    """Command line: where the studies are, where the catalogues go, and what to
-    write."""
-    # Four flat add_argument declarations: helpers would only scatter the CLI.
+    """Command line: which data set, where the studies are, where the catalogues go, and
+    what to write."""
+    # Five flat add_argument declarations: helpers would only scatter the CLI.
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--dataset",
+        choices=DATASETS,
+        default="hls4ml",
+        help="The data set whose catalogues are written (default hls4ml).",
+    )
     parser.add_argument(
         "--dbs",
         default=None,
-        help="Study databases directory (default <repo>/logs/optuna/hls4ml"
+        help="Study databases directory (default <repo>/logs/optuna/<dataset>"
         "[/<feature label>]).",
     )
     parser.add_argument(
         "--out",
         default=None,
-        help="Where the catalogues go (default <repo>/scripts/hls4ml"
+        help="Where the catalogues go (default <repo>/scripts/<dataset>"
         "[/<feature label>]).",
     )
     parser.add_argument(
         "--features",
         default=None,
         help="Comma-separated feature set, e.g. 'pt,eta,phi'; the default is the "
-        "four-momentum layout every experiment config reads.",
+        "four-momentum layout every experiment config reads. hls4ml alone.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report which files would change; write nothing.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    # The top-tagging experiments pin their features, so that data set has no
+    # feature-set trees.
+    if args.features and args.dataset != "hls4ml":
+        parser.error("--features applies to the hls4ml data set alone")
+    return args
 
 
 def _features(spec: str | None) -> tuple[str, ...] | None:
@@ -472,9 +581,9 @@ def main() -> int:
     """Generate every catalogue, or report which of them a regeneration would change."""
     args = _parse_args()
     repo = Path(__file__).resolve().parents[2]
-    layout = Layout(features=_features(args.features))
-    dbs = _default(args.dbs, repo / "logs" / "optuna" / "hls4ml", layout)
-    out = _default(args.out, repo / "scripts" / "hls4ml", layout)
+    layout = Layout(features=_features(args.features), dataset=args.dataset)
+    dbs = _default(args.dbs, repo / "logs" / "optuna" / args.dataset, layout)
+    out = _default(args.out, repo / "scripts" / args.dataset, layout)
     stale = _generate(dbs, out, repo, layout, args.dry_run)
     if stale:
         print(f"\n{stale} file(s) differ from a fresh generation.", file=sys.stderr)
