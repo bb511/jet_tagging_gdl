@@ -16,6 +16,9 @@ Symmetry. The logits are exact under shifts of eta and phi, the reflections eta 
 and phi -> -phi, rotations of the plane about any point and any permutation of the
 constituents. A rotation about the beam shifts every phi, and a boost along it every eta
 of a massless constituent.
+Under the axis offset the leader's eta and phi from the full jet's axis are two more
+scalars: a shift of the jet and its axis together leaves them alone, a rotation of the
+plane does not.
 
 The tensor invariants are three-point correlators built in O(N) from rank-2 tensors, as
 energy flow moments are (arXiv:1911.04491): the beta = 2 energy flow polynomials of the
@@ -53,7 +56,7 @@ def _unit_lift(eta: torch.Tensor, phi: torch.Tensor) -> torch.Tensor:
 
 
 def _sort_by_pt(x: torch.Tensor) -> torch.Tensor:
-    """Order (jets, N, 3) rows [p_T, eta, phi] by decreasing p_T, padded rows last."""
+    """Order (jets, N, F) rows, p_T first, by decreasing p_T, padded rows last."""
     order = x[..., 0].argsort(dim=1, descending=True)
     return x.gather(1, order.unsqueeze(-1).expand_as(x))
 
@@ -262,6 +265,8 @@ class VectorNeuronsClassifier(nn.Module):
     :param dropout: dropout rate in front of each linear layer of the scalar MLPs and of
         the head; it never touches a vector.
     :param units: GeV per unit of p_T, 20 as in the L-GATr-slim and LLoCa rows.
+    :param axis_offset: read two more columns, eta and phi measured from the full jet's
+        axis, and give the first block the leader's two as scalars.
     :param n_class: classes, read off the scalars, the readout invariants and the
         context.
     """
@@ -280,10 +285,12 @@ class VectorNeuronsClassifier(nn.Module):
         gate: bool = True,
         dropout: float = 0.0,
         units: float = 20.0,
+        axis_offset: bool = False,
         n_class: int = 5,
     ) -> None:
         super().__init__()
         self.nconstituents, self.units = nconstituents, units
+        self.axis_offset = axis_offset
         self.register_buffer("metric", _form_matrix(), persistent=False)
         self.stream = Stream(stream_channels) if stream_channels > 0 else None
         self.tensors = (
@@ -293,9 +300,13 @@ class VectorNeuronsClassifier(nn.Module):
         )
         self.blocks = _blocks(
             nconstituents,
-            # Every rank's scalars, the jet's two, the stream and three kinds of tensor
-            # invariant, in the order of _first_scalars.
-            nconstituents * RANK_SCALARS + 2 + stream_channels + 3 * tensor_invariants,
+            # Every rank's scalars, the jet's two, the stream, three kinds of tensor
+            # invariant and the leader's offset, in the order of _first_scalars.
+            nconstituents * RANK_SCALARS
+            + 2
+            + stream_channels
+            + 3 * tensor_invariants
+            + (2 if axis_offset else 0),
             num_blocks,
             vector_channels=vector_channels,
             scalar_channels=scalar_channels,
@@ -310,7 +321,12 @@ class VectorNeuronsClassifier(nn.Module):
         self.head = _dense([width, *head_layers, n_class], False, dropout)
 
     def _first_scalars(
-        self, u: torch.Tensor, unit: torch.Tensor, p: torch.Tensor, keep: torch.Tensor
+        self,
+        u: torch.Tensor,
+        unit: torch.Tensor,
+        p: torch.Tensor,
+        keep: torch.Tensor,
+        offset: torch.Tensor | None,
     ) -> torch.Tensor:
         """Return the (jets, s_first) input scalars of the first block.
 
@@ -318,19 +334,23 @@ class VectorNeuronsClassifier(nn.Module):
         :param unit: (jets, N, 4) the lifts at unit p_T.
         :param p: (jets, N) p_T in units.
         :param keep: (jets, N, 1), one on a real rank and zero on a padded one.
+        :param offset: (jets, 2) the leader's eta and phi from the full jet's axis, None
+            without the axis offset.
         """
         jet = u.sum(dim=1, keepdim=True)
         r = torch.stack([p, _form(u, jet, self.metric)], dim=-1)
         jet_scalars = [p.sum(dim=1, keepdim=True), _form(jet, jet, self.metric)]
         stream = [] if self.stream is None else [self.stream(r, keep)]
         tensors = [] if self.tensors is None else [self.tensors(u, unit)]
-        return torch.cat([r.flatten(1), *jet_scalars, *stream, *tensors], dim=-1)
+        axis = [] if offset is None else [offset]
+        return torch.cat([r.flatten(1), *jet_scalars, *stream, *tensors, *axis], dim=-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits of a batch of jets.
 
         :param x: (jets, constituents, 3) rows [p_T GeV, eta, phi], with padded
-            constituents as all-zero rows.
+            constituents as all-zero rows. Under the axis offset the rows are 5 wide,
+            with eta and phi from the full jet's axis behind them.
         :return: (jets, n_class) logits.
         """
         x = _sort_by_pt(x)
@@ -340,7 +360,8 @@ class VectorNeuronsClassifier(nn.Module):
         # p_T alone marks a padded row: its lift is zero whatever its angles.
         keep = (p != 0.0).unsqueeze(-1).to(p.dtype)
         c = keep.sum(dim=1) / self.nconstituents
-        v, s = u, self._first_scalars(u, unit, p, keep)
+        offset = x[:, 0, 3:5] if self.axis_offset else None
+        v, s = u, self._first_scalars(u, unit, p, keep, offset)
         for block in self.blocks:
             v, s = block(v, s, c)
         return self.head(self.head_norm(torch.cat([s, self.readout(v), c], dim=-1)))

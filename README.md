@@ -80,10 +80,10 @@ python src/train.py experiment=hls4ml/deepsets_16 \
 The following options can be given the the method:
 
 ```bash
-data.method=null/augmentation/symm_loss
+data.method=augmentation/symm_loss
 ```
 
-When the method is set to `null`, there's no augmentation or symmetry loss being implemented; this is how the embedded symmetry architectures are ran.
+When the method is set to `augmentation` with `data.augmentation_scheme=none`, there's no augmentation or symmetry loss being implemented; this is how the embedded symmetry architectures are ran.
 When the method is set to `augmentation`, then `data.augmentation_scheme` needs to also be set to one of the following: `none`, `so2`, `so3`, `lorentz` or `lorentz_iso`.
 The experiment config establishes what the data and the model are, because a certain data configuration determines the configuration of the model.
 
@@ -91,8 +91,8 @@ The `data.n_folds` argument enables cross-validation.
 When `n_folds >= 2`, the training and validation data sets are merged and resplit following a conventional k-folding procedure.
 The test split is never touched during this process.
 
-The checkpoints of each run are written under `logs/<hydra run dir>/checkpoints/{main,fold_<i>}/`.
-The training figures, such as the loss curve, are written under `<hydra run dir>/plots/{main,fold_<i>}/`.
+The checkpoints of each run are written under `<hydra run dir>/checkpoints/`, and `scripts/cluster/submit_train.sh --folds` puts fold i of a training in `<hydra run dir>/fold_<i>/`, under its main run.
+The training writes no figures: the evaluation writes the ROC curves and the confusion matrix of each tested checkpoint under `<eval run dir>/plots/{main,fold_<i>}/`.
 A checkpoint manifest is also written in the run directory: `checkpoint_manifest.json`.
 This latter `json` files is used at evaluation time to compute the invariance metrics on the checkpointed models.
 The training script returns the validation accuracy over the jet classes.
@@ -116,7 +116,7 @@ One row in the produced .csv contains the following information:
 - the invariance metrics per group
 - the model's forward FLOP count.
 
-The evaluation script can also take a baseline model corresponding to an augmented/SCL model, to compute meaningful statistics:
+An augmented or SCL model is evaluated with the regime overrides of its training:
 
 ```bash
 python src/eval.py experiment=hls4ml/deepsets_16 \
@@ -133,7 +133,7 @@ python scripts/analysis/compare_to_baseline.py <run table> <baseline table>.
 After the evaluation is completed, you can make figures of the results by using:
 
 ```bash
-python scripts/analysis/make_figures.py --features <features>
+python scripts/analysis/make_figures.py --features <features> --deltas <deltas tables>
 python scripts/analysis/make_latex_table.py results/<features>/results_table_*.csv
 ```
 
@@ -156,11 +156,10 @@ The `_scl_optuna` variant of a config adds `algorithm.symm_loss_weight`.
 The other four regimes use the plain `<model>_optuna`.
 The `callbacks=search` is set such that a trial does not run any plotting and does not output anything to `results/`.
 
-The best trial in a study can be fetches with the following script:
+The best of the first 200 completed trials of each study is written into its block of `scripts/hls4ml/run<model>_train.sh` by the following script:
 
 ```bash
-python scripts/optuna/fetch_best_params.py \
-    --db logs/optuna/hls4ml/deepsets.db --study deepsets_nconst16_symm_loss_so2
+python scripts/optuna/make_train_catalogues.py
 ```
 
 ## Licence

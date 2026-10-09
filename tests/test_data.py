@@ -204,6 +204,19 @@ def test_the_datamodule_serves_rebased_jets_at_the_widths_of_its_regime(
     assert torch.equal(served[..., absolute], stored[..., absolute])
 
 
+def test_full_axis_keeps_the_record_columns_in_the_baseline_alone(
+    record: FakeRecord,
+) -> None:
+    datamodule = _datamodule(full_axis=True)
+    datamodule.prepare_data()
+    datamodule.setup()
+
+    assert torch.equal(datamodule.data_test.X, FakeRecord().load("test").x)
+    assert torch.equal(datamodule.load_split("train")[0], FakeRecord().load("train").x)
+    with pytest.raises(ValueError, match="baseline"):
+        _datamodule(full_axis=True, augmentation_scheme="so2")
+
+
 def test_the_rebase_measures_the_axis_columns_from_the_kept_constituents() -> None:
     # The record measures them from the untruncated jet's axis, which disagrees with the
     # kept one on 70 to 85 % of the entries at 16 constituents; stand-ins of 3 here.

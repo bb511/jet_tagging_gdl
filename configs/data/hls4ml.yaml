@@ -39,3 +39,8 @@ pin_memory: true
 # the debug configs pass.
 n_folds: 5
 kfold_seed: 42
+
+# true keeps the record's etarel, phirel, deltaR and ptrel, measured from the untruncated jet's
+# axis, rather than rebasing them on the kept constituents: the test of what that axis is worth,
+# in the baseline regime alone.
+full_axis: false

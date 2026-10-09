@@ -7,7 +7,7 @@ import hydra
 import pytest
 import torch
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from src.utils.omegaconf import short_hash
 from tests.conftest import (
@@ -18,6 +18,7 @@ from tests.conftest import (
     MODELS,
     MOMENT_ROWS,
     NCONSTITUENTS,
+    PT_ETA_PHI,
     QUANTISED,
     ROOT,
     algorithm_yaml,
@@ -30,6 +31,9 @@ EXPERIMENT_DIR = ROOT / "configs" / "experiment" / "hls4ml"
 SEARCH_DIR = ROOT / "configs" / "hparams_search" / "hls4ml"
 EXPERIMENTS = sorted(path.stem for path in EXPERIMENT_DIR.glob("*.yaml"))
 SEARCHES = sorted(path.stem for path in SEARCH_DIR.glob("*.yaml"))
+# The searches of the cheap vector neurons with and without the full jet's axis, which
+# belong to no row.
+CHEAP_SEARCHES = ("vn_cheap_optuna", "vn_cheap_axis_optuna")
 # Digests of each experiment's state-dict layout at N = 16, 50 and 150 (the jet-level
 # rows at 150 alone): the keys in order with their shapes and dtypes, then the Keras
 # weights of vn_hgq, from the K1 golden of commit 50d78b93. The checkpoints of the
@@ -112,7 +116,8 @@ COPIES = [
         "algorithm/vn",
         "algorithm/vn_hgq",
         "_target_ name units optimizer scheduler quantisation beta beta_schedule "
-        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
+        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction "
+        "axis_offset",
     ),
     (
         "search/deepsets",
@@ -146,6 +151,7 @@ COPIES = [
         "search/jet_level_bdt_noeta52",
         "storage study_name",
     ),
+    ("search/vn_cheap", "search/vn_cheap_axis", "study_name"),
 ]
 # (trainer.precision, extras.matmul_precision) of each row's experiments, None where the
 # trainer's own stays. fp32 for the embedded rows, whose invariants overflow fp16, with
@@ -208,7 +214,7 @@ def test_the_configs_are_those_the_row_lists_name() -> None:
     }
 
     assert set(EXPERIMENTS) == experiments | {f"{row}_150" for row in JET_LEVEL}
-    assert set(SEARCHES) == searches
+    assert set(SEARCHES) == searches | set(CHEAP_SEARCHES)
 
 
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
@@ -248,7 +254,7 @@ def test_every_experiment_builds_its_row(experiment: str, tmp_path: Path) -> Non
     assert monitors == ([None] if model in QUANTISED else ["val/acc", "val/acc"])
 
 
-@pytest.mark.parametrize("search", SEARCHES)
+@pytest.mark.parametrize("search", sorted(set(SEARCHES) - set(CHEAP_SEARCHES)))
 def test_every_search_names_its_study_from_the_regime(
     search: str, tmp_path: Path
 ) -> None:
@@ -266,6 +272,46 @@ def test_every_search_names_its_study_from_the_regime(
     assert ("algorithm.symm_loss_weight" in found["params"]) == (method == "symm_loss")
     assert found["study_name"] == f"{model}_nconst{n}_{method}_{scheme}"
     assert found["storage"] == f"sqlite:///logs/optuna/hls4ml/{model}.db?timeout=600"
+
+
+def _cheap_search(search: str, tmp_path: Path) -> tuple[DictConfig, Any]:
+    regime = ("data.method=augmentation", "data.augmentation_scheme=none")
+    overrides = ("experiment=hls4ml/vn_16", f"hparams_search=hls4ml/{search}", *regime)
+    cfg = compose_root("train.yaml", *overrides, "trainer=cpu", "logger=none")
+    HydraConfig().set_config(point_into(cfg, tmp_path))
+    return cfg, hydra.utils.instantiate(cfg.algorithm)
+
+
+def test_the_cheap_vn_searches_differ_by_the_full_axis_alone(tmp_path: Path) -> None:
+    (control, plain), (axis, offset) = (
+        _cheap_search(search, tmp_path) for search in CHEAP_SEARCHES
+    )
+    found = [
+        OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
+        for cfg in (control, axis)
+    ]
+    fixed = [
+        (cfg.algorithm.num_blocks, cfg.algorithm.gate, cfg.algorithm.stream_channels)
+        for cfg in (control, axis)
+    ]
+    widths = [module.net.blocks[0].norm.num_features for module in (plain, offset)]
+
+    assert [study["study_name"] for study in found] == [
+        "vn_cheap_nconst16_augmentation_none",
+        "vn_cheap_axis_nconst16_augmentation_none",
+    ]
+    assert {study["storage"] for study in found} == {
+        "sqlite:///logs/optuna/hls4ml/vn_cheap.db?timeout=600"
+    }
+    assert fixed == [(1, False, 0)] * 2
+    assert not hydra.utils.instantiate(control.data).full_axis
+    assert hydra.utils.instantiate(axis.data).full_axis
+    assert plain.required_features == list(control.data.features) == PT_ETA_PHI
+    assert offset.required_features == list(axis.data.features)
+    assert offset.required_features == [*PT_ETA_PHI, "etarel", "phirel"]
+    # The leader's two angles from the full axis, and nothing else, join the first block.
+    assert widths[1] == widths[0] + 2
+    assert offset.flops_total > plain.flops_total > 0
 
 
 @pytest.mark.parametrize("original, copy, changed", COPIES)

@@ -74,6 +74,10 @@ class HLS4MLDataModule(LightningDataModule):
     Every split is rebased on the axis of the constituents kept as it is loaded, because
     the record measures etarel, phirel, deltaR and ptrel from the untruncated jet's axis,
     whereas every transform downstream measures them from the batch it is handed.
+    `full_axis` keeps the record's columns instead, for the test of what that axis is
+    worth. It is refused outside the baseline regime, whose batches no transform
+    touches; the probe still transforms, so the invariance figures of such a run mean
+    nothing.
 
     :param revision: string with a HF repository commit pin; None goes to HEAD.
     :param cache_dir: the local cache path ``paths.base_data_dir``;
@@ -91,6 +95,7 @@ class HLS4MLDataModule(LightningDataModule):
     :param kfold_seed: fixes the kfold splitting so its reproducible.
     :param fold_idx: the fold served, counted from zero, which train.py derives from its
         `fold` knob; ignored at n_folds 1.
+    :param full_axis: keep the record's axis columns rather than rebasing them.
     """
 
     # Test batches keep all 16 record columns whatever the model reads, so that the
@@ -112,9 +117,12 @@ class HLS4MLDataModule(LightningDataModule):
         n_folds: int = 1,
         kfold_seed: int = 42,
         fold_idx: int = 0,
+        full_axis: bool = False,
     ) -> None:
         super().__init__()
         _validate_run(method, augmentation_scheme)
+        if full_axis and (method, augmentation_scheme) != ("augmentation", "none"):
+            raise ValueError("full_axis runs in the baseline regime alone")
 
         self.revision = revision
         self.cache_dir = cache_dir
@@ -126,6 +134,7 @@ class HLS4MLDataModule(LightningDataModule):
 
         self.nconstituents = nconstituents
         self.features = list(features)
+        self.full_axis = full_axis
 
         # dataloader hyperparameters
         self.batch_size = batch_size
@@ -227,11 +236,13 @@ class HLS4MLDataModule(LightningDataModule):
         return self.record
 
     def _load(self, record, split: str) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return the jets and the labels of *split*, rebased on the kept axis."""
+        """Return the jets and the labels of *split*, rebased on the kept axis unless
+        `full_axis` is set."""
         data = record.load(split)
         x, scales = data.x.clone(), self.norm_scales
-        for chunk in x.split(REBASE_CHUNK):
-            chunk.copy_(rebase_on_kept_axis(chunk, self.feature_names, scales))
+        if not self.full_axis:
+            for chunk in x.split(REBASE_CHUNK):
+                chunk.copy_(rebase_on_kept_axis(chunk, self.feature_names, scales))
         return x, data.y
 
     def _setup_fit(self, record, indices: list[int] | None) -> None:

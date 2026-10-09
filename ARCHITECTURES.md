@@ -65,8 +65,10 @@ inputs, two hooks. The steps:
   whatever width it is handed to those columns, in that order.
 - If it needs them de-normalised or reordered, override `_prepare_inputs(x)`, and fill any
   buffer it needs in `_on_features_resolved()`, which runs at the end of `setup()` once
-  `norm_scales` and the feature names are known. `src/algorithms/lorentznet.py` is the worked
-  example of both hooks.
+  `norm_scales` and the feature names are known. `DenormalisedModule` and `FourMomentumModule`
+  in `src/algorithms/__init__.py` are the worked example of both hooks: a row that reads the
+  four-momentum in GeV subclasses `FourMomentumModule` and calls `self._register_denorm_scales()`
+  in `build_net`, as `src/algorithms/lorentznet.py` does.
 - Add `configs/algorithm/<name>.yaml` on the pattern of `deepsets.yaml`: `_target_`,
   `_convert_: all`, a short `name`, `nbr_feats: ${len:${data.features}}`, the
   `method`/`group` interpolations from the data config, the architecture arguments, and an
@@ -85,16 +87,25 @@ inputs, two hooks. The steps:
   and a 21-block search catalogue under every feature-set directory. A variant of a grid row pinned
   to columns of its own, as the moment rows are, gets a subclass of its own that sets
   `required_features`, so that the grid row keeps reading `data.features`, and an algorithm config
-  that sets `nbr_feats` to a number, since `tests/test_algorithms.py` builds every row with the
-  four-momentum as `data.features`.
-- Extend `tests/test_algorithms.py`, which exercises every algorithm config under both
-  methods.
+  that sets `nbr_feats` to a number, since `tests/conftest.py::algorithm` builds the rows of the
+  tests with the four-momentum as `data.features` by default.
+- Extend `tests/test_algorithms.py`, which steps every row of `MODELS` in `tests/conftest.py` and
+  reads its columns out of a full-width batch, and add the row's state-dict digests to `LAYOUTS`
+  in `tests/test_configs.py`, which builds every experiment and holds its layout to them.
 
 Every one of the removed modules will need two things on the way in. They import
 `pytorch_lightning.utilities.memory.garbage_collection_cuda`; the `pytorch_lightning`
 namespace is not used anywhere in this repository any more, and the base class handles memory
 without it. They also accept `method="equivariance"`, which no longer exists: the supported
 methods are `augmentation` and `symm_loss`.
+
+## LorentzNet
+
+Kept at the refactor, so it needs no porting notes; this section holds the measurements behind its
+batch sizes. Its edges join real constituents alone, so memory follows the squared multiplicity,
+whose mean is 1 800 at N = 50 and 2 800 at N = 150. On a 32 GB V100, 1024 jets take 22 GiB at
+N = 50 and 1536 do not fit, and 512 jets take 17 GiB at N = 150, so the experiments set half the
+usual batch of 2048 at N = 50 and a quarter at N = 150. A larger card would take more.
 
 ## PELICAN
 
@@ -112,8 +123,37 @@ beams as `pelican` and without them as `pelican_lorentz`: the same module and ne
 `configs/algorithm/pelican_lorentz.yaml` (a standalone copy of `pelican.yaml` with `add_beams:
 false`, kept in step by `tests/test_configs.py`), with its own experiment configs, search config
 and catalogues; the 150-constituent row is not searched and its experiment config carries the
-beams-on optimum. The rest of this section is the record of
-the vendored copy that was removed at the refactor, kept as history.
+beams-on optimum.
+
+The pair tensor costs B N² per channel, and every slot is built whether or not it holds a
+constituent, so memory follows the squared slot count (N + 2 with the beams) rather than the
+multiplicity. The experiments of both rows therefore cut the usual batch of 2048 jets to a quarter
+at N = 50 and to a sixteenth at N = 150. A V100 pre-flight at the largest search point (5 blocks,
+35/35) at those batches peaked at 3.7 GB and 0.12 s per step at N = 16, at 7.3 GB and 0.21 s at
+N = 50, which fits an 11 GB slice, and at 15.2 GB, 0.42 s and 27 min per epoch at N = 150
+(2026-09-13). N = 150 needs a full card or a third of an H100, never an 11 GB slice, and its study
+was the costliest of the three.
+
+`n_chunks` (`configs/algorithm/pelican.yaml`) is two at N = 150, where the pair tensor is dense
+over the 152 slots while the mean real multiplicity is 49.4, so that 89 % of it is padding. On one
+V100 at a batch of 128 (2026-09-15), a step took, in ms:
+
+| chunks                                 | default point, 5 × 25/15 | largest search point, 5 × 35/35 |
+| -------------------------------------- | ------------------------ | ------------------------------- |
+| none, dense over the 152 slots         | 192                      | 346                             |
+| one, trimmed to the batch's widest jet | 123                      | 223                             |
+| two                                    | 83                       | 142                             |
+| four                                   | 127                      | 155                             |
+| eight                                  | 235                      | 238                             |
+
+Past two chunks the kernel launches of the small chunks dominate a dedicated card, but three
+drivers time-sharing one card hide them: three drivers at four chunks reach 13.9 steps per second
+in aggregate, against 11.8 at two, so four is worth trying on a shared card
+(`algorithm.n_chunks=4`). Peak memory falls from 8.4 GB dense to 4.6 GB at two chunks and 2.8 GB
+at four (15.2, 8.3 and 5.1 GB at the largest point), so a trial fits a 1g slice.
+
+The rest of this section is the record of the vendored copy that was removed at the refactor,
+kept as history.
 
 Permutation-invariant, Lorentz-invariant aggregator network: pairwise Lorentz invariants of
 the constituent four-momenta are fed through equivariant rank-2 layers and aggregated to a
@@ -183,6 +223,13 @@ order of its tokens, so the reflection is exact too. Both rows are one module an
 `lgatr_slim_lorentz.yaml` is a standalone copy of `lgatr_slim.yaml` with the two switches off,
 kept in step by `tests/test_configs.py`, as for PELICAN.
 
+A V100 pre-flight at the largest search point (12 blocks, 32/96 channels, 8 heads, `mlp_ratio` 4,
+2.0 M parameters), on a shared card on 2026-09-28, took 12.9 GiB and 0.33 s per step at N = 16 with
+the usual 2048 jets, which fits a full card but not a 1g MIG slice, and 18.1 GiB and 0.44 s at
+N = 50 with 1024 jets. At N = 150 the attention scores cost B × heads × 154² per block: 256 jets
+took 14.3 GiB and 0.29 s, and 512 reach 28.5 GiB, too close to the 32 GB of the card. The
+experiments of both rows set these batches.
+
 ## LLoCa
 
 Added on 2026-09-28 as the fourth symmetry-embedded architecture, and the second whose network is
@@ -231,6 +278,13 @@ by `tests/test_configs.py`. A jet of one or two constituents gives the frames-ne
 independent vectors, and the package regularises such frames with random noise, so these jets
 may leave a small floor on the flip rates even under an exact group.
 
+A V100 pre-flight at the largest search point (12 blocks, 8 heads of 8x0n+2x1n, `mlp_factor` 4,
+frames-net hidden 64, 2.4 M parameters; 2026-09-28) reserved 5.5 GiB and took 0.15 s per step at
+N = 16 with the usual 2048 jets, which fits a 1g MIG slice, 9.6 GiB and 0.23 s at N = 50 with 1024
+jets, which fits a full card and, with little margin, a 1g slice, and 12.3 GiB and 0.39 s at
+N = 150 with 512 jets, which fits a full card but not a 1g slice. The experiments of the four rows
+set these batches.
+
 ## Vector neurons
 
 Added on 2026-10-03 in one row, `vn`, which replaced the two four-momentum rows `vn_z` and `vn_so2`
@@ -240,10 +294,11 @@ arXiv:2104.12229) carry lists of vectors as hidden features and mix them with a 
 layer that acts on the channel index alone, so that the layer commutes with the group; here the
 vectors are lifts of the constituents' (p_T, η, φ), and the group is the Euclidean group of the
 (η, φ) plane. Our code is the network `VectorNeuronsClassifier` in
-`src/algorithms/components/vector_neurons.py` and the `JetTaggingModule` subclass `VectorNeurons` in
-`src/algorithms/vector_neurons.py`, which pins `required_features` to `[pt, eta, phi]` and returns
-the batch to GeV and radians in `_prepare_inputs`. Around them sit `configs/algorithm/vn.yaml`, the
-three experiment configs `configs/experiment/hls4ml/vn_{16,50,150}.yaml`, the search config
+`src/algorithms/components/vector_neurons.py` and the `DenormalisedModule` subclass `VectorNeurons`
+in `src/algorithms/vector_neurons.py`, which pins `required_features` to `[pt, eta, phi]` and whose
+inherited `_prepare_inputs` returns the batch to GeV and radians. Around them sit
+`configs/algorithm/vn.yaml`, the three experiment configs
+`configs/experiment/hls4ml/vn_{16,50,150}.yaml`, the search config
 `configs/hparams_search/hls4ml/vn_optuna.yaml` and the catalogues
 `scripts/hls4ml/runvn_{search,train,eval}.sh`. It is the one embedded row that does not read the
 four-momentum: `setup()` refuses any list but `required_features`, so its experiment configs set
@@ -424,17 +479,13 @@ may send to zero. The search found no prior use of the lift (1, η, φ, η² + �
 jets or for FPGA networks, and no energy flow moments with learned weights inside a trainable
 equivariant network; that is an absence after a search, not a proof.
 
-`tests/test_algorithms.py` checks, on the network in float64 and eval mode, that the logits are
-invariant to 1e-9 under shifts of η and φ across the wrap, under rotations of the plane about the
-leader and about the fourth-hardest constituent and under both reflections, and to 1e-12 under a
-permutation. Through `forward`, on massless record jets, the probe's `so2` and `lorentz` transforms
-must move the logits by less than 1e-6 (9e-8 and 2e-8, the float32 rounding in `forward`), and
-`so3` and `lorentz_iso` by more than a thousand times the `so2` shift. It also checks the form and
-the tensor invariants against their closed forms, that a padded slot changes nothing (an eight-slot
-network against a nine-slot copy), that the batch is de-normalised, that removing a constituent
-moves the logits through the multiplicity, that every gate starts at 1/2 and that the logits are
-finite on the FLOP counter's input. `tests/test_configs.py` checks that the experiments set
-`data.features` to `required_features` and leave `extras.matmul_precision` unset.
+`tests/test_algorithms.py` checks, on the network in float64 and eval mode with its gates drawn at
+random, that through `forward`, on massless record jets, the probe's `so2` and `lorentz` transforms
+move the logits by less than 1e-6 (9e-8 and 2e-8, the float32 rounding in `forward`), and `so3` and
+`lorentz_iso` by more than a thousand times the `so2` shift. It also checks the form and the tensor
+invariants against their closed forms, that a padded slot changes nothing (an eight-slot network
+against a nine-slot copy) and that the batch is de-normalised. `tests/test_configs.py` checks that
+the experiments leave `extras.matmul_precision` unset.
 
 ## Vector neurons trained quantisation-aware (`vn_hgq`)
 
@@ -450,7 +501,7 @@ a slope of 0.2, where Keras 3 and torch use 1/6 (read in its source, not tried).
 supports the uGT alone and pins Keras 3.11, below the 3.15 that hgq2 0.2.0 needs. Our code is the
 port `src/algorithms/components/vector_neurons_hgq.py`, which sets Keras's backend to JAX before
 it imports Keras and which the subclass therefore imports first, the weight copy
-`src/algorithms/components/vector_neurons_port.py` and the `VectorNeurons` subclass
+`src/algorithms/utils/vector_neurons_port.py` and the `VectorNeurons` subclass
 `VectorNeuronsHGQ` in `src/algorithms/vector_neurons_hgq.py`. Around them sit
 `configs/algorithm/vn_hgq.yaml`, a standalone copy of `vn.yaml` that `tests/test_configs.py` keeps
 equal to it up to `units`, the optimiser, the scheduler and the keys of the port and its training,
@@ -669,36 +720,30 @@ estimate, and the latencies assume that the 5 ns clock is met. At N = 16 the com
 JEDI-linear, 136 k LUT at 75 ns and 73.6 % (on the untruncated jet's axis, see "JEDI-linear"), and
 the DeepSets of Odagiu et al. 2024, 747 k LUT and 555 DSPs at 115 ns.
 
-`tests/test_vector_neurons_hgq.py` checks the port: that in float mode it reproduces the torch
-network in float64 to 1e-6 relative (eight slots, some padded, two blocks, random gates and running
-statistics), that the fold leaves an eval batch normalisation unchanged, that the first block's
-scalars follow torch's flattening and units, that the gate is torch's hard sigmoid within 2⁻¹⁰ and
-exactly 1/2 at zero, that floor and ceil keep float64 and the p_T word rounds a near tie as integer
-arithmetic does, that keep is 1 on a real word and 0 on padding (0.12 GeV is padding), that seeding
-sets the trainable widths and leaves the fixed quantisers alone, that the quantised port trains two
-steps, traces and survives a `.keras` round trip, and, with alkaid installed, that alkaid
-reproduces it bit for bit. `tests/test_vn_hgq_module.py` runs the module on the CPU on a stub
-datamodule: training steps Keras per batch, advances `global_step` and checkpoints the last epoch
-with the Keras weights; a checkpoint restores them in the port's float type; β reaches every
-quantised layer, constant or scheduled; the evaluation traces the training split and exports a
-model whose prediction of the stored words equals `logits_clean`; JAX off the CPU is refused at
-test time; a GPU run keeps the CPU backend; the float twin prices the FLOPs while the EBOPs wait for
-the trace; and `init_from` copies a float run of the same architecture alone.
-`tests/test_synthesise_vn.py` loads the script by path and checks the CSV row with and without
-Vivado, its header, the macro accuracy against torchmetrics, a tiny export end to end through
-`--no-cosim --no-vivado` and `--report-only` (bit-exact, both prediction files written), the
-co-simulation where Verilator exists, the refusal of JAX off the CPU and the floor patch.
-`tests/test_compare_outputs.py` checks that an identical candidate passes with no difference, that
-shuffling the logits of one class fails its working points, that noise within the tolerance passes
-and beyond it fails, the macro accuracy against torchmetrics, the ROC gap against the step
-functions, the CSV rows, the refusals of a bad floor, a foreign header and other labels, and the
-figure. `tests/test_configs.py` checks the experiments (fp32, no clipping, the unranked checkpoint,
-no early stopping, `num_workers` 0, the features, JAX following the trainer) and `vn_hgq.yaml`
-against `vn.yaml`, `tests/test_make_train_catalogues.py` that `QUANTISED` agrees in both modules
-and that no layout generates its catalogues, and `tests/test_datamodule.py` that
-`load_split("train")` at `n_folds` 1 is the training split at full width. Every module that imports
-Keras sets `KERAS_BACKEND=jax` and `JAX_PLATFORMS=cpu` first and skips without `hgq` (or
-`alkaid`), so `make test` passes without the group.
+`tests/test_quantised.py` checks the port and the module on the CPU on a stub datamodule. A float
+`vn` of random weights, saved as a run, is copied through `init_from` into a port in float mode,
+which then reproduces it in float64 to 1e-5 of the largest logit (eight slots, some padded, two
+blocks), for the network of the finals and for four variants of the latency ablation, the batch
+normalisations folded in two of them; a float run of another architecture is refused. In two
+epochs of training the module steps Keras and the mock optimiser once per batch, gives every
+quantised layer the β of its epoch under a schedule and checkpoints the last epoch with the Keras
+weights, which a fresh port restores in its float type. The evaluation of that checkpoint traces
+the training split alone and exports a model whose prediction of the stored words equals
+`logits_clean`, with one EBOPs figure in `export.json`, `test/ebops` and `ebops_total`, and JAX off
+the CPU is refused at test time. With alkaid installed, `scripts/synthesis/synthesise_vn.py` runs
+on that export through `--no-cosim --no-vivado`: neither Keras nor alkaid differs from
+`logits_clean` on any logit, both prediction files are written, the CSV row has its frozen columns
+with NaN Vivado figures, the floor patch keeps float64, and a CSV of another header is refused;
+where Verilator exists, the co-simulation matches exactly. `tests/test_scripts.py` checks that
+`compare_outputs.py` passes an identical candidate with no difference and a ROC gap of 0, fails a
+noisy one, scores the macro accuracy as torchmetrics does and appends its rows, that `QUANTISED`
+agrees in both modules and that neither the default nor the `[pt, eta, phi]` layout generates its
+catalogues. `tests/test_configs.py` checks the experiments (fp32, no clipping, the unranked
+checkpoint, no early stopping, `num_workers` 0, positive FLOPs beside NaN EBOPs before the trace)
+and `vn_hgq.yaml` against `vn.yaml`, and `tests/test_data.py` that `load_split("train")` at
+`n_folds` 1 is the training split at full width. Every module that imports Keras sets
+`KERAS_BACKEND=jax` and `JAX_PLATFORMS=cpu` first and skips without `hgq` (or `alkaid`), so
+`make test` passes without the group.
 
 The port was shaped by the following behaviours of hgq2 0.2.0, alkaid 0.8.1, Keras 3.15.1 and
 JAX 0.10.2, each read in their sources or met on olgpu. `QBatchNormDense` trains with the offset
@@ -846,16 +891,17 @@ pre-flight at the corner, with batches of 2048 under fp16 autocast, reserved 0.1
 0.77 GiB and took 3.3, 3.9 and 6.3 ms per step at 16, 50 and 150 constituents, so every study
 fits a 1g MIG slice. These figures were measured on olgpu on 2026-09-30.
 
-`tests/test_algorithms.py` checks, with the maximum, that the logits are invariant under padding,
-to 1e-10 in float64; it calls the network directly, because `forward` casts every batch to float32.
-Padding is tested by a hole among a jet's slots and by a zero slot appended to a full jet. The
-appended slot is the jet's only padded one, so a maximum that let its embedding in unmasked would
-fail wherever that embedding exceeds the real values.
-Last, it checks the parameter count. `tests/test_configs.py` keeps `jedi_linear.yaml` a copy of
-`deepsets.yaml`, the shared search choices, the SCL weight included, equal to those of DeepSets and
-both spaces free of an activation, and `tests/test_make_train_catalogues.py` checks that the
-generator's registries equal those of the tests and that a feature-set layout writes catalogues for
-`jedi_linear` beside the other grid rows and none for the embedded rows.
+`tests/test_algorithms.py` checks that a padded slot changes no logit, the network at eight slots
+against a copy at nine that sees one more padded slot, and that `_masked_pool`, which the row shares
+with DeepSets, reads the real slots alone under each of the three pools, to 1e-12 in float64. The
+pool is tested on a hole among a jet's slots and on padded slots flooded with 1e6, which would win
+every channel of an unmasked maximum and swamp either sum. Last, it checks the parameter count at
+the published point on four features, 19 653, and the FLOPs and eBOPs per jet at N = 16 against a
+hand count. `tests/test_configs.py` keeps `jedi_linear.yaml` a copy of `deepsets.yaml`, the shared
+search choices, the SCL weight included, equal to those of DeepSets and both spaces free of an
+activation, and `tests/test_scripts.py` checks that the generator's registries equal those of the
+tests and that a feature-set layout writes catalogues for `jedi_linear` beside the other grid rows
+and none for the embedded rows.
 
 ## Linformer
 
@@ -936,8 +982,8 @@ embedding is a function of the first bias, so the mask, and not the zero input, 
 queries of padded slots are computed all the same; with BatchNorm on, they enter the batch
 statistics of the feed-forward sub-layer and nothing else. The readout pool is searched among
 `sum`, `max` and `sum_over_n`, the masked sum divided by the constant N, which is the reference's
-average pool restricted to the real constituents; the sum and the maximum come from `_masked_pool`
-of the DeepSets component. The sum and `sum_over_n` express the same functions, since the head's
+average pool restricted to the real constituents; all three come from `_masked_pool` of the
+DeepSets component. The sum and `sum_over_n` express the same functions, since the head's
 first dense layer absorbs 1/N, and differ only in their conditioning at initialisation; both stay
 in the search at Patrick's request. All three are cheap on an FPGA: an adder tree, a comparator
 tree and a constant scale. Last, BatchNorm is a switch, `batchnorm`, searched on or off as the
@@ -1013,15 +1059,13 @@ single short runs, not tuned results. Smoke runs at N = 16, a fit and an evaluat
 feature set, one SCL fit (so3) and one augmented fit (lorentz), went end to end under `16-mixed`,
 with the results rows written to a scratch directory, not to `results/`.
 
-`tests/test_algorithms.py` calls the network directly, in float64 and in eval mode, since `forward`
-casts every batch to float32 and BatchNorm in training mode would couple the jets of a batch. With
-`sum_over_n` and BatchNorm on, overwriting
-the rows of E_k and E_v that belong to padded slots must leave the logits unchanged, while a change
-to a real slot's row must move them, so that the check cannot pass vacuously. The pool must read
-the real constituents alone, with `sum_over_n` equal to the sum divided by the slot count, and the
-parameter count must match the formula above.
-In `tests/test_make_train_catalogues.py`, a feature-set layout must generate train and eval
-catalogues for the row.
+`tests/test_algorithms.py` runs the network in eval mode, since BatchNorm in training mode would
+couple the jets of a batch. With the sum and BatchNorm on, a copy at nine slots that sees one more
+padded slot, whose rows of E_k and E_v keep their own random draw, must give the logits of the
+network at eight; `sum_over_n` is left out there, since it divides by a slot count that differs by
+design. `_masked_pool` must read the real constituents alone, with `sum_over_n` equal to the sum
+divided by the slot count. In `tests/test_scripts.py`, a feature-set layout must generate train and
+eval catalogues for the row.
 
 ## Jet moments
 
@@ -1116,10 +1160,10 @@ The algorithm configs are standalone copies of `deepsets.yaml` and `jedi_linear.
 in `_target_`, `name`, `nbr_feats` and `moments`, the control also in `moments_only: true` and in
 having no `phi_layers` or `aggregation`; `tests/test_configs.py` keeps the rest in step. As in
 `vn.yaml`, `nbr_feats` is 3 rather than `${len:${data.features}}`, because
-`tests/test_algorithms.py` builds every row with the four-momentum as `data.features`. The default
-set is `uniform`. The experiments train for 200 epochs on batches of 2048 with five folds at the
-algorithm defaults and set `data.features: [pt, etarel, phirel]`. Each search config is its
-parent's space plus
+`tests/conftest.py::algorithm` builds the rows of the tests with the four-momentum as
+`data.features` by default. The default set is `uniform`. The experiments train for 200 epochs on
+batches of 2048 with five folds at the algorithm defaults and set
+`data.features: [pt, etarel, phirel]`. Each search config is its parent's space plus
 `algorithm.moments: choice(uniform, rankcut)`, the control's being the DeepSets space without
 `phi_layers` and `aggregation`, so every space holds only the FPGA-cheap pools and ReLU. They run
 one study per constituent count, `<row>_nconst<N>_augmentation_none` in
@@ -1173,23 +1217,21 @@ jets under fp16 autocast and a gradient scaler, reserved 0.10, 0.21 and 0.43 GiB
 for `jedi_linear_moments` and 0.05, 0.06 and 0.11 GiB and 3.1 ms for the control at N = 16, 50 and
 150 (olgpu, 2026-10-05), so every study fits a 1g MIG slice.
 
-`tests/test_moments.py` checks the moments against their explicit sums over pairs and triples, the
-exact zeros of the rank cuts, their invariance under shifts and rotations of the plane and under
-permutations, the rank cuts against moments of the leading constituents alone, their dtype and
-accuracy under bf16 autocast on the CPU and fp16 autocast on a GPU (both fail without the guard),
-the widths of the heads, that a DeepSets without phi reads the moments and the multiplicity alone
-and refuses inconsistent options, and that the moment rows refuse `none`. Against literal lists of
-the committed state-dict keys and stacks rebuilt from the same seed in the committed order, it
-checks that the two networks without moments draw the same weights and compute the same logits,
-bit for bit, under every pooling. `tests/test_algorithms.py` builds the three rows with the other
-algorithms, checks that each fills its scales and refuses a reordered or a longer column list,
-that the moments widen the head and add their batch normalisation alone, that padded slots change
-nothing, and holds the rows to their exact groups at 1e-6 and to a thousand times the
-`so2` shift under the others, calling the network directly in float64 with its batch normalisation
-calibrated on the test jets, since at its initial statistics the raw moments, about 1e10 there,
-would drown every other input of the head. `tests/test_configs.py` keeps the configs copies of
-their parents, the search spaces the parents' plus the moment set, and the experiments pinned to
-their columns with mixed precision and no `matmul_precision`.
+`tests/test_algorithms.py` checks the moments against their explicit sums over pairs and triples at
+every rank cut, the cut keeping the leading constituents, on jets whose padded slots sit among the
+real ones and on jets of one and two constituents, and their dtype and accuracy under bf16 autocast
+on the CPU and fp16 autocast on a GPU (both fail without the guard). Against stacks rebuilt from the
+same seed in the committed order, it checks that the two networks without moments keep their
+state-dict keys, draw the same weights and compute the same logits, bit for bit, under every
+pooling. It builds the three rows with the other rows of `MODELS`, checks that `moments_only` fills
+its scales and that `setup()` refuses a longer column list for `deepsets_moments` and a reordered
+one for `jedi_linear_moments`, and holds the rows to their exact groups at 1e-6 and to a thousand
+times the `so2` shift under the others, calling the network directly in float64 with its batch
+normalisation calibrated on the test jets, since at its initial statistics the raw moments, about
+1e10 there, would drown every other input of the head. `tests/test_configs.py` keeps the configs
+copies of their parents, the search spaces the parents' plus the moment set and the experiments at
+the trainer's mixed precision with no `matmul_precision`; it also holds the state-dict layout of
+every experiment to a digest of the committed one.
 
 ## Jet-level ceiling
 
@@ -1241,11 +1283,11 @@ folds with one datamodule. The batches are `(x, y)` with `x` of shape (jets, 1, 
 callbacks see the usual contract: training and validation drop the trailing partial batch and the
 test split keeps every jet. The loaders run in the main process, since the splits sit in memory and
 nothing transforms them. The datamodule exposes `features` (every observable but those of
-`data.exclude`), `feature_names` (all 53, in the shards' order), `feature_indices()`,
-`norm_scales` (None) and `keep_full_features_at_test` (false); `JetTaggingModule.setup` then reads
-the batches unreduced. The constructor reads nothing, as `tests/test_configs.py` needs when it
-instantiates every experiment's data node, and refuses every regime but augmentation/none; the
-first access to the shards refuses an `exclude` that names no column. `configs/data/jet_level.yaml`
+`data.exclude`), `feature_names` (all 53, in the shards' order), `norm_scales` (None) and
+`keep_full_features_at_test` (false); `JetTaggingModule.setup` then reads the batches unreduced.
+The constructor reads nothing, as `tests/test_configs.py` needs when it instantiates every
+experiment's data node, and refuses every regime but augmentation/none; the first access to the
+shards refuses an `exclude` that names no column. `configs/data/jet_level.yaml`
 pins the revision of `configs/data/hls4ml.yaml` and sets `nconstituents: 150`, the label of the rows:
 the observables come from the whole jet, which N = 150 never truncates, so the rows pair with the
 networks' N = 150 rows under `scripts/analysis/compare_to_baseline.py --baseline-model`. The data
@@ -1289,21 +1331,22 @@ widths give 109 696 and 109 184 FLOPs and 3.52 and 3.50 M eBOPs. A smoke trainin
 near 7 V100-hours and a 200-epoch process near 7 minutes; two epochs reached a test accuracy of
 0.814 and 0.813.
 
-`tests/test_jet_level.py` writes synthetic shards in the record's layout (a constituent list
-column, 53 `j_*` columns with a constant `j_ptfrac`, and `label`; two shards per split, each split
-at its own offset) and checks the column order and `exclude`, that every split and fold is the
-standardisation of its jets by the training split's constants, bit for bit, with the constant
-column centred to zero, that a fold holds the jets `fold_indices` selects from the pooled jets,
-the batch shapes and the one-hot labels, that the test split keeps its trailing jets, and the
-refusals. It trains `jet_level_noeta52` on the CPU, its main run and two folds, evaluates the three
-checkpoints with `eval.py` and checks the one row under `jet_level/`: the networks' header,
-`nconstituents` 150, NaN in every invariance cell, positive costs, and an `.npz` per checkpoint
-with the two keys. Under `slow` and with the record, it checks that the datamodule's labels of
-every split equal those of the loader's cache at N = 16 and that the shards' constituent lists,
-capped at 16, hold the cache's real-constituent counts, jet by jet. `tests/test_invariance.py`
-checks the probe-less mode against `clean_metrics`, `tests/test_configs.py` the copies, the search
-spaces, the shared revision and fold seed and the experiments, and
-`tests/test_make_train_catalogues.py` the catalogues.
+`tests/conftest.py` writes synthetic shards in the record's layout (a constituent list column, 53
+`j_*` columns with a constant `j_ptfrac`, and `label`; two shards per split, each split at its own
+offset), on which `tests/test_data.py` checks the column order and `exclude`, that every split and
+fold is the standardisation of its jets by the training split's constants, bit for bit, with the
+constant column centred to zero, that a fold holds the jets `fold_indices` selects from the pooled
+jets, the batch shape and the one-hot labels, and the refusal of every regime but the baseline.
+`tests/test_entry_points.py` trains `jet_level_noeta52` on the CPU, its main run and fold 1 of 2,
+evaluates both checkpoints with `eval.py` and checks the one row: the networks' header,
+`nconstituents` 150, the fold alone, NaN in every invariance cell of the folds, positive costs, and
+an `.npz` per checkpoint with the two keys and every test jet, the trailing partial batch included.
+Under `slow` and with the record, `tests/test_data.py` checks that the datamodule's labels of every
+split equal those of the loader's cache at N = 16 and that the shards' constituent lists, capped at
+16, hold the cache's real-constituent counts, jet by jet. `tests/test_evaluation.py` checks the
+probe-less mode against `clean_metrics`, `tests/test_configs.py` the copies, the search spaces and
+the experiments, `tests/test_data.py` the shared revision and fold seed, and `tests/test_scripts.py`
+the catalogues.
 
 Two rows of gradient-boosted trees joined on 2026-10-07, `jet_level_bdt_all53` and
 `jet_level_bdt_noeta52`, on the same observables through the same datamodule, so that the ceiling
@@ -1375,19 +1418,16 @@ near 3.7 hours unless early stopping ends it. At the defaults the validation acc
 rows. A checkpoint holds about 5 kB per tree at 31 leaves (0.78 MB at 30 iterations), so one of
 2000 iterations at 255 leaves would hold about 330 MB.
 
-`tests/test_bdt.py` checks the wrapper (zeros before the first fit, ten iterations per fit,
-finite log-probabilities that sum to one up to the floor, three fits of the same jets equal to one,
-the state-dict round trip, the depth mapping), that epoch k is validated on (k + 1) × 10 iterations
-with one mock step per batch, and an end-to-end run of `jet_level_bdt_noeta52` on the synthetic
-shards with the default callbacks and an MLflow logger: a main run and fold 1 of 3, three epochs
-each, then `eval.py` on the directory. That run ends at 30 iterations, the best checkpoint holds
-(epoch + 1) × 10, and the one row under `jet_level/` has the networks' header, `nconstituents` 150,
-NaN costs and invariance cells, with a two-key `.npz` per checkpoint. The test also checks the
-copies, the shared search space and the experiments' CPU trainer, fp32, absent clipping, disabled
-probe and subdirectory. `tests/test_configs.py` exempts the two rows from the cost inequality and
-keeps its MLP-space check to the MLP rows, and `tests/test_make_train_catalogues.py` checks
-`CPU_ROWS` against `tests/conftest.py` and that each catalogue of the two rows holds one block,
-`trainer=cpu` without a device, in the default layout alone.
+`tests/test_algorithms.py` checks the wrapper (ten iterations per fit, the state-dict round trip,
+the depth mapping) and that epoch k is validated on (k + 1) × 10 iterations with one mock step per
+batch. `tests/test_entry_points.py` runs `jet_level_bdt_noeta52` end to end on the synthetic shards
+with the default callbacks: a main run and fold 1 of 2, two epochs each, then `eval.py` on the
+directory. The best checkpoint of each run holds (epoch + 1) × 10 iterations, and the one row has
+the networks' header, `nconstituents` 150, NaN costs and invariance cells, with a two-key `.npz` per
+checkpoint. `tests/test_configs.py` checks the copies, the shared search space and the experiments'
+fp32, absent clipping, disabled probe and subdirectory, and exempts the two rows from the cost
+inequality, and `tests/test_scripts.py` checks `CPU_ROWS` against `tests/conftest.py` and that the
+blocks of the two rows carry `trainer=cpu` without a device, in the default layout alone.
 
 ## Vector neurons on the four-momentum
 

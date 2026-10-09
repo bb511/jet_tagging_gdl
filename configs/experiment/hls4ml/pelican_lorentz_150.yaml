@@ -31,7 +31,7 @@ algorithm:
   # Mean real multiplicity of the training jets at this truncation (49.44, measured
   # 2026-09-13 on the record cache); no beams to add.
   nbar: 49.4
-  # Speed knob, measured in pelican_150.yaml: two chunks on a dedicated card.
+  # Speed knob, measured in ARCHITECTURES.md ("PELICAN"): two chunks on a dedicated card.
   n_chunks: 2
   # Transferred from the best trial of pelican_nconst150_augmentation_none (trial 131 of 340,
   # val/acc_best 0.8447, logs/optuna/hls4ml/pelican.db): the study's top eight trials all sit at

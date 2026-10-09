@@ -3,7 +3,7 @@
 # the MLP of jet_level_all53.yaml. Each epoch adds trees_per_epoch boosting iterations, one tree per
 # class each, to one warm-started estimator, so that the networks' checkpointing, early stopping and
 # val/acc_best apply unchanged. A copy of jet_level_bdt_noeta52.yaml that differs in name and
-# nbr_feats (tests/test_bdt.py keeps the rest in step).
+# nbr_feats (tests/test_configs.py keeps the rest in step).
 _target_: src.algorithms.bdt.BoostedTreesClassifier
 _convert_: all # the hyperparameters a checkpoint holds stay plain containers
 name: jet_level_bdt_all53

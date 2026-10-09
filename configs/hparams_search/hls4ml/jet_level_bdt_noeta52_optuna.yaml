@@ -23,9 +23,9 @@ hydra:
       seed: 1234
       n_startup_trials: 20
 
-    # One space for both rows, which tests/test_bdt.py keeps equal. trees_per_epoch is not searched,
-    # since the epoch count sets the number of iterations. max_depth 0 is no limit: the sweeper
-    # writes a None choice as the string 'None'.
+    # One space for both rows, which tests/test_configs.py keeps equal. trees_per_epoch is not
+    # searched, since the epoch count sets the number of iterations. max_depth 0 is no limit: the
+    # sweeper writes a None choice as the string 'None'.
     params:
       algorithm.learning_rate: tag(log, interval(0.01, 0.3))
       algorithm.max_leaf_nodes: choice(15, 31, 63, 127, 255)

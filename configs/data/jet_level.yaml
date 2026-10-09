@@ -2,7 +2,7 @@
 # the moments of its training split and served as jets of one slot, for the jet-level ceiling.
 _target_: src.data.hls4ml_jet_level_datamodule.JetLevelDataModule
 
-# The networks' pin in configs/data/hls4ml.yaml, so that both read one record; tests/test_configs.py
+# The networks' pin in configs/data/hls4ml.yaml, so that both read one record; tests/test_data.py
 # keeps the two equal.
 revision: fc7104f60a45d528ab597b220d5a7cd8e31cfff8
 

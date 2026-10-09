@@ -28,6 +28,10 @@ gate: true # false passes the mixed vectors ungated, so that they need not wait 
 head_layers: [64, 32] # hidden widths of the readout MLP
 dropout: 0.0
 units: 20.0 # GeV per unit of p_T, the L-GATr-slim and LLoCa rows' scale; never searched
+# true reads the leader's eta and phi from the full jet's axis as two more scalars of the first
+# block: a test of what that axis is worth, with data.full_axis true, nbr_feats 5 and data.features
+# [pt, eta, phi, etarel, phirel] (hparams_search/hls4ml/vn_cheap_axis_optuna.yaml).
+axis_offset: false
 
 optimizer:
   _target_: torch.optim.AdamW

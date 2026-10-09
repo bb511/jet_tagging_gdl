@@ -22,6 +22,7 @@ from src.algorithms.components.mlp import _dense
 from src.algorithms.components.pelican import LinEq2to2
 from src.algorithms.components.vector_neurons import (
     TensorInvariants,
+    VectorNeuronsClassifier,
     _form,
     _form_matrix,
     _unit_lift,
@@ -607,6 +608,42 @@ def test_the_vn_form_and_tensor_invariants_are_their_explicit_sums() -> None:
     assert torch.allclose(_form(jet, jet, metric), torch.tensor([0.75]).double())
     assert torch.allclose(_form(u, u, metric), torch.zeros_like(p), atol=1e-12)
     assert torch.allclose(invariants, torch.cat(triples), rtol=1e-12)
+
+
+def test_the_vn_axis_offset_reads_the_leader_and_moves_with_the_jet() -> None:
+    # Rows [p_T GeV, eta, phi, etarel, phirel] of six slots, the last two padded.
+    torch.manual_seed(0)
+    net = VectorNeuronsClassifier(
+        nconstituents=6,
+        head_layers=[8],
+        vector_channels=4,
+        scalar_channels=8,
+        invariants=4,
+        tensor_invariants=1,
+        stream_channels=0,
+        gate=False,
+        axis_offset=True,
+    )
+    net = net.double().eval()
+    g = torch.Generator().manual_seed(1)
+    x = 0.3 * torch.randn(10, 6, 5, generator=g, dtype=torch.float64)
+    x[..., 0] = 1.0 + 100.0 * torch.rand(10, 6, generator=g, dtype=torch.float64)
+    x[:, 4:] = 0.0
+    real = (x[..., :1] > 0).double()
+    leader = x[torch.arange(10), x[..., 0].argmax(dim=1)]
+    # The jet and its axis shifted together leave etarel and phirel as they are.
+    shifted = x + real * torch.tensor([0.0, 0.7, -0.4, 0.0, 0.0]).double()
+    moved = x + real * torch.tensor([0.0, 0.0, 0.0, 0.2, 0.0]).double()
+    seen = []
+    net.blocks[0].norm.register_forward_pre_hook(lambda _, args: seen.append(args[0]))
+
+    with torch.no_grad():
+        logits, logits_shifted, logits_moved = net(x), net(shifted), net(moved)
+    s_in = seen[0].shape[1] - net.blocks[0].invariants.width - 1
+
+    assert torch.equal(seen[0][:, s_in - 2 : s_in], leader[:, 3:5])
+    assert torch.allclose(logits_shifted, logits, rtol=0.0, atol=1e-10)
+    assert not torch.allclose(logits_moved, logits, rtol=0.0, atol=1e-6)
 
 
 def _tree_jets() -> tuple[torch.Tensor, torch.Tensor]:

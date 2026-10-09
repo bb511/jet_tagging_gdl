@@ -6,9 +6,10 @@ The commands that can be run to obtain all the results in this study.
 The available directories contain the following scripts:
 
 - `hls4ml/` has all the individual training and evaluation commands for the models trained on the `hls4ml` data set
-- `cluster/` contains the scripting that runs the code on the used cluster backends: slurm and NGT pods
+- `cluster/` contains the scripting that runs the code on the used backends: nohup queues on a GPU host and NGT pods
 - `optuna/` contains the scripts that are used to run the hyperparameter optimisations
 - `analysis/` contains the scripts that produce the result latex tables and corresponding figures
+- `synthesis/` contains the synthesis of the quantised vector-neuron network with alkaid and Vivado
 
 ## Command Catalogues
 
@@ -38,7 +39,6 @@ hls4ml[/<features>]/run<model>_search.sh
   |  cluster/submit_search.sh
   v
 logs/optuna/hls4ml[/<features>]/<model>.db   the sweeps' only durable record
-  |  optuna/fetch_best_params.py             -> configs/experiment/hls4ml/<model>_<N>.yaml
   |  optuna/make_train_catalogues.py [--features pt,eta,phi]
   v
 hls4ml[/<features>]/run<model>_train.sh
@@ -48,7 +48,8 @@ logs/train/hls4ml[/<features>]/<model>/nconst<N>/<variant>/checkpoint_manifest.j
   |  cluster/submit_eval.sh  (hls4ml[/<features>]/run<model>_eval.sh)
   v
 results/<features>/results_table_{baseline,augmentation,symm_loss}.csv
-  (LorentzNet, the two PELICANs, the two L-GATr-slims, the four LLoCas and the two vector-neuron rows: results/embedded/results_table_baseline.csv)
+  (LorentzNet, the two PELICANs, the two L-GATr-slims, the four LLoCas, the vector neurons and the three moment rows: results/embedded/results_table_baseline.csv;
+   the four jet-level rows: results/jet_level/; vn_hgq: results/quantised/)
   |  analysis/compare_to_baseline.py <run table> <baseline table>
   v
 results/<features>/deltas_<run>_vs_<baseline>.csv
@@ -63,22 +64,24 @@ Have a go by running:
 bash scripts/cluster/submit_train.sh --dry-run --only baseline --gpu 0 scripts/hls4ml/rundeepsets_train.sh
 ```
 
-**The checkpoints trained with --cluster need to be evaluated with --cluster.**
-
 ## Script Manifest
 
 | File                               |                                                                                     |
 | ---------------------------------- | ----------------------------------------------------------------------------------- |
-| `cluster/submit_search.sh`         | Optuna drivers of a search catalogue; `--tag`, `--cluster`.                         |
+| `cluster/submit_search.sh`         | Optuna drivers of a search catalogue; `--tag`.                                      |
 | `cluster/submit_search_ngt.sh`     | Several workers of one study on a pod, through `submit_search.sh`.                  |
-| `cluster/submit_train.sh`          | A train catalogue: nohup queue, `--folds` fan-out, or one submitit job per block.   |
-| `cluster/submit_eval.sh`           | The same for an eval catalogue, with the manifest rewrite.                          |
+| `cluster/submit_train.sh`          | A train catalogue: nohup queue or `--folds` fan-out.                                |
+| `cluster/submit_eval.sh`           | An eval catalogue as a nohup queue; warns of a block whose manifest is missing.     |
 | `cluster/sweep_status.py`          | Trials against the target, live workers, the command to finish it; `--features`.    |
-| `cluster/lib.sh`                   | Shared by the submitters: parser, `--only`, `.env`, GPU pinning, the rewrite.       |
-| `optuna/fetch_best_params.py`      | A study's best trial as hydra overrides and as YAML; `--all`, `--csv`.              |
-| `optuna/make_train_catalogues.py`  | Studies to `run*_{train,eval}.sh`; `--features`, `--dry-run`, `--transferred`.      |
-| `analysis/common.py`               | Shared by the four: table reading, fold parsing, display names; not a script.       |
+| `cluster/lib.sh`                   | Shared by the submitters: parser, `--only`, `.env`, GPU pinning, the nohup queue.   |
+| `optuna/make_train_catalogues.py`  | Studies to `run*_{train,eval}.sh`; `--features`, `--dry-run`.                       |
+| `analysis/common.py`               | Shared by the six: table reading, fold parsing, display names; not a script.        |
 | `analysis/compare_to_baseline.py`  | Joins a run table with a baseline table into a deltas table; the reference is free. |
 | `analysis/make_figures.py`         | Deltas against a baseline, one figure per regime; `--features <dir> --deltas <p>`.  |
 | `analysis/make_baseline_figure.py` | The absolute counterpart for baseline rows, e.g. `results/embedded/`.               |
 | `analysis/make_latex_table.py`     | Results tables to `.tex`, formatting only.                                          |
+| `analysis/collect_params.py`       | Parameter and FLOP counts of every main training run, from MLflow; `--out`.         |
+| `analysis/compare_outputs.py`      | Clean outputs of two evaluations of the same jets, figure by figure; `--csv`.       |
+| `synthesis/synthesise_vn.py`       | A `vn_hgq` export through alkaid, Verilator and Vivado to a `synthesis.csv` row.    |
+| `setup.sh`                         | Working directories and `.env`, which it never overwrites.                          |
+| `symbolink.sh`                     | `data/`, `logs/`, `outputs/`, `results/` as symlinks per `.env`; destructive.       |
