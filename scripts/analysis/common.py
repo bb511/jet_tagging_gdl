@@ -1,15 +1,13 @@
 """What every analysis script needs: reading the tables, and naming things for a reader.
 
 The scripts in this directory are run as scripts, so Python puts this directory first on
-the import path and a plain ``import common`` finds this file. The bootstrap below adds
-the repository root as well, for ``src.symmetry``, and re-adds this directory for the
-case where a script is loaded by path rather than run, as the tests do.
+the import path and a plain ``import common`` finds this file; the tests, which load a
+script by path, put it there themselves. The bootstrap below adds the repository root as
+well, for ``src.symmetry``.
 
 Nothing heavy is imported here or by anything it pulls in, so a bare interpreter with
 matplotlib alone still runs the figure scripts.
 """
-
-from __future__ import annotations
 
 import csv
 import math
@@ -18,11 +16,16 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-for _path in (REPO_ROOT, Path(__file__).resolve().parent):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from src.symmetry import TABULATED_FAMILIES, TABULATED_GROUPS
+from src.symmetry import (
+    ACCURACY_TRANSFORMED,
+    FLIP,
+    TABULATED_FAMILIES,
+    TABULATED_GROUPS,
+    TOTAL_VARIATION,
+)
 
 # augmentation_scheme -> the label the figures and tables print for it. The labels are
 # presentation; which groups are drawn, and in what order, is TABULATED_GROUPS, so a group the
@@ -37,6 +40,8 @@ AUG_ORDER = {
     **{group: i + 1 for i, group in enumerate(("lorentz", "so2", "so3"))},
 }
 
+# vn_hgq precedes vn: a name that is no key, such as vn_hgq_beta<tag>, takes the label of
+# the first key it contains.
 MODEL_DISPLAY = {
     "deepsets": "DeepSets",
     "mlp": "MLP",
@@ -61,18 +66,17 @@ MODEL_DISPLAY = {
     "jet_level_noeta52": "Jet observables w/o eta (52)",
     "jet_level_bdt_all53": "Jet observables BDT (53)",
     "jet_level_bdt_noeta52": "Jet observables BDT w/o eta (52)",
-    "transformer": "JetFormer",
 }
 
 METRIC_DISPLAY = {
-    "tv": "Total variation",
-    "flip": "Flip rate",
-    "accuracy_transformed": "Accuracy (transformed)",
+    TOTAL_VARIATION: "Total variation",
+    FLIP: "Flip rate",
+    ACCURACY_TRANSFORMED: "Accuracy (transformed)",
 }
 
-# Sentinels a cell carries in place of a number: the tables write "nan" where no fold reported the
-# quantity, and the tables written before this one carried the other words.
-NO_VALUE = {"", "nan", "n/a", "baseline", "no_baseline", "no_folds", "—"}
+# What a cell carries in place of a number: the tables write "nan" where no fold
+# reported the quantity.
+NO_VALUE = {"", "nan"}
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -88,7 +92,7 @@ def read_csv(path: Path) -> list[dict[str, str]]:
     return [dict(zip(header, row + [""] * (len(header) - len(row)))) for row in rows]
 
 
-def parse_folds(raw, keep_nan: bool = False) -> list[float] | None:
+def parse_folds(raw: str | None, keep_nan: bool = False) -> list[float] | None:
     """Parse a semicolon-separated per-fold column; None if it is empty or unparsable.
 
     :param keep_nan: keep the folds that reported nothing, as NaN. A figure needs a
@@ -125,7 +129,7 @@ def opt_float(row: dict[str, str], key: str) -> float | None:
     return None if math.isnan(value) else value
 
 
-def safe_fmt(value, digits: int) -> str:
+def safe_fmt(value: str | float | None, digits: int) -> str:
     """Fixed-point format, ``N/A`` for anything that is not a number."""
     try:
         number = float(value)
@@ -159,9 +163,9 @@ def index_deltas(
     }
 
 
-def read_deltas(paths: list[Path]) -> list[dict[str, str]]:
-    """Every deltas row the given tables hold, reporting what was read and what was
-    missing.
+def read_tables(paths: list[Path], noun: str) -> list[dict[str, str]]:
+    """Every row the given tables hold, reporting what was read, counted in *noun*, and
+    what was missing.
 
     The caller decides what an empty result means: a figure of deltas cannot be drawn at all,
     whereas a LaTeX table prints dashes in those columns.
@@ -172,9 +176,18 @@ def read_deltas(paths: list[Path]) -> list[dict[str, str]]:
             print(f"[skip] {path} is missing")
             continue
         found = read_csv(path)
-        print(f"[load] {len(found):3d} deltas <- {shorten(path)}")
+        print(f"[load] {len(found):3d} {noun} <- {shorten(path)}")
         rows += found
     return rows
+
+
+def write_csv(path: Path, rows: list[dict[str, object]], header: list[str]) -> None:
+    """Rewrite *path* from the rows: unlike a results table, it is never appended to."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def shorten(path: Path) -> Path:
@@ -199,15 +212,19 @@ def detect_inv_metric_suffix(rows: list[dict[str, str]]) -> str | None:
     return None
 
 
-def model_display(model_raw: str) -> str:
-    """Map a short algorithm name or a full class path to the label the tables print."""
-    key = model_raw.lower().split(".")[-1]
-    if key in MODEL_DISPLAY:
-        return MODEL_DISPLAY[key]
-    for name, label in MODEL_DISPLAY.items():
-        if name in key:
-            return label
-    return model_raw.split(".")[-1]
+def scheme_of(row: dict[str, str]) -> str:
+    """The augmentation scheme of a results row, lowercased."""
+    return str(row.get("augmentation_scheme", "")).lower()
+
+
+def model_display(model: str) -> str:
+    """The label the tables print for an algorithm name; a name that is no key takes
+    that of the first key it contains."""
+    if model in MODEL_DISPLAY:
+        return MODEL_DISPLAY[model]
+    return next(
+        (label for name, label in MODEL_DISPLAY.items() if name in model), model
+    )
 
 
 def metric_display(metric: str | None) -> str:

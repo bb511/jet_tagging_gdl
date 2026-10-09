@@ -12,10 +12,8 @@ defaults:
   - _self_
 
 model_checkpoint:
-  dirpath: ${paths.output_dir}/checkpoints
-  filename: "epoch_{epoch:03d}"
   # Unranked: each epoch's file replaces the previous one, so best_model_path is the last epoch.
   monitor: null
+  mode: min # restated: ModelCheckpoint.state_key holds the mode, which the util config sets to max
   save_top_k: 1
   save_last: false
-  auto_insert_metric_name: false

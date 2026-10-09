@@ -162,11 +162,23 @@ if [ "$workers" -gt "$trials" ]; then
     exit 2
 fi
 
-# The first T mod k workers carry the remainder, so no worker is left idle.
-per_worker=$((trials / workers))
-remainder=$((trials % workers))
+# Part $3 (0-based) of $1 items cut into $2 contiguous parts, as '<first> <count>'.
+# The first $1 mod $2 parts carry one item more, so no two parts differ by more
+# than one item.
+share_of() {
+    local per=$(($1 / $2)) rem=$(($1 % $2))
+    if [ "$3" -lt "$rem" ]; then
+        echo "$(($3 * (per + 1))) $((per + 1))"
+    else
+        echo "$((rem * (per + 1) + ($3 - rem) * per)) $per"
+    fi
+}
+
+# Worker $1's share of --trials.
 trials_of() {
-    if [ "$1" -lt "$remainder" ]; then echo $((per_worker + 1)); else echo "$per_worker"; fi
+    local count
+    read -r _ count <<< "$(share_of "$trials" "$workers" "$1")"
+    echo "$count"
 }
 
 split=""
@@ -181,12 +193,8 @@ if [ "$n_ids" -gt 0 ] && [ "$n_ids" -lt "$workers" ]; then
 fi
 pin_of() {
     [ "$n_ids" -gt 0 ] || return 0
-    local per=$((n_ids / workers)) rem=$((n_ids % workers)) first count
-    if [ "$1" -lt "$rem" ]; then
-        first=$(($1 * (per + 1))); count=$((per + 1))
-    else
-        first=$((rem * (per + 1) + ($1 - rem) * per)); count=$per
-    fi
+    local first count
+    read -r first count <<< "$(share_of "$n_ids" "$workers" "$1")"
     local IFS=','
     printf 'taskset -c %s ' "${ids[*]:$first:$count}"
 }

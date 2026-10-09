@@ -1,28 +1,4 @@
-# The build copies pyproject.toml and poetry.lock alone; everything else is kept out of the
-# build context so a local checkout with data, logs or checkpoints does not get sent to the
-# daemon.
-.git
-.claude
-.sublime
-sftp-config.json
-.DS_Store
-.env
-
-/data
-/logs
-/outputs
-/results
-/checkpoints
-notebooks
-
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.venv
-venv/
-*.log
-*.out
-*.h5
-*.tar
-*.tar.gz
+# The build copies pyproject.toml and poetry.lock alone; allow only those into the context.
+*
+!pyproject.toml
+!poetry.lock

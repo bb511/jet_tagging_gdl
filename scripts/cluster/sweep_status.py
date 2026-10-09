@@ -45,14 +45,6 @@ FINISHED = re.compile(r"\[HYDRA\]\s+(Best|Value)", re.M)
 HDR = "%-11s %-38s %6s %8s %6s %7s  %-8s %s"
 
 
-def find_repo_root(start: Path) -> Path:
-    """Walk up from ``start`` to the directory holding ``.project-root``."""
-    for p in [start, *start.parents]:
-        if (p / ".project-root").exists():
-            return p
-    return start
-
-
 def _regime(block: str) -> tuple[str, str, str, str] | None:
     """(model, nconstituents, method, scheme) of one search block."""
     exp = re.search(r"experiment=hls4ml/([a-z0-9]+)_(\d+)", block)
@@ -170,13 +162,10 @@ def complete_of(db: str, study: str, writable: bool = False) -> int:
 
 def launch_command(row: dict) -> str:
     """The submit_search.sh invocation that tops this study up to its target."""
+    todo = row["target"] - row["done"]
     return (
-        "bash scripts/cluster/submit_search.sh --only %s %s hydra.sweeper.n_trials=%d"
-        % (
-            row["label"],
-            row["script"],
-            row["target"] - row["done"],
-        )
+        f"bash scripts/cluster/submit_search.sh --only {row['label']} {row['script']}"
+        f" hydra.sweeper.n_trials={todo}"
     )
 
 
@@ -261,19 +250,7 @@ def _table_line(row: dict) -> str:
 
 def print_table(rows: list[dict]) -> None:
     """Every study short of its target, one line each, then a tally by status."""
-    print(
-        HDR
-        % (
-            "model",
-            "study",
-            "target",
-            "complete",
-            "todo",
-            "workers",
-            "status",
-            "driver",
-        )
-    )
+    print(HDR % tuple("model study target complete todo workers status driver".split()))
     print("-" * 112)
     for row in rows:
         if row["status"] != "DONE":
@@ -318,9 +295,8 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     """Print the sweep table, then the commands that would finish the campaign."""
     args = _parse_args()
-    # Anchored on .project-root: globbing from the wrong working directory would yield an empty
-    # table instead of an error.
-    repo = find_repo_root(Path(__file__).resolve().parent)
+    # Anchored on this file: another working directory would give an empty table.
+    repo = Path(__file__).resolve().parents[2]
     os.chdir(repo)
     label = features_label(args.features)
     db_root = args.db_root or db_root_of(label)

@@ -4,12 +4,10 @@ default_root_dir: ${paths.output_dir}
 
 # A floor of one epoch, so early stopping cannot end a run before any validation.
 min_epochs: 1
-max_epochs: 10
+max_epochs: 200
 
 accelerator: cpu
 devices: 1
-
-check_val_every_n_epoch: 1
 
 gradient_clip_val: 1.0
 

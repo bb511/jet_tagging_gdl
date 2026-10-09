@@ -8,7 +8,7 @@ from lightning import Trainer
 
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "checkpoint_manifest.json"

@@ -38,15 +38,15 @@ The figures are SVG rather than PDF because matplotlib's PDF backend emits matht
 fonts, which PDF.js and the VSCode viewers built on it garble.
 """
 
-from __future__ import annotations
-
 import argparse
 import math
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import numpy as np
 
 # common.py puts the repository root on the import path, so it is imported before src.symmetry.
 from common import (
@@ -59,15 +59,22 @@ from common import (
     metric_display,
     model_display,
     opt_float,
-    read_csv,
-    read_deltas,
-    shorten,
+    read_tables,
+    scheme_of,
 )
 from matplotlib import patheffects
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from src.symmetry import TABULATED_GROUPS, TOTAL_VARIATION
+from src.symmetry import (
+    ACCURACY_TRANSFORMED,
+    FLIP,
+    FLIP_RECOVER,
+    TABULATED_GROUPS,
+    TOTAL_VARIATION,
+)
 
 # Match the thesis body font: Latin Modern Roman is Computer Modern.
 mpl.rcParams.update(
@@ -150,6 +157,9 @@ REGIME_FILE_STEM = {"Augmentation": "augmentation", "SCL": "symm_loss"}
 # tables hold no row for it, and the FLOPs count.
 Entry = dict[str, tuple[float, float] | float | None]
 
+# (regime label, model label, N, group label) -> the entry of that cell.
+Index = dict[tuple[str, str, int, str], Entry]
+
 
 def _delta(deltas: dict, key: tuple, scale: float = 1.0) -> tuple[float, float] | None:
     """One deltas row as (mean, deviation), or None when the tables hold no such row."""
@@ -171,20 +181,11 @@ def _fmt_flops(value: float | None) -> str:
     return f"{value:.0f}"
 
 
-def _scheme_of(row: dict[str, str]) -> str:
-    """The row's augmentation scheme, lowercased."""
-    return str(row.get("augmentation_scheme", "")).lower()
-
-
 def _discover_rows(results_dir: Path, stem: str, features: str) -> list[dict[str, str]]:
     """Read results/<features>/results_table_<stem>.csv, the one directory --features
-    names."""
-    rows: list[dict[str, str]] = []
-    for path in sorted(results_dir.glob(f"{features}/results_table_{stem}.csv")):
-        found = read_csv(path)
-        rows.extend(found)
-        print(f"[load] {len(found):3d} rows <- {shorten(path)}")
-    return rows
+    names, when it exists."""
+    paths = sorted(results_dir.glob(f"{features}/results_table_{stem}.csv"))
+    return read_tables(paths, "rows")
 
 
 def _extract_entry(row: dict[str, str], deltas: dict, inv_metric: str) -> Entry:
@@ -196,51 +197,37 @@ def _extract_entry(row: dict[str, str], deltas: dict, inv_metric: str) -> Entry:
     accuracies, the flip rate and the recover rate are scaled to percentage points, the
     units the results tables write them in being proportions.
     """
-    group = _scheme_of(row)
+    group = scheme_of(row)
     return {
         "flops": opt_float(row, "flops_mean"),
         "acc": _delta(deltas, delta_key(row, "", "test_acc"), 100.0),
-        "acc_t": _delta(deltas, delta_key(row, group, "accuracy_transformed"), 100.0),
+        "acc_t": _delta(deltas, delta_key(row, group, ACCURACY_TRANSFORMED), 100.0),
         "inv": _delta(deltas, delta_key(row, group, inv_metric)),
-        "flip": _delta(deltas, delta_key(row, group, "flip"), 100.0),
-        "recover": _delta(deltas, delta_key(row, group, "flip_recover"), 100.0),
+        "flip": _delta(deltas, delta_key(row, group, FLIP), 100.0),
+        "recover": _delta(deltas, delta_key(row, group, FLIP_RECOVER), 100.0),
     }
-
-
-def _baseline_rows(
-    results_dir: Path, features: str, regime_rows: dict
-) -> list[dict[str, str]]:
-    """The unaugmented rows, from their own table or from the regime tables.
-
-    A regime catalogue evaluated on its own writes its ``none`` row into that regime's
-    table, so the rows can be present while results_table_baseline.csv is not.
-    """
-    rows = _discover_rows(results_dir, "baseline", features)
-    return rows or [
-        r for found in regime_rows.values() for r in found if _scheme_of(r) == "none"
-    ]
 
 
 def _index_rows(
     regime_rows: dict, baselines: list[dict], deltas: dict, metric: str
-) -> dict:
+) -> Index:
     """(regime, model, N, group) -> entry, over the regimes that have a table.
 
     The unaugmented rows are indexed again under every regime: each regime's bars are deltas
     against the unaugmented run of the same model and constituent count, whose row carries the
     FLOPs and holds the zero line. A row of a scheme the figures draw no bars for is left out.
     """
-    zero = [row for row in baselines if _scheme_of(row) == "none"]
-    index: dict[tuple[str, str, int, str], Entry] = {}
+    zero = [row for row in baselines if scheme_of(row) == "none"]
+    index: Index = {}
     for regime, rows in regime_rows.items():
         if not rows:
             continue
-        drawn = [r for r in rows if _scheme_of(r) in GROUPS.values()]
+        drawn = [r for r in rows if scheme_of(r) in GROUPS.values()]
         for row in zero + drawn:
             model, n = model_display(row.get("model", "")), int(
                 row.get("nconstituents", 0)
             )
-            group = AUG_DISPLAY[_scheme_of(row)]
+            group = AUG_DISPLAY[scheme_of(row)]
             index[(regime, model, n, group)] = _extract_entry(row, deltas, metric)
     return index
 
@@ -258,11 +245,11 @@ def build_dataset(results_dir: Path, features: str, deltas: dict):
         label: _discover_rows(results_dir, stem, features)
         for label, stem in REGIME_FILE_STEM.items()
     }
-    baselines = _baseline_rows(results_dir, features, regime_rows)
+    baselines = _discover_rows(results_dir, "baseline", features)
     if not baselines:
         sys.exit(
-            f"No unaugmented (augmentation_scheme=none) rows under {results_dir}/{features}/, "
-            "neither a results_table_baseline.csv nor a 'none' row in the regime tables. "
+            f"No unaugmented (augmentation_scheme=none) rows under {results_dir}/{features}/: "
+            "results_table_baseline.csv is missing or empty. "
             "Evaluate the baseline runs first, e.g.:\n"
             "    python3 src/eval.py checkpoint_manifest_path=<baseline>/checkpoint_manifest.json"
         )
@@ -305,7 +292,14 @@ def scaffold(row_labels: list[str], models: list[str]):
     return fig, axes
 
 
-def _draw_group(ax, xs, ys, es, colour, bands=()):
+def draw_group(
+    ax: Axes,
+    xs: Sequence[float],
+    ys: Sequence[float],
+    es: Sequence[float],
+    colour: str,
+    bands: Sequence[tuple[float, float]] = (),
+) -> list[float]:
     """One group's bar cluster, its error bars and any recover-rate bands.
 
     :param bands: (x, y) points to band, empty on a row that carries no recover rate.
@@ -325,8 +319,13 @@ def _draw_group(ax, xs, ys, es, colour, bands=()):
     return whiskers + [y for _, y in bands]
 
 
-def _finish_row(
-    axes_row, ylabel: str, extent: list[float], ns, last: bool, headroom=0.0
+def finish_row(
+    axes_row: np.ndarray,
+    ylabel: str,
+    extent: list[float],
+    ns: list[int],
+    last: bool,
+    headroom: float = 0.0,
 ) -> None:
     """Label and scale one row of panels; sharey='row' spreads the limits across it.
 
@@ -351,7 +350,9 @@ def _finish_row(
     axes_row[0].set_ylim(lo, hi + headroom * (hi - lo))
 
 
-def _flops_footer(axes_row, flops_rows: list[list[float | None]], ns) -> None:
+def flops_footer(
+    axes_row: np.ndarray, flops_rows: list[list[float | None]], ns: list[int]
+) -> None:
     """The FLOPs footer: one number per (model, N), so architecture cost reads at a
     glance.
 
@@ -382,7 +383,7 @@ def _flops_footer(axes_row, flops_rows: list[list[float | None]], ns) -> None:
     axes_row[0].set_ylabel("FLOPs")
 
 
-def _legend(fig, ncol: int) -> None:
+def legend(fig: Figure, ncol: int) -> None:
     """The group swatches and the recover-rate band, centred under the panels."""
     handles = [Patch(facecolor=COL[g], edgecolor="none", label=g) for g in GROUPS]
     handles.append(Line2D([0], [0], color=RECOVER_COLOR, lw=5, label="recover rate"))
@@ -399,7 +400,7 @@ def _legend(fig, ncol: int) -> None:
     )
 
 
-def _save(fig, out_dir: Path, name: str, missing: list[tuple]) -> None:
+def save(fig: Figure, out_dir: Path, name: str, missing: list[tuple]) -> None:
     """Write the figure as ``<name>.svg`` and report the cells that had no row."""
     fig.savefig(out_dir / f"{name}.svg", dpi=200, bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
@@ -423,7 +424,15 @@ def _row_specs(inv_metric: str) -> list[tuple[str, str, str]]:
     ]
 
 
-def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
+def _series(
+    index: Index,
+    regime: str,
+    model: str,
+    ns: list[int],
+    group: str,
+    key: str,
+    missing: list[tuple],
+):
     """Bar positions, heights, deviations and recover-rate bands for one group of one
     panel.
 
@@ -444,7 +453,14 @@ def _series(index, regime: str, model: str, ns, group: str, key: str, missing):
     return xs, ys, es, bands
 
 
-def _draw_rows(axes, specs, index, regime: str, models, ns) -> list[tuple]:
+def _draw_rows(
+    axes: np.ndarray,
+    specs: list[tuple[str, str, str]],
+    index: Index,
+    regime: str,
+    models: list[str],
+    ns: list[int],
+) -> list[tuple]:
     """The bar rows of one regime figure; returns the cells that had no row to draw."""
     missing: list[tuple] = []
     for i, (key, _, ylabel) in enumerate(specs):
@@ -454,28 +470,35 @@ def _draw_rows(axes, specs, index, regime: str, models, ns) -> list[tuple]:
                 xs, ys, es, bands = _series(
                     index, regime, model, ns, group, key, missing
                 )
-                extent += _draw_group(ax, xs, ys, es, COL[group], bands)
-        _finish_row(axes[i], ylabel, extent, ns, last=i == len(specs) - 1)
+                extent += draw_group(ax, xs, ys, es, COL[group], bands)
+        finish_row(axes[i], ylabel, extent, ns, last=i == len(specs) - 1)
     return missing
 
 
-def _flops_of(index, regime: str, model: str, n: int) -> float | None:
+def _flops_of(index: Index, regime: str, model: str, n: int) -> float | None:
     """FLOPs are a property of the architecture, so they are read off the unaugmented
     entry."""
     entry = index.get((regime, model, n, "None"))
     return entry.get("flops") if entry else None
 
 
-def fig_regime(index, models, ns, regime: str, out_dir: Path, inv_metric: str) -> None:
+def fig_regime(
+    index: Index,
+    models: list[str],
+    ns: list[int],
+    regime: str,
+    out_dir: Path,
+    inv_metric: str,
+) -> None:
     """Draw one regime's figure and write it as ``fig_<stem>.svg`` under ``out_dir``."""
     specs = _row_specs(inv_metric)
     fig, axes = scaffold([label for _, label, _ in specs], models)
     missing = _draw_rows(axes, specs, index, regime, models, ns)
     flops = [[_flops_of(index, regime, model, n) for n in ns] for model in models]
-    _flops_footer(axes[len(specs)], flops, ns)
-    _legend(fig, ncol=len(GROUPS) + 1)
+    flops_footer(axes[len(specs)], flops, ns)
+    legend(fig, ncol=len(GROUPS) + 1)
     fig.tight_layout(rect=[0.0, 0.035, 1, 0.975], h_pad=0.4)
-    _save(fig, out_dir, f"fig_{REGIME_FILE_STEM[regime]}", missing)
+    save(fig, out_dir, f"fig_{REGIME_FILE_STEM[regime]}", missing)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -516,7 +539,9 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _require_rows(regimes: list[str], models: list[str], ns: list[int], args) -> None:
+def _require_rows(
+    regimes: list[str], models: list[str], ns: list[int], args: argparse.Namespace
+) -> None:
     """Exit with what to run when the tables hold nothing to draw."""
     if not regimes:
         sys.exit(
@@ -532,7 +557,7 @@ def _require_rows(regimes: list[str], models: list[str], ns: list[int], args) ->
 def main() -> None:
     """Draw one figure per regime the results directory holds a table for."""
     args = _parse_args()
-    rows = read_deltas(args.deltas)
+    rows = read_tables(args.deltas, "deltas")
     if not rows:
         sys.exit(
             f"No delta rows under {[str(p) for p in args.deltas]}. Write them first, e.g.:\n"

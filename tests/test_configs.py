@@ -1,18 +1,15 @@
+import hashlib
 import math
 from pathlib import Path
+from typing import Any
 
 import hydra
 import pytest
+import torch
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
-from src.algorithms.deepsets import (
-    DeepSets,
-    DeepSetsMoments,
-    JEDILinear,
-    JEDILinearMoments,
-)
-from src.algorithms.vector_neurons import VectorNeurons
+from src.utils.omegaconf import short_hash
 from tests.conftest import (
     BASELINE_ONLY,
     CPU_ROWS,
@@ -21,444 +18,302 @@ from tests.conftest import (
     MODELS,
     MOMENT_ROWS,
     NCONSTITUENTS,
-    PT_ETAREL_PHIREL,
     QUANTISED,
     ROOT,
+    algorithm_yaml,
     compose_root,
     point_into,
+    sweeper,
 )
 
-# The jet-level rows run at the one constituent count that labels them.
-EXPECTED_EXPERIMENTS = {
-    f"{model}_{n}" for model in (*MODELS, *QUANTISED) for n in NCONSTITUENTS
-} | {f"{row}_150" for row in JET_LEVEL}
-# The baseline-only rows (the embedded class and the jet-level rows) are never trained
-# under the SCL, so they have no SCL space.
-EXPECTED_SEARCHES = {
-    f"{model}{variant}_optuna"
-    for model in (*MODELS, *JET_LEVEL)
-    for variant in ("", "_scl")
-    if not (model in BASELINE_ONLY and variant == "_scl")
+EXPERIMENT_DIR = ROOT / "configs" / "experiment" / "hls4ml"
+SEARCH_DIR = ROOT / "configs" / "hparams_search" / "hls4ml"
+EXPERIMENTS = sorted(path.stem for path in EXPERIMENT_DIR.glob("*.yaml"))
+SEARCHES = sorted(path.stem for path in SEARCH_DIR.glob("*.yaml"))
+# Digests of each experiment's state-dict layout at N = 16, 50 and 150 (the jet-level
+# rows at 150 alone): the keys in order with their shapes and dtypes, then the Keras
+# weights of vn_hgq, from the K1 golden of commit 50d78b93. The checkpoints of the
+# finals hold these layouts, and eval.py loads them strictly.
+LAYOUTS = {
+    "deepsets": "9294bcdce881 181f7342cf6e 181f7342cf6e",
+    "mlp": "3d445a0a0618 78bf9b67580c 8a92848f3053",
+    "jetformer": "396ef5d47808 396ef5d47808 396ef5d47808",
+    "lorentznet": "f7b122f582b9 f7b122f582b9 f7b122f582b9",
+    "pelican": "ffadb7cc6a1b ffadb7cc6a1b ffadb7cc6a1b",
+    "pelican_lorentz": "816ee4ee78da 816ee4ee78da 9e3f131dcde2",
+    "lgatr_slim": "7b4746935bf2 7b4746935bf2 7b4746935bf2",
+    "lgatr_slim_lorentz": "7b4746935bf2 7b4746935bf2 7b4746935bf2",
+    "lloca_lorentz": "7d6d372f2e86 7d6d372f2e86 7d6d372f2e86",
+    "lloca_z": "f7d323974944 f7d323974944 f7d323974944",
+    "lloca_so2": "5842a90f20b0 5842a90f20b0 5842a90f20b0",
+    "lloca_so3": "f7d323974944 f7d323974944 f7d323974944",
+    "vn": "e3a06fa147b8 c195801f4616 6e4923c8de4e",
+    "jedi_linear": "52bfba5cff0e 52bfba5cff0e 52bfba5cff0e",
+    "linformer": "65f74d9bbd94 cb44afba1ef0 6a1caad50656",
+    "deepsets_moments": "bc017939538b bc017939538b bc017939538b",
+    "jedi_linear_moments": "89beb94b7da7 89beb94b7da7 89beb94b7da7",
+    "moments_only": "a631eed1a09e a631eed1a09e a631eed1a09e",
+    "jet_level_all53": "cba69c105b19",
+    "jet_level_noeta52": "e123efd972cf",
+    "jet_level_bdt_all53": "0454180ac26f",
+    "jet_level_bdt_noeta52": "0454180ac26f",
+    "vn_hgq": "8d315eab0580 a376435f525e 9845c7c24750",
+}
+LAYOUT = {
+    f"{row}_{n}": digest
+    for row, digests in LAYOUTS.items()
+    for n, digest in zip((150,) if row in JET_LEVEL else NCONSTITUENTS, digests.split())
 }
 SUBDIRS = {
     **dict.fromkeys(EMBEDDED, "embedded"),
     **dict.fromkeys(JET_LEVEL, "jet_level"),
     **dict.fromkeys(QUANTISED, "quantised"),
 }
-
-
-def _names(group: str) -> list[str]:
-    return sorted(path.stem for path in (ROOT / "configs" / group).glob("*.yaml"))
-
-
-EXPERIMENTS = _names("experiment/hls4ml")
-SEARCHES = _names("hparams_search/hls4ml")
-# Each moment row's parent, its class and the parent's keys it does not have.
-MOMENT_PARENTS = {
-    "deepsets_moments": ("deepsets", "DeepSetsMoments", ()),
-    "jedi_linear_moments": ("jedi_linear", "JEDILinearMoments", ()),
-    "moments_only": ("deepsets", "DeepSetsMoments", ("phi_layers", "aggregation")),
+# The rows that share a network keep standalone configs, since results and log
+# directories are keyed by algorithm.name: (original, copy, the keys the copy may
+# change), algorithm configs and search spaces alike.
+COPIES = [
+    ("algorithm/pelican", "algorithm/pelican_lorentz", "name add_beams nbar"),
+    ("algorithm/lgatr_slim", "algorithm/lgatr_slim_lorentz", "name add_beams add_time"),
+    *(
+        ("algorithm/lloca_lorentz", f"algorithm/lloca_{frames}", "name frames")
+        for frames in ("z", "so2", "so3")
+    ),
+    (
+        "algorithm/deepsets",
+        "algorithm/jedi_linear",
+        "_target_ name phi_layers rho_layers dropout hidden head_layers",
+    ),
+    (
+        "algorithm/deepsets",
+        "algorithm/deepsets_moments",
+        "_target_ name nbr_feats moments",
+    ),
+    (
+        "algorithm/deepsets",
+        "algorithm/moments_only",
+        "_target_ name nbr_feats phi_layers aggregation moments moments_only",
+    ),
+    (
+        "algorithm/jedi_linear",
+        "algorithm/jedi_linear_moments",
+        "_target_ name nbr_feats moments",
+    ),
+    *(
+        ("algorithm/mlp", f"algorithm/{row}", "name nconstituents nbr_feats")
+        for row in ("jet_level_all53", "jet_level_noeta52")
+    ),
+    (
+        "algorithm/jet_level_bdt_all53",
+        "algorithm/jet_level_bdt_noeta52",
+        "name nbr_feats",
+    ),
+    (
+        "algorithm/vn",
+        "algorithm/vn_hgq",
+        "_target_ name units optimizer scheduler quantisation beta beta_schedule "
+        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
+    ),
+    (
+        "search/deepsets",
+        "search/jedi_linear",
+        "storage study_name params.algorithm.phi_layers params.algorithm.rho_layers "
+        "params.algorithm.hidden params.algorithm.head_layers",
+    ),
+    ("search/deepsets_scl", "search/jedi_linear_scl", ""),
+    (
+        "search/deepsets",
+        "search/deepsets_moments",
+        "storage study_name params.algorithm.moments",
+    ),
+    (
+        "search/deepsets",
+        "search/moments_only",
+        "storage study_name params.algorithm.phi_layers params.algorithm.aggregation "
+        "params.algorithm.moments",
+    ),
+    (
+        "search/jedi_linear",
+        "search/jedi_linear_moments",
+        "storage study_name params.algorithm.moments",
+    ),
+    *(
+        ("search/mlp", f"search/{row}", "storage study_name")
+        for row in ("jet_level_all53", "jet_level_noeta52")
+    ),
+    (
+        "search/jet_level_bdt_all53",
+        "search/jet_level_bdt_noeta52",
+        "storage study_name",
+    ),
+]
+# (trainer.precision, extras.matmul_precision) of each row's experiments, None where the
+# trainer's own stays. fp32 for the embedded rows, whose invariants overflow fp16, with
+# TF32 except for vn, whose linear layers act on the vector components themselves; the
+# moment rows keep 16-mixed, their moments leaving autocast in float32 themselves.
+ARITHMETIC = {
+    **dict.fromkeys(EMBEDDED, (32, "high")),
+    **dict.fromkeys(MOMENT_ROWS, (None, None)),
+    **dict.fromkeys(("vn", *CPU_ROWS, *QUANTISED), (32, None)),
 }
+FPGA_POOLS = "choice(sum, max, sum_over_n)"
 
 
-def _composed(tmp_path: Path, *overrides: str) -> DictConfig:
-    # The experiments select the GPU trainer and MLflow; both are overridden so that the
-    # composition can be checked on any machine.
-    cfg = compose_root("train.yaml", *overrides, "trainer=cpu", "logger=none")
-    HydraConfig().set_config(point_into(cfg, tmp_path))
-    return cfg
+def _layout(module: torch.nn.Module) -> str:
+    lines = [
+        f"{name} {list(v.shape)} {v.dtype}"
+        if torch.is_tensor(v)
+        else f"{name} {type(v).__name__}"
+        for name, v in module.state_dict().items()
+    ]
+    keras = getattr(module.net, "keras_model", None)
+    weights = [] if keras is None else keras.get_weights()
+    lines += [f"{list(w.shape)} {w.dtype}" for w in weights]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:12]
+
+
+def _flat(node: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    flat = {}
+    for key, value in node.items():
+        if isinstance(value, dict):
+            flat |= _flat(value, f"{prefix}{key}.")
+        else:
+            flat[f"{prefix}{key}"] = value
+    return flat
+
+
+def _kept(spec: str, changed: list[str]) -> dict[str, Any]:
+    kind, name = spec.split("/")
+    if kind == "algorithm":
+        config = algorithm_yaml(name)
+    else:
+        path = SEARCH_DIR / f"{name}_optuna.yaml"
+        config = OmegaConf.to_container(OmegaConf.load(path).hydra.sweeper)
+    # A changed key covers every key nested under it.
+    kept = _flat(config).items()
+    return {
+        k: v
+        for k, v in kept
+        if not any(k == c or k.startswith(f"{c}.") for c in changed)
+    }
+
+
+def test_the_configs_are_those_the_row_lists_name() -> None:
+    experiments = {f"{row}_{n}" for row in (*MODELS, *QUANTISED) for n in NCONSTITUENTS}
+    searches = {
+        f"{row}{scl}_optuna"
+        for row in (*MODELS, *JET_LEVEL)
+        for scl in ("", "_scl")
+        if not (row in BASELINE_ONLY and scl)
+    }
+
+    assert set(EXPERIMENTS) == experiments | {f"{row}_150" for row in JET_LEVEL}
+    assert set(SEARCHES) == searches
 
 
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
-def test_every_experiment_config_builds_data_algorithm_and_trainer(
-    experiment: str, tmp_path: Path
-) -> None:
-    assert set(EXPERIMENTS) == EXPECTED_EXPERIMENTS
-    cfg = _composed(tmp_path, f"experiment=hls4ml/{experiment}")
-    model, nconstituents = experiment.rsplit("_", 1)
+def test_every_experiment_builds_its_row(experiment: str, tmp_path: Path) -> None:
+    model, n = experiment.rsplit("_", 1)
     if model in QUANTISED:
         pytest.importorskip("hgq")
-
-    assert hydra.utils.instantiate(cfg.data).nconstituents == int(nconstituents)
-    assert hydra.utils.instantiate(cfg.trainer)
+    overrides = ("trainer=cpu", "logger=none")
+    cfg = compose_root("train.yaml", f"experiment=hls4ml/{experiment}", *overrides)
+    HydraConfig().set_config(point_into(cfg, tmp_path))
     module = hydra.utils.instantiate(cfg.algorithm)
+    monitored = ("model_checkpoint", "early_stopping")
+    monitors = [
+        cfg.callbacks[name].monitor for name in monitored if name in cfg.callbacks
+    ]
+
+    assert hydra.utils.instantiate(cfg.data).nconstituents == int(n)
+    assert hydra.utils.instantiate(cfg.trainer)
     assert module.hparams.name == model
-    # A jet-level row reads one slot of observables per jet, whatever labels it.
-    slots = 1 if model in JET_LEVEL else int(nconstituents)
-    assert module.hparams.nconstituents == slots
-    if model in QUANTISED:
-        # Priced on the float twin; the EBOPs are known once the test pass has traced
-        # the quantisers.
-        assert math.isnan(module.ebops_total) and module.flops_total > 0
-    elif model in CPU_ROWS:
-        # The trees run in scikit-learn, which neither counter sees.
-        assert math.isnan(module.flops_total) and math.isnan(module.ebops_total)
+    assert module.hparams.nconstituents == (1 if model in JET_LEVEL else int(n))
+    assert _layout(module) == LAYOUT[experiment]
+    # save_hyperparameters collects these through Lightning's frame walk; without them a
+    # checkpoint cannot rebuild the network it holds.
+    unsaved = {"_target_", "_convert_", "optimizer", "scheduler"}
+    assert set(cfg.algorithm) - unsaved <= set(module.hparams)
+    flops, ebops = module.flops_total, module.ebops_total
+    if model in CPU_ROWS:
+        assert math.isnan(flops) and math.isnan(ebops)
+    elif model in QUANTISED:
+        assert math.isnan(ebops) and flops > 0
     else:
         # Every MAC the FLOP counter prices at 2 the eBOP counter prices at 8 x 8.
-        assert module.ebops_total >= 32 * module.flops_total > 0
+        assert ebops >= 32 * flops > 0
     assert cfg.results_table.subdir == SUBDIRS.get(model)
     assert cfg.callbacks.invariance_metric.probe == (model not in JET_LEVEL)
+    # The quantised row's last epoch is the model: unranked, and never stopped early.
+    assert monitors == ([None] if model in QUANTISED else ["val/acc", "val/acc"])
 
 
 @pytest.mark.parametrize("search", SEARCHES)
-def test_every_search_config_offers_a_non_empty_space(
+def test_every_search_names_its_study_from_the_regime(
     search: str, tmp_path: Path
 ) -> None:
-    assert set(SEARCHES) == EXPECTED_SEARCHES
     model = search.removesuffix("_optuna").removesuffix("_scl")
-    nconstituents = 150 if model in JET_LEVEL else 16
-    cfg = _composed(
-        tmp_path,
-        f"experiment=hls4ml/{model}_{nconstituents}",
-        f"hparams_search=hls4ml/{search}",
+    n = 150 if model in JET_LEVEL else 16
+    method, scheme = (
+        ("symm_loss", "so2") if "_scl" in search else ("augmentation", "none")
     )
-    params = cfg.hydra.sweeper.params
+    regime = (f"data.method={method}", f"data.augmentation_scheme={scheme}")
+    experiment = (f"experiment=hls4ml/{model}_{n}", f"hparams_search=hls4ml/{search}")
 
-    assert params
-    assert all(str(value) for value in params.values())
-    assert ("algorithm.symm_loss_weight" in params) == search.endswith("_scl_optuna")
+    found = sweeper(tmp_path, *experiment, *regime)
+
+    assert found["params"] and all(str(value) for value in found["params"].values())
+    assert ("algorithm.symm_loss_weight" in found["params"]) == (method == "symm_loss")
+    assert found["study_name"] == f"{model}_nconst{n}_{method}_{scheme}"
+    assert found["storage"] == f"sqlite:///logs/optuna/hls4ml/{model}.db?timeout=600"
 
 
-def test_a_feature_list_on_the_command_line_reaches_data_and_algorithm(
-    tmp_path: Path,
+@pytest.mark.parametrize("original, copy, changed", COPIES)
+def test_each_standalone_copy_equals_its_original_but_for_its_own_keys(
+    original: str, copy: str, changed: str
 ) -> None:
-    # The feature-set ablations are one override: nbr_feats is ${len:${data.features}}, so
-    # the network's input width follows the list rather than a second knob of its own.
-    cfg = _composed(tmp_path, "experiment=hls4ml/mlp_16", "data.features=[pt,eta,phi]")
-
-    assert cfg.algorithm.nbr_feats == 3
-    assert hydra.utils.instantiate(cfg.data).features == ["pt", "eta", "phi"]
-    assert hydra.utils.instantiate(cfg.algorithm).hparams.nbr_feats == 3
+    assert _kept(copy, changed.split()) == _kept(original, changed.split())
 
 
-def test_the_study_name_follows_the_regime(tmp_path: Path) -> None:
-    for method, scheme in (("augmentation", "none"), ("symm_loss", "so2")):
-        cfg = _composed(
-            tmp_path,
-            "experiment=hls4ml/deepsets_16",
-            "hparams_search=hls4ml/deepsets_optuna",
-            f"data.method={method}",
-            f"data.augmentation_scheme={scheme}",
-        )
-        study_name = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)[
-            "study_name"
-        ]
-
-        assert study_name == f"deepsets_nconst16_{method}_{scheme}"
-
-
-def test_the_beamless_pelican_differs_from_the_beams_on_one_in_the_switch_alone() -> (
-    None
-):
-    # pelican_lorentz.yaml is a standalone copy of pelican.yaml, because the algorithm tests load
-    # these files with OmegaConf alone and a defaults list would not resolve there; this is what
-    # keeps the copy from drifting.
-    beams, lorentz = (
-        OmegaConf.to_container(
-            OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
-        )
-        for name in ("pelican", "pelican_lorentz")
+@pytest.mark.parametrize("experiment", EXPERIMENTS)
+def test_each_experiment_sets_the_arithmetic_of_its_row(experiment: str) -> None:
+    model = experiment.rsplit("_", 1)[0]
+    cfg = OmegaConf.to_container(OmegaConf.load(EXPERIMENT_DIR / f"{experiment}.yaml"))
+    trainer, extras, data = (
+        cfg.get(node) or {} for node in ("trainer", "extras", "data")
     )
-    assert (beams["add_beams"], lorentz["add_beams"]) == (True, False)
-    assert (beams["name"], lorentz["name"]) == ("pelican", "pelican_lorentz")
-    for cfg in (beams, lorentz):
-        for key in ("name", "add_beams", "nbar"):
-            cfg.pop(key)
-    assert beams == lorentz
+    manual = model in (*CPU_ROWS, *QUANTISED)
 
-
-def test_the_lorentz_lgatr_differs_from_the_spurion_one_in_the_switches_alone() -> None:
-    # lgatr_slim_lorentz.yaml is a standalone copy of lgatr_slim.yaml, because the
-    # algorithm tests load these files with OmegaConf alone and a defaults list would
-    # not resolve there; this is what keeps the copy from drifting.
-    spurion, lorentz = (
-        OmegaConf.to_container(
-            OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
-        )
-        for name in ("lgatr_slim", "lgatr_slim_lorentz")
-    )
-    assert (spurion["add_beams"], spurion["add_time"]) == (True, True)
-    assert (lorentz["add_beams"], lorentz["add_time"]) == (False, False)
-    assert (spurion["name"], lorentz["name"]) == ("lgatr_slim", "lgatr_slim_lorentz")
-    for cfg in (spurion, lorentz):
-        for key in ("name", "add_beams", "add_time"):
-            cfg.pop(key)
-    assert spurion == lorentz
-
-
-def test_the_lloca_rows_differ_in_name_and_frames_alone() -> None:
-    # lloca_z.yaml, lloca_so2.yaml and lloca_so3.yaml are standalone copies of
-    # lloca_lorentz.yaml, because the algorithm tests load these files with OmegaConf
-    # alone and a defaults list would not resolve there; this is what keeps the copies
-    # from drifting.
-    rows = {
-        row: OmegaConf.to_container(
-            OmegaConf.load(ROOT / "configs" / "algorithm" / f"lloca_{row}.yaml")
-        )
-        for row in ("lorentz", "z", "so2", "so3")
-    }
-    for row, cfg in rows.items():
-        assert (cfg["name"], cfg["frames"]) == (f"lloca_{row}", row)
-        for key in ("name", "frames"):
-            cfg.pop(key)
-    for cfg in rows.values():
-        assert cfg == rows["lorentz"]
-
-
-def test_jedi_linear_differs_from_deepsets_in_the_network_alone() -> None:
-    # jedi_linear.yaml is a standalone copy of deepsets.yaml, because the algorithm
-    # tests load these files with OmegaConf alone and a defaults list would not resolve
-    # there. The comparator is read against DeepSets, so the training recipe is held
-    # fixed and only the network moves; this is what keeps the copy from drifting.
-    deepsets, jedi = (
-        OmegaConf.to_container(
-            OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
-        )
-        for name in ("deepsets", "jedi_linear")
-    )
-    assert (deepsets["_target_"], jedi["_target_"]) == (
-        "src.algorithms.deepsets.DeepSets",
-        "src.algorithms.deepsets.JEDILinear",
-    )
-    assert (deepsets["name"], jedi["name"]) == ("deepsets", "jedi_linear")
-    architectures = (
-        (deepsets, "phi_layers rho_layers aggregation dropout"),
-        (jedi, "hidden head_layers aggregation"),
-    )
-    for cfg, keys in architectures:
-        for key in ("_target_", "name", *keys.split()):
-            cfg.pop(key)
-    assert deepsets == jedi
-
-
-def test_jedi_linear_searches_the_pooling_and_training_choices_of_deepsets() -> None:
-    # The two rows differ in the network alone, so every choice they share is tuned over
-    # the same values, the SCL weight included; neither searches an activation (see the
-    # test below). The SCL configs hold only the weight, over a defaults list.
-    deepsets, jedi, deepsets_scl, jedi_scl = (
-        OmegaConf.load(
-            ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}.yaml"
-        ).hydra.sweeper.params
-        for name in (
-            "deepsets_optuna",
-            "jedi_linear_optuna",
-            "deepsets_scl_optuna",
-            "jedi_linear_scl_optuna",
-        )
-    )
-    for key in ("aggregation", "optimizer.lr", "optimizer.weight_decay"):
-        assert jedi[f"algorithm.{key}"] == deepsets[f"algorithm.{key}"], key
-    assert dict(jedi_scl) == dict(deepsets_scl)
-
-
-@pytest.mark.parametrize(
-    "row", ["deepsets", "jedi_linear", "deepsets_moments", "jedi_linear_moments"]
-)
-def test_the_search_offers_relu_and_the_fpga_cheap_pools_alone(row: str) -> None:
-    # tanh costs an FPGA a lookup table and the mean a per-jet division. With no
-    # activation in the space, every trial takes the network's ReLU; sum_over_n divides
-    # by the constant N.
-    params = OmegaConf.load(
-        ROOT / "configs" / "hparams_search" / "hls4ml" / f"{row}_optuna.yaml"
-    ).hydra.sweeper.params
-    algorithm = OmegaConf.load(ROOT / "configs" / "algorithm" / f"{row}.yaml")
-
-    assert "algorithm.activation" not in params
-    assert params["algorithm.aggregation"] == "choice(sum, max, sum_over_n)"
-    assert algorithm.aggregation == "sum"
-
-
-@pytest.mark.parametrize("experiment", [f"vn_{n}" for n in NCONSTITUENTS])
-def test_the_vn_experiments_keep_full_float32_matmuls_and_their_own_columns(
-    experiment: str,
-) -> None:
-    # TF32 rounds the inputs of every float32 matmul to about 5e-4, and this network's
-    # linear layers act on the vector components themselves, so a transformed jet would
-    # be rounded differently and the embedded group would hold to that precision only.
-    cfg = OmegaConf.load(
-        ROOT / "configs" / "experiment" / "hls4ml" / f"{experiment}.yaml"
-    )
-    assert cfg.trainer.precision == 32
-    assert "matmul_precision" not in (cfg.get("extras") or {})
-    # The one embedded row that reads pt, eta and phi rather than the four-momentum of
-    # configs/data/hls4ml.yaml, which its setup() would refuse.
-    assert list(cfg.data.features) == VectorNeurons.required_features
-
-
-def _algorithm_yaml(name: str) -> dict:
-    return OmegaConf.to_container(
-        OmegaConf.load(ROOT / "configs" / "algorithm" / f"{name}.yaml")
-    )
-
-
-def _search_params(name: str) -> dict[str, str]:
-    path = ROOT / "configs" / "hparams_search" / "hls4ml" / f"{name}_optuna.yaml"
-    return dict(OmegaConf.load(path).hydra.sweeper.params)
-
-
-@pytest.mark.parametrize(
-    "experiment", [f"{row}_{n}" for row in QUANTISED for n in NCONSTITUENTS]
-)
-def test_the_quantised_experiments_step_keras_in_fp32_and_keep_the_last_epoch(
-    experiment: str, tmp_path: Path
-) -> None:
-    # Lightning refuses gradient clipping under manual optimisation, and 16-mixed would
-    # pass the mock optimiser's step through a gradient scaler with no gradient to
-    # check. The last epoch is the model, so the checkpoint is unranked and nothing
-    # stops a run early; JAX's threads rule out forked loader workers.
-    cfg = _composed(tmp_path, f"experiment=hls4ml/{experiment}")
-    checkpoint = cfg.callbacks.model_checkpoint
-
-    assert cfg.trainer.gradient_clip_val is None and cfg.trainer.precision == 32
-    assert checkpoint.monitor is None and checkpoint.save_top_k == 1
-    assert not checkpoint.save_last
-    assert {"early_stopping", "lr_monitor"}.isdisjoint(cfg.callbacks)
-    assert cfg.data.num_workers == 0
-    assert list(cfg.data.features) == VectorNeurons.required_features
-    # JAX follows the trainer, whose devices are a count or a list of indices.
-    assert (cfg.algorithm.jax_platform, cfg.algorithm.jax_devices) == ("cpu", 1)
-    gpu = compose_root(
-        "train.yaml", f"experiment=hls4ml/{experiment}", "trainer.devices=[1]"
-    )
-    assert gpu.algorithm.jax_platform == "gpu"
-    assert list(gpu.algorithm.jax_devices) == [1]
-
-
-def test_the_quantised_vn_differs_from_vn_in_the_port_and_its_training_alone() -> None:
-    # vn_hgq.yaml is a standalone copy of vn.yaml, as the other rows that share a
-    # network are, so that its architecture keys stay those of the float checkpoints it
-    # copies.
-    vn, quantised = _algorithm_yaml("vn"), _algorithm_yaml("vn_hgq")
-    port = "quantisation beta beta_schedule init_from calibration_jets floatx"
-    training = "jax_platform jax_devices warmup_fraction"
-
-    assert (vn["units"], quantised["units"]) == (20.0, 16.0)
-    for key in "_target_ name units optimizer scheduler".split():
-        vn.pop(key)
-        quantised.pop(key)
-    for key in f"{port} {training}".split():
-        quantised.pop(key)
-    assert vn == quantised
-
-
-@pytest.mark.parametrize("row", MOMENT_ROWS)
-def test_each_moment_row_differs_from_its_parent_in_the_moments_alone(row: str) -> None:
-    # Standalone copies, as jedi_linear.yaml is of deepsets.yaml, read against their
-    # parents: the training recipe is held fixed and only the moments move. nbr_feats is
-    # 3 rather than ${len:...}, since tests/test_algorithms.py builds every row on the
-    # four-momentum.
-    parent, target, dropped = MOMENT_PARENTS[row]
-    moments, reference = _algorithm_yaml(row), _algorithm_yaml(parent)
-
-    assert moments["_target_"] == f"src.algorithms.deepsets.{target}"
-    assert (moments["name"], moments["nbr_feats"]) == (row, 3)
-    assert moments["moments"] == "uniform"
-    assert moments.pop("moments_only", False) == (row == "moments_only")
-    for key in ("_target_", "name", "nbr_feats", "moments"):
-        moments.pop(key)
-        reference.pop(key, None)
-    for key in dropped:
-        reference.pop(key)
-    assert moments == reference
-
-
-@pytest.mark.parametrize("row", MOMENT_ROWS)
-def test_each_moment_row_searches_its_parents_space_and_the_moment_set(
-    row: str, tmp_path: Path
-) -> None:
-    parent, _, dropped = MOMENT_PARENTS[row]
-    params, reference = _search_params(row), _search_params(parent)
-    cfg = _composed(
-        tmp_path, f"experiment=hls4ml/{row}_16", f"hparams_search=hls4ml/{row}_optuna"
-    )
-    sweeper = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
-
-    assert params.pop("algorithm.moments") == "choice(uniform, rankcut)"
-    for key in dropped:
-        reference.pop(f"algorithm.{key}")
-    assert params == reference
-    assert sweeper["storage"] == f"sqlite:///logs/optuna/hls4ml/{row}.db?timeout=600"
-    assert sweeper["study_name"] == f"{row}_nconst16_augmentation_none"
-
-
-@pytest.mark.parametrize(
-    "experiment", [f"{row}_{n}" for row in MOMENT_ROWS for n in NCONSTITUENTS]
-)
-def test_the_moment_experiments_pin_their_columns_and_keep_mixed_precision(
-    experiment: str,
-) -> None:
-    # The moments leave autocast for float32 themselves, so the trainer's 16-mixed stays,
-    # and TF32 would round the inputs of their products while pair, chain and triangle
-    # cancel between large terms.
-    cfg = OmegaConf.load(
-        ROOT / "configs" / "experiment" / "hls4ml" / f"{experiment}.yaml"
-    )
-    assert "precision" not in cfg.trainer
-    assert "matmul_precision" not in (cfg.get("extras") or {})
-    assert list(cfg.data.features) == PT_ETAREL_PHIREL
-    assert DeepSetsMoments.required_features == PT_ETAREL_PHIREL
-    assert JEDILinearMoments.required_features == PT_ETAREL_PHIREL
-    # The parents read whatever data.features names, as every grid row does.
-    assert DeepSets.required_features is None and JEDILinear.required_features is None
-
-
-@pytest.mark.parametrize(
-    "row, width", [("jet_level_all53", 53), ("jet_level_noeta52", 52)]
-)
-def test_each_jet_level_row_is_the_mlp_on_one_slot_of_observables(
-    row: str, width: int
-) -> None:
-    # Standalone copies of mlp.yaml, as the moment rows are of their parents: the
-    # training recipe is the constituent MLP's, and only the input moves.
-    jet_level, mlp = _algorithm_yaml(row), _algorithm_yaml("mlp")
-
-    assert (jet_level["name"], jet_level["nconstituents"]) == (row, 1)
-    assert jet_level["nbr_feats"] == width
-    for key in ("name", "nconstituents", "nbr_feats"):
-        jet_level.pop(key)
-        mlp.pop(key)
-    assert jet_level == mlp
-
-
-def _sweeper(tmp_path: Path, row: str) -> dict:
-    cfg = _composed(
-        tmp_path, f"experiment=hls4ml/{row}_150", f"hparams_search=hls4ml/{row}_optuna"
-    )
-    return OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
-
-
-# The trees search a space of their own, which tests/test_bdt.py checks.
-@pytest.mark.parametrize("row", [row for row in JET_LEVEL if row not in CPU_ROWS])
-def test_each_jet_level_row_searches_the_mlp_space(row: str, tmp_path: Path) -> None:
-    # The space, the budget and the sampler of the constituent MLP; only the study moves.
-    sweeper, mlp = _sweeper(tmp_path, row), _sweeper(tmp_path, "mlp")
-
+    expected = ARITHMETIC.get(model, (None, None))
+    assert (trainer.get("precision"), extras.get("matmul_precision")) == expected
+    # Lightning refuses gradient clipping under manual optimisation, and the threads JAX
+    # starts rule out forked loader workers.
     assert (
-        sweeper.pop("storage") == f"sqlite:///logs/optuna/hls4ml/{row}.db?timeout=600"
-    )
-    assert sweeper.pop("study_name") == f"{row}_nconst150_augmentation_none"
-    for key in ("storage", "study_name"):
-        mlp.pop(key)
-    assert sweeper == mlp
-    assert sweeper["n_trials"] == 200 and sweeper["sampler"]["seed"] == 1234
+        "gradient_clip_val" in trainer and trainer["gradient_clip_val"] is None
+    ) == manual
+    assert (data.get("num_workers") == 0) == (model in QUANTISED)
 
 
-def test_the_jet_level_rows_read_the_networks_record_and_folds(tmp_path: Path) -> None:
-    # One revision and one fold seed, so that fold i of a jet-level row and of a network
-    # holds the same jets.
-    hls4ml, jet_level = (
-        OmegaConf.load(ROOT / "configs" / "data" / f"{name}.yaml")
-        for name in ("hls4ml", "jet_level")
-    )
-    noeta = _composed(tmp_path, "experiment=hls4ml/jet_level_noeta52_150")
+@pytest.mark.parametrize(
+    "row", ["deepsets", "mlp", "linformer", "jedi_linear", *MOMENT_ROWS]
+)
+def test_the_fpga_rows_search_relu_and_the_three_pools_alone(row: str) -> None:
+    # tanh costs an FPGA a lookup table and the mean a per-jet division; sum_over_n
+    # divides by the constant N. With no activation searched, every trial takes ReLU.
+    params = OmegaConf.load(SEARCH_DIR / f"{row}_optuna.yaml").hydra.sweeper.params
 
-    assert (jet_level.revision, jet_level.kfold_seed) == (
-        hls4ml.revision,
-        hls4ml.kfold_seed,
-    )
-    assert list(noeta.data.exclude) == ["j_eta"]
-    assert (noeta.data.n_folds, noeta.data.batch_size, noeta.trainer.max_epochs) == (
-        5,
-        2048,
-        200,
-    )
+    assert not any("activation" in key for key in params)
+    assert params.get("algorithm.aggregation", FPGA_POOLS) == FPGA_POOLS
+    assert algorithm_yaml(row).get("activation", "relu") == "relu"
+
+
+def test_the_resolvers_count_features_hash_runs_and_label_folds(tmp_path: Path) -> None:
+    # nbr_feats is ${len:${data.features}}, so a feature-set ablation is one override.
+    features = ("experiment=hls4ml/mlp_16", "data.features=[pt,eta,phi]")
+    cfg = compose_root("train.yaml", *features, "trainer=cpu", "logger=none")
+    HydraConfig().set_config(point_into(cfg, tmp_path))
+
+    assert hydra.utils.instantiate(cfg.algorithm).hparams.nbr_feats == 3
+    assert (cfg.run_name, cfg.run_label) == (short_hash(str(tmp_path), 12), "main")
+    cfg.fold = 3
+    assert (cfg.run_name, cfg.run_label) == ("fold_3", "fold_3")

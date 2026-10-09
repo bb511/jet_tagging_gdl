@@ -290,8 +290,6 @@ def import_keras(floatx: str) -> Any:
     import keras
 
     keras.config.set_floatx(floatx)
-    if keras.backend.backend() != "jax":
-        raise ImportError(f"Keras runs on {keras.backend.backend()}, not on JAX")
     _keep_float64_rounding()
     return keras
 

@@ -3,31 +3,23 @@
 # PELICAN is a symmetry-embedded class, so it runs the baseline regime only; data.method and
 # data.augmentation_scheme still take CLI overrides, but anything else is outside the study design.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: pelican
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "pelican", "nconst-150"]
 
 experiment_name: hls4ml_pelican_nconst150
 
 # A sixteenth of the usual batch: the pair tensor costs B * N^2 per channel and every slot is
 # built whether or not it holds a constituent, so memory follows the squared slot count (152 with
-# the beams) rather than the multiplicity. 15.2 GB peak at the largest search point (5 blocks,
-# 35/35), 0.42 s per step, 27 min per epoch on a V100 (measured 2026-09-13): a full card or a
-# third of an H100, never an 11 GB slice, and the study is the costly one of the three.
+# the beams) rather than the multiplicity.
 data:
   nconstituents: 150
   batch_size: 128
-  n_folds: 5
 
 # fp32, not the trainer's 16-mixed: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6
 # GeV^2, above the fp16 maximum of 65 504, before the input embedding compresses them.
 trainer:
-  max_epochs: 200
   precision: 32
 
 # TF32 matmuls on Ampere and later. The fp32 range that made these experiments force precision 32
@@ -42,14 +34,7 @@ algorithm:
   # 2026-09-13 on the record cache) plus the two beams.
   nbar: 51.4
   # A speed knob (configs/algorithm/pelican.yaml): the pair tensor is dense over the 152 slots
-  # while the mean real multiplicity is 49.4, so 89 % of it is padding. Measured on one V100,
-  # batch 128, ms per step at the default 5 x 25/15 point | the largest 5 x 35/35 search point
-  # (2026-09-15): unchunked 192 | 346; one chunk, trimmed to the batch's widest jet, 123 | 223;
-  # two 83 | 142; four 127 | 155; eight 235 | 238. Past two chunks the kernel launches of the
-  # small chunks dominate a dedicated card, but three drivers time-sharing one card hide them
-  # (3 x four chunks aggregate 13.9 steps/s against 11.8 for 3 x two), so four is worth trying
-  # on a shared card, algorithm.n_chunks=4 on the command line. Peak memory 8.4 GB dense, 4.6 at
-  # two chunks, 2.8 at four (15.2 / 8.3 / 5.1 at the largest point), so a trial fits a 1g slice.
+  # while the mean real multiplicity is 49.4, so 89 % of it is padding.
   n_chunks: 2
 
 # Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.

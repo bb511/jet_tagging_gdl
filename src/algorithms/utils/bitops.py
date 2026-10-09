@@ -23,10 +23,10 @@ import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_leaves
 
-from src.algorithms.utils.flops import restore_state, snapshot_buffers
+from src.algorithms.utils.flops import counted_pass
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 BITS = 8
 
@@ -256,16 +256,12 @@ def count_ebops(model: torch.nn.Module, example: torch.Tensor) -> BitOps:
     The train/eval mode and the buffers are restored afterwards; a failed pass gives NaN
     and a warning.
     """
-    was_training = model.training
-    buffers = snapshot_buffers(model)
-    model.eval()
-    try:
-        return _counted_forward(model, example)
-    except Exception as exc:  # pragma: no cover - diagnostic path
-        log.warning(f"eBOP counting failed for {type(model).__name__}: {exc}")
-        return BitOps(math.nan, math.nan, frozenset())
-    finally:
-        restore_state(model, was_training, buffers)
+    with counted_pass(model, training=False):
+        try:
+            return _counted_forward(model, example)
+        except Exception as exc:  # pragma: no cover - diagnostic path
+            log.warning(f"eBOP counting failed for {type(model).__name__}: {exc}")
+            return BitOps(math.nan, math.nan, frozenset())
 
 
 def _counted_forward(model: torch.nn.Module, example: torch.Tensor) -> BitOps:
@@ -281,15 +277,15 @@ def _counted_forward(model: torch.nn.Module, example: torch.Tensor) -> BitOps:
     return BitOps(mode.ebops, mode.unpriced, frozenset(mode.unclassified))
 
 
-def record_ebops(model: torch.nn.Module, nconstituents: int, nbr_feats: int) -> None:
-    """Store the eBOPs of one fully occupied jet as ``model.ebops_total``.
+def count_ebops_per_jet(
+    model: torch.nn.Module, nconstituents: int, nbr_feats: int
+) -> BitOps:
+    """The eBOPs and the unpriced elements of one fully occupied jet.
 
-    Its unpriced elements go to ``model.ebops_unpriced``. The example comes from a
-    private generator, so the global RNG stream of the run that constructs the model is
-    untouched.
+    The example comes from a private generator, so the global RNG stream of the run that
+    constructs the model is untouched.
     """
     generator = torch.Generator().manual_seed(0)
     example = torch.randn(2, nconstituents, nbr_feats, generator=generator)
     counts = count_ebops(model, example)
-    model.ebops_total = counts.ebops / 2.0
-    model.ebops_unpriced = counts.unpriced / 2.0
+    return counts._replace(ebops=counts.ebops / 2.0, unpriced=counts.unpriced / 2.0)

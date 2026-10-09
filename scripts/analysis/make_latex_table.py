@@ -16,8 +16,6 @@ Usage, one ``.tex`` written beside each input::
         --deltas results/px_py_pz_e/deltas_*_vs_baseline.csv
 """
 
-from __future__ import annotations
-
 import argparse
 import math
 from itertools import groupby
@@ -32,15 +30,14 @@ from common import (
     index_deltas,
     metric_display,
     model_display,
+    opt_float,
     read_csv,
-    read_deltas,
+    read_tables,
     safe_fmt,
+    scheme_of,
 )
 
-
-def _group_of(row: dict) -> str:
-    """The row's augmentation scheme, lowercased."""
-    return str(row.get("augmentation_scheme", "")).lower()
+from src.symmetry import FLIP, FLIP_RECOVER, FLIP_STABLE
 
 
 def _sort_key(row: dict) -> tuple[str, int, int]:
@@ -49,43 +46,29 @@ def _sort_key(row: dict) -> tuple[str, int, int]:
         nconst = int(row.get("nconstituents", 0) or 0)
     except (ValueError, TypeError):
         nconst = 0
-    return (row.get("model", ""), nconst, AUG_ORDER.get(_group_of(row), 99))
+    return (row.get("model", ""), nconst, AUG_ORDER.get(scheme_of(row), 99))
 
 
-def _percent_pair(
-    row: dict, first_key: str, second_key: str
-) -> tuple[float, float] | None:
-    """Two accuracy columns as percentages, None when they do not read as numbers.
-
-    An accuracy is written as a proportion by the callback and as a percentage by the
-    MLflow export, so a first value below 2 is taken to be the former and both are
-    scaled.
-    """
-    try:
-        first, second = float(row.get(first_key, "nan")), float(
-            row.get(second_key, "nan")
-        )
-    except (TypeError, ValueError):
-        return None
-    scale = 100.0 if not math.isnan(first) and first < 2.0 else 1.0
-    return first * scale, second * scale
+def _percent(row: dict, key: str) -> float | None:
+    """An accuracy column in percent, None when it is absent, blank or NaN; the tables
+    write proportions."""
+    value = opt_float(row, key)
+    return None if value is None else 100 * value
 
 
 def _acc_cell(row: dict) -> str:
-    """The test accuracy as ``mean \\pm std`` in percent, whatever units the row
-    used."""
-    pair = _percent_pair(row, "test_acc_mean", "test_acc_std")
-    return (
-        "N/A" if pair is None else f"{safe_fmt(pair[0], 2)} \\pm {safe_fmt(pair[1], 2)}"
-    )
+    """The test accuracy as ``mean \\pm std`` in percent."""
+    mean, std = _percent(row, "test_acc_mean"), _percent(row, "test_acc_std")
+    return f"{safe_fmt(mean, 2)} \\pm {safe_fmt(std, 2)}"
 
 
 def _ci_cell(row: dict) -> str:
     """The bootstrap confidence interval of the accuracy as ``[lo, hi]`` in percent."""
-    pair = _percent_pair(row, "test_acc_ci_lower", "test_acc_ci_upper")
-    if pair is None or any(math.isnan(bound) for bound in pair):
+    lower = _percent(row, "test_acc_ci_lower")
+    upper = _percent(row, "test_acc_ci_upper")
+    if lower is None or upper is None:
         return "N/A"
-    return f"[{pair[0]:.1f}, {pair[1]:.1f}]"
+    return f"[{lower:.1f}, {upper:.1f}]"
 
 
 def _pm_cell(row: dict, prefix: str, digits: int = 3) -> str:
@@ -125,11 +108,8 @@ def _delta_cell(delta: dict | None, digits: int = 3) -> str:
 
 def _flops_cell(row: dict) -> str:
     """FLOPs in thousands, the unit the published tables quote."""
-    try:
-        flops = float(row.get("flops_mean", "nan"))
-    except (TypeError, ValueError):
-        return "N/A"
-    return "N/A" if math.isnan(flops) else f"{int(flops / 1000)}K"
+    flops = opt_float(row, "flops_mean")
+    return "N/A" if flops is None else f"{int(flops / 1000)}K"
 
 
 def _multirow(span: int, body: str) -> str:
@@ -152,13 +132,13 @@ def _table_row(
     """One tabular line: the spanning cells, this row's own numbers, then its two
     deltas."""
     model_cell, nconst_cell, flops_cell = cells
-    inv_delta = deltas.get(delta_key(row, _group_of(row), metric))
+    inv_delta = deltas.get(delta_key(row, scheme_of(row), metric))
     acc_delta = deltas.get(delta_key(row, "", "test_acc"))
     return (
         f"    {model_cell} & {nconst_cell} & "
-        f"{AUG_DISPLAY.get(_group_of(row), _group_of(row))} & {flops_cell} & "
+        f"{AUG_DISPLAY.get(scheme_of(row), scheme_of(row))} & {flops_cell} & "
         f"{_acc_cell(row)} & {_ci_cell(row)} & {_delta_cell(inv_delta)} & "
-        f"{_pm_cell(row, 'flip_recover')} & {_pm_cell(row, 'flip_stable')} & "
+        f"{_pm_cell(row, FLIP_RECOVER)} & {_pm_cell(row, FLIP_STABLE)} & "
         f"{_pval_cell(acc_delta.get('bootstrap_pvalue') if acc_delta else None)} \\\\"
     )
 
@@ -240,23 +220,18 @@ EPILOGUE = [
 
 
 def write_latex_table(
-    rows: list[dict],
-    output_path: Path,
-    inv_metric: str | None = None,
-    deltas: dict | None = None,
+    rows: list[dict], output_path: Path, inv_metric: str | None, deltas: dict
 ) -> None:
     """Write ``rows`` as a standalone LaTeX table.
 
     :param inv_metric: the metric whose delta becomes the delta column, ``flip`` when
-        nothing is given.
+        None.
     :param deltas: the index of :func:`common.index_deltas`; the delta and p-value
-        columns are dashes without it.
+        columns are dashes where it holds no row.
     """
-    if not rows:
-        return
     sorted_rows = sorted(rows, key=_sort_key)
     lines = _preamble(metric_display(inv_metric))
-    lines += _body_lines(sorted_rows, inv_metric or "flip", deltas or {})
+    lines += _body_lines(sorted_rows, inv_metric or FLIP, deltas)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines + EPILOGUE), encoding="utf-8")
     print(f"[write_latex] {len(sorted_rows)}-row table -> {output_path}")
@@ -290,7 +265,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     """Render each table named on the command line as a ``.tex`` beside it."""
     args = _parse_args()
-    deltas = index_deltas(read_deltas(args.deltas))
+    deltas = index_deltas(read_tables(args.deltas, "deltas"))
     if not deltas:
         print(
             "[note] no deltas table given: the delta and p-value columns will print as dashes"

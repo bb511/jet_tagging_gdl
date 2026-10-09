@@ -28,16 +28,14 @@ nconstituents: 16
 # Any subset of the 16 record columns; LorentzNet needs exactly these four.
 features: [px, py, pz, e]
 
-batch_size: 256
+batch_size: 2048
 # Loader processes, where the online transform runs; they persist across epochs so their copy of
 # the shuffler advances (fresh forks would replay the first permutation every epoch). 0 iterates
 # in the driver instead, 1.8x slower per epoch for DeepSets at N=16 under augmentation.
 num_workers: 4
 pin_memory: true
 
-# 1: the record's split; k >= 2: pool train+val and re-split (experiments set 5).
-n_folds: 1
+# k >= 2: pool train+val and re-split into k folds; 1: the record's split, which the searches and
+# the debug configs pass.
+n_folds: 5
 kfold_seed: 42
-
-# Test batches keep all 16 columns so the invariance probes find px, py and pz.
-keep_full_features_at_test: true

@@ -1,15 +1,15 @@
 """L-GATr-slim (arXiv:2512.17011), the scalars-and-vectors variant of L-GATr.
 
-L-GATr is arXiv:2405.14806. The network is supplied by the ``lgatr`` package, and
-this module adds only the tagger wrapper around it.
+L-GATr is arXiv:2405.14806. The network is supplied by the ``lgatr`` package, and this
+module adds only the tagger wrapper around it.
 
-The metric is (+, -, -, -) and the momenta are in GeV.
-Batches must be de-normalised before they reach this module.
+The metric is (+, -, -, -) and the momenta are in GeV. Batches must be de-normalised
+before they reach this module.
 
-Symmetry. With no spurions the logits are invariant under the full Lorentz group.
-The time vector (1, 0, 0, 0) make the architecture SO(3) invariant.
-The two lightlike beams (1, 0, 0, +-1), with or without the time vector, make it SO(2)
-invariant about the beam axis.
+Symmetry. With no spurions the logits are invariant under the full Lorentz group. The
+time vector (1, 0, 0, 0) make the architecture SO(3) invariant. The two lightlike beams
+(1, 0, 0, +-1), with or without the time vector, make it SO(2) invariant about the beam
+axis.
 """
 
 import lgatr

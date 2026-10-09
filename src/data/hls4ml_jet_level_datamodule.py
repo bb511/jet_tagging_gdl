@@ -14,16 +14,15 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
-from huggingface_hub import snapshot_download
 from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from src.data.components.dataset import HLS4MLDataset
-from src.data.hls4ml_datamodule import REPO_ID, fold_indices
+from src.data.hls4ml_datamodule import fold_indices, record_snapshot
 from src.symmetry import CLASS_NAMES
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 # The record's jet-level columns carry this prefix, its constituent columns j1_.
 PREFIX = "j_"
@@ -88,12 +87,20 @@ def _validate_regime(method: str, augmentation_scheme: str) -> None:
         )
 
 
-def _loader(dataset: HLS4MLDataset) -> DataLoader:
+def _loader(dataset: HLS4MLDataset, num_workers: int, pin_memory: bool) -> DataLoader:
     """One element per batch, from the dataset's own batching.
 
-    No worker process: the split sits in memory and nothing transforms it.
+    Workers persist across epochs, so that their copy of the shuffler advances; fresh
+    forks would replay the first permutation every epoch.
     """
-    return DataLoader(dataset, batch_size=1, collate_fn=lambda batch: batch[0])
+    return DataLoader(
+        dataset,
+        batch_size=1,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
+        pin_memory=pin_memory,
+        collate_fn=lambda batch: batch[0],
+    )
 
 
 class JetLevelDataModule(LightningDataModule):
@@ -129,6 +136,8 @@ class JetLevelDataModule(LightningDataModule):
         transform_kwargs: dict[str, float | bool] | None = None,
         nconstituents: int = 150,
         batch_size: int = 2048,
+        num_workers: int = 0,
+        pin_memory: bool = False,
         n_folds: int = 1,
         kfold_seed: int = 42,
         fold_idx: int = 0,
@@ -138,14 +147,13 @@ class JetLevelDataModule(LightningDataModule):
         self.revision = revision
         self.shards_dir = shards_dir
         self.exclude = list(exclude)
-        self.method = method
-        self.augmentation_scheme = augmentation_scheme
-        self.transform_kwargs = dict(transform_kwargs or {})
         self.nconstituents = nconstituents
         self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
         self.n_folds = n_folds
         self.kfold_seed = kfold_seed
-        self.fold_idx = fold_idx if n_folds >= 2 else 0
+        self.fold_idx = fold_idx
 
         # Filled on first use.
         self._directory: Path | None = None
@@ -159,14 +167,10 @@ class JetLevelDataModule(LightningDataModule):
     def shards_directory(self) -> Path:
         """The directory of the shards, got from the hub."""
         if self._directory is None:
-            self._directory = Path(self.shards_dir or self._snapshot() / "data")
+            self._directory = Path(
+                self.shards_dir or Path(record_snapshot(self.revision)) / "data"
+            )
         return self._directory
-
-    def _snapshot(self) -> Path:
-        """The root of the record's hub snapshot at ``revision``."""
-        return Path(
-            snapshot_download(REPO_ID, repo_type="dataset", revision=self.revision)
-        )
 
     @property
     def feature_names(self) -> list[str]:
@@ -190,11 +194,6 @@ class JetLevelDataModule(LightningDataModule):
             )
         return [name for name in self.feature_names if name not in self.exclude]
 
-    def feature_indices(self) -> list[int] | None:
-        """The columns of ``features`` in ``feature_names``, None when in order."""
-        indices = [self.feature_names.index(name) for name in self.features]
-        return None if indices == list(range(len(self.feature_names))) else indices
-
     @property
     def scale(self) -> Scale:
         """The standardisation, fixed on the record's own training split."""
@@ -203,34 +202,22 @@ class JetLevelDataModule(LightningDataModule):
         return self._scale
 
     def setup(self, stage: str | None = None) -> None:
-        """Build *stage* (``fit``, ``validate`` or ``test``, None for all)."""
+        """Build *stage* (``fit`` or ``test``, None for both)."""
         if stage in (None, "fit") and self.data_train is None:
             self._setup_fit()
-        if stage in (None, "validate") and self.data_val is None:
-            self.data_val = self._dataset(self._read("validation"))
-        if stage in (None, "test", "predict") and self.data_test is None:
+        if stage in (None, "test") and self.data_test is None:
             # Every test jet is scored, as for the networks.
             self.data_test = self._dataset(self._read("test"), drop_last=False)
             log.info(f"Test: x_test {tuple(self.data_test.X.shape)}")
 
-    def set_fold(self, fold_idx: int) -> None:
-        """Set which fold will be served next."""
-        if self.n_folds >= 2 and not 0 <= fold_idx < self.n_folds:
-            raise ValueError(
-                f"fold_idx {fold_idx} is out of range for n_folds={self.n_folds}."
-            )
-        self.fold_idx = fold_idx if self.n_folds >= 2 else 0
-        self.data_train = None
-        self.data_val = None
-
     def train_dataloader(self) -> DataLoader:
-        return _loader(self.data_train)
+        return _loader(self.data_train, self.num_workers, self.pin_memory)
 
     def val_dataloader(self) -> DataLoader:
-        return _loader(self.data_val)
+        return _loader(self.data_val, self.num_workers, self.pin_memory)
 
     def test_dataloader(self) -> DataLoader:
-        return _loader(self.data_test)
+        return _loader(self.data_test, self.num_workers, self.pin_memory)
 
     def _read(self, split: str) -> Split:
         return _read_split(self.shards_directory, split, self.features)

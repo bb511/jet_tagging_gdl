@@ -1,5 +1,3 @@
-ignore_warnings: False
-
 # Prompts when the config carries no tag, and a multirun raises instead of prompting, so every
 # experiment config sets its own.
 enforce_tags: True

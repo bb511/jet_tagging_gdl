@@ -1,7 +1,7 @@
 """Copy a trained float vector-neuron network into its HGQ2 port.
 
-The port (vector_neurons_hgq.py) differs from ``VectorNeuronsClassifier`` in four places,
-which the copy absorbs so that in eval mode both give the same logits:
+The port (components/vector_neurons_hgq.py) differs from ``VectorNeuronsClassifier`` in
+four places, which the copy absorbs so that in eval mode both give the same logits:
 
 - p_T is counted in 16 GeV rather than in the float network's units, so every
   batch-normalised input of degree d in p is scaled by lambda^d, lambda the ratio of
@@ -22,9 +22,12 @@ Vectors are stored components first in the port, so every channel mixing becomes
 transposed weight.
 """
 
-from pathlib import Path
+from __future__ import annotations
 
-import keras
+from collections.abc import Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import torch
 from torch import nn
@@ -36,6 +39,11 @@ from src.algorithms.components.vector_neurons import (
     VectorNeuronsClassifier,
 )
 from src.utils.checkpoints import MANIFEST_FILENAME, read_manifest
+
+# For annotations alone, so that importing this module never selects Keras's backend:
+# the component does, before its own first import of Keras.
+if TYPE_CHECKING:
+    import keras
 
 # The constructor arguments of VectorNeuronsClassifier that a checkpoint's
 # hyperparameters carry beside nconstituents and output_dim.
@@ -61,6 +69,15 @@ COUNT = None
 Segment = tuple[int, int | None]
 
 
+def architecture(hparams: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the arguments of ``VectorNeuronsClassifier`` that *hparams* hold, by
+    keyword, with ``LEGACY_DEFAULTS`` for those it lacks."""
+    kwargs = {key: hparams[key] for key in ARCHITECTURE_KEYS if key in hparams}
+    if "head_layers" in kwargs:
+        kwargs["head_layers"] = list(kwargs["head_layers"])
+    return {**LEGACY_DEFAULTS, **kwargs}
+
+
 def _checkpoint_path(init_from: Path) -> Path:
     """The main run's checkpoint of a run directory or a manifest, or *init_from*."""
     if init_from.suffix == ".ckpt":
@@ -72,6 +89,25 @@ def _checkpoint_path(init_from: Path) -> Path:
     return Path(runs[0].checkpoint_path)
 
 
+def _check_architecture(
+    path: Path, theirs: dict[str, Any], ours: dict[str, Any]
+) -> None:
+    """Refuse the checkpoint *path* unless its architecture *theirs* is *ours*.
+
+    The units may differ: the copy folds them into the batch normalisations.
+
+    :raises ValueError: naming every argument that differs.
+    """
+    differ = [
+        key
+        for key in ARCHITECTURE_KEYS
+        if key != "units" and theirs.get(key) != ours.get(key)
+    ]
+    if differ:
+        pairs = ", ".join(f"{k} {theirs.get(k)} vs {ours.get(k)}" for k in differ)
+        raise ValueError(f"{path} holds another architecture: {pairs}.")
+
+
 def _net_state(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     """The network's entries of a Lightning state dict, without the ``net.`` prefix."""
     return {
@@ -81,18 +117,22 @@ def _net_state(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     }
 
 
-def load_float_network(init_from: str | Path) -> VectorNeuronsClassifier:
-    """Rebuild a trained float network in eval mode.
+def load_float_network(
+    init_from: str | Path, like: Mapping[str, Any]
+) -> VectorNeuronsClassifier:
+    """Rebuild in eval mode the trained float network that *init_from* names.
 
     :param init_from: a run directory (its main run), a manifest or a ``.ckpt``.
+    :param like: the hyperparameters of the port it is copied into.
+    :raises ValueError: when its architecture is not that of *like*, units aside.
     """
     path = _checkpoint_path(Path(init_from))
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     hparams = checkpoint["hyper_parameters"]
-    kwargs = {key: hparams[key] for key in ARCHITECTURE_KEYS if key in hparams}
-    kwargs["head_layers"] = list(kwargs["head_layers"])
+    theirs = architecture(hparams)
+    _check_architecture(path, theirs, architecture(like))
     net = VectorNeuronsClassifier(
-        hparams["nconstituents"], n_class=hparams["output_dim"], **kwargs
+        hparams["nconstituents"], n_class=hparams["output_dim"], **theirs
     )
     net.load_state_dict(_net_state(checkpoint["state_dict"]))
     return net.eval()
@@ -145,13 +185,14 @@ def _port_statistics(
     return gamma, beta, scales * mean, scales**2 * (var + norm.eps)
 
 
-def _copy_norm(
+def copy_batch_norm(
     layer: keras.Layer,
     norm: nn.BatchNorm1d,
     scales: np.ndarray,
     rows: np.ndarray | None = None,
 ) -> None:
-    """Fold *scales* into the running statistics of *norm*, permuted by *rows*."""
+    """Copy *norm* into the port's batch normalisation *layer*, *scales* folded into its
+    running statistics and its channels permuted by *rows*."""
     gamma, beta, mean, var_eps = _port_statistics(norm, scales, rows)
     layer.bn_gamma.assign(gamma)
     layer.bn_beta.assign(beta)
@@ -165,13 +206,13 @@ def _fold_norm(
     scales: np.ndarray,
     rows: np.ndarray | None = None,
 ) -> None:
-    """Fold *norm*, on the statistics ``_copy_norm`` would give the port, into the
+    """Fold *norm*, on the statistics ``copy_batch_norm`` would give the port, into the
     copied *dense* that reads its output."""
     gamma, beta, mean, var_eps = _port_statistics(norm, scales, rows)
     a = gamma / np.sqrt(var_eps)
     # (in, out), the input channels in the port's order.
-    kernel = keras.ops.convert_to_numpy(dense.kernel)
-    bias = keras.ops.convert_to_numpy(dense.bias)
+    kernel = np.asarray(dense.kernel)
+    bias = np.asarray(dense.bias)
     dense.bias.assign(bias + (beta - a * mean) @ kernel)
     dense.kernel.assign(a[:, None] * kernel)
 
@@ -190,7 +231,7 @@ def _place_norm(
     if fold:
         _fold_norm(model.get_layer(dense_name), norm, scales, rows)
     else:
-        _copy_norm(model.get_layer(norm_name), norm, scales, rows)
+        copy_batch_norm(model.get_layer(norm_name), norm, scales, rows)
 
 
 def _copy_linear(
@@ -205,12 +246,31 @@ def _copy_linear(
     layer.bias.assign(factor * _numpy(linear.bias))
 
 
+def _linears(stack: nn.Sequential) -> list[nn.Linear]:
+    return [module for module in stack if isinstance(module, nn.Linear)]
+
+
+def _copy_linears(
+    model: keras.Model,
+    linears: list[nn.Linear],
+    names: list[str],
+    rows: np.ndarray | None = None,
+) -> None:
+    """Copy *linears* in order into the dense layers *names*, the first kernel's rows in
+    the order *rows*."""
+    for j, (name, linear) in enumerate(zip(names, linears, strict=True)):
+        _copy_linear(model.get_layer(name), linear, rows=rows if j == 0 else None)
+
+
 def _copy_channels(layer: keras.Layer, weight: torch.Tensor) -> None:
     """A ``ChannelLinear`` (out, in) becomes the (in, out) kernel of the last axis."""
     layer.kernel.assign(_numpy(weight).T)
 
 
-def _copy_forms(model: keras.Model, forms: FormInvariants, prefix: str) -> None:
+def _copy_forms(
+    model: keras.Model, forms: FormInvariants | TensorInvariants, prefix: str
+) -> None:
+    """Copy the left and right channel mixings of forms or of tensor invariants."""
     _copy_channels(model.get_layer(f"{prefix}_left"), forms.left.weight)
     _copy_channels(model.get_layer(f"{prefix}_right"), forms.right.weight)
 
@@ -228,8 +288,7 @@ def _copy_stream(
 
 def _copy_tensors(model: keras.Model, tensors: TensorInvariants) -> None:
     """Copy the left, right and stacked rank weights of the tensor invariants."""
-    _copy_channels(model.get_layer("tensors_left"), tensors.left.weight)
-    _copy_channels(model.get_layer("tensors_right"), tensors.right.weight)
+    _copy_forms(model, tensors, "tensors")
     # (3, K, N) to (N, 3K): the port's channel w K + k holds C, D or E for w = 0, 1, 2.
     weight = _numpy(tensors.weight)
     kernel = weight.reshape(-1, weight.shape[-1]).T
@@ -254,22 +313,13 @@ def _block_layout(
     return segments, _deinterleave(net.nconstituents, block.norm.num_features)
 
 
-def _copy_mlp(
-    model: keras.Model, mlp: nn.Sequential, b: int, rows: np.ndarray | None
-) -> None:
-    """Copy the scalar MLP of block *b*, the first kernel's rows in the order *rows*."""
-    linears = [m for m in mlp if isinstance(m, nn.Linear)]
-    for j, linear in enumerate(linears):
-        first_rows = rows if j == 0 else None
-        _copy_linear(model.get_layer(f"block{b}_mlp{j}"), linear, rows=first_rows)
-
-
 def _copy_block(
     model: keras.Model, net: VectorNeuronsClassifier, b: int, scale: float, fold: bool
 ) -> None:
     """Copy block *b*: its scalar MLP, normalisation, gate if any, mixing and forms."""
     block, (segments, rows) = net.blocks[b], _block_layout(net, b)
-    _copy_mlp(model, block.mlp, b, rows)
+    mlp = _linears(block.mlp)
+    _copy_linears(model, mlp, [f"block{b}_mlp{j}" for j in range(len(mlp))], rows)
     scales = _scales(segments, scale, net.nconstituents)
     names = (f"block{b}_norm", f"block{b}_mlp0")
     _place_norm(model, names, block.norm, scales, rows, fold)
@@ -284,10 +334,9 @@ def _copy_head(
 ) -> None:
     """Copy the readout forms, the head's MLP and its normalisation."""
     _copy_forms(model, net.readout, "readout")
-    linears = [m for m in net.head if isinstance(m, nn.Linear)]
-    names = [f"head{j}" for j in range(len(linears) - 1)] + ["head_last"]
-    for name, linear in zip(names, linears):
-        _copy_linear(model.get_layer(name), linear)
+    head = _linears(net.head)
+    names = [f"head{j}" for j in range(len(head) - 1)] + ["head_last"]
+    _copy_linears(model, head, names)
     segments = _state_segments(net.head_norm, net.readout)
     scales = _scales(segments, scale, net.nconstituents)
     _place_norm(model, ("head_norm", names[0]), net.head_norm, scales, fold=fold)

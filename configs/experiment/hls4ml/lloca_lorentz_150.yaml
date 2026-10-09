@@ -3,41 +3,26 @@
 # a starting point, not tuned values. Symmetry-embedded, so it runs the baseline regime only; the
 # other three rows are lloca_{z,so2,so3}_150.yaml.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: lloca_lorentz
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "lloca_lorentz", "nconst-150"]
 
 experiment_name: hls4ml_lloca_lorentz_nconst150
 
-# Set by a V100 pre-flight at the largest search point (12 blocks, 8 heads, 8x0n+2x1n per head,
-# mlp_factor 4, frames-net hidden 64, 2.4M parameters; 2026-09-28, reserved memory): 12.3 GiB and
-# 0.39 s/step at 512 jets, which fits a full card but not a 1g MIG slice.
 data:
   nconstituents: 150
   batch_size: 512
-  n_folds: 5
 
 # fp32, not the trainer's 16-mixed: the wrapper hands the frames-net float64 momenta (in float32 the
 # massless constituents' pair masses fall to zero and the frames-net's sqrt has no finite gradient),
 # the package keeps the orthonormalisation in float64, and the references train LLoCa without amp.
 trainer:
-  max_epochs: 200
   precision: 32
 
 # TF32 matmuls on Ampere and later, as in the other embedded experiments; a no-op on a V100.
 extras:
   matmul_precision: high
-
-# Compiled, as in the searches at 50 and 150 constituents (those at 16 ran eager): 25 to 35 % less
-# time per step and about 10 % less peak memory than eager (olgpu V100, 2026-09-30), with logits
-# within about 1e-6 of the eager network's, at a one-off compile of 1 to 1.5 min per fit.
-algorithm:
-  compile: true
 
 # Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:

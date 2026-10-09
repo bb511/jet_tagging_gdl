@@ -31,7 +31,7 @@ from src.utils import (
 from src.utils.checkpoints import ManifestRun, merge_manifests, read_manifest
 from src.utils.results_table import write_results_row
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 # The callbacks that write per checkpoint, each under a subdirectory of its label.
 _LABELLED = (PlottingCallback, InvarianceMetricCallback)
@@ -78,15 +78,48 @@ def _callbacks(cfg: DictConfig, label: str) -> list[Callback]:
     return callbacks
 
 
+def _test_checkpoint(
+    cfg: DictConfig, run: ManifestRun, datamodule: LightningDataModule
+) -> tuple[dict[str, Any], LightningModule]:
+    """Test one checkpoint with a module, callbacks, loggers and a trainer of its own,
+    its MLflow run nested under the training run that wrote the checkpoint.
+
+    :return: the test metrics, and the tested module, which carries the costs.
+    """
+    # Re-seeded per checkpoint, so that every fold sees the same transform draws.
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed, workers=True)
+    algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)
+    callbacks = _callbacks(cfg, run.fold_label)
+    logger = instantiate_loggers(cfg.get("logger"))
+    nest_under(logger, run.mlflow_run_id)
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=logger
+    )
+    if logger:
+        objects = {"cfg": cfg, "algorithm": algorithm, "trainer": trainer}
+        log_hyperparameters({**objects, "fold_idx": run.fold_label})
+
+    log.info(f"[{run.fold_label}] Testing {run.checkpoint_path}")
+    # weights_only=False: the hyperparameters are plain containers, torch.load 2.6 rejects.
+    trainer.test(
+        model=algorithm,
+        datamodule=datamodule,
+        ckpt_path=run.checkpoint_path,
+        weights_only=False,
+    )
+    return dict(trainer.callback_metrics), algorithm
+
+
 @task_wrapper
 def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Test every checkpoint of one training on the held-out test split.
 
     The folds are summarised into one results row once the last of them has been tested;
-    the main run is left out of it whenever folds exist.
-    The k-fold runs are nested underneath the main run in MLFlow.
-    Every checkpoint, the main run's included, leaves its per-jet logits, labels and
-    transform draws in ``<output_dir>/outputs/<fold_label>.npz``.
+    the main run is left out of it whenever folds exist. Each MLflow run nests under the
+    training run that wrote its checkpoint. Every checkpoint, the main run's included,
+    leaves its per-jet logits, labels and transform draws in
+    ``<output_dir>/outputs/<fold_label>.npz``.
 
     :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``.
     """
@@ -99,29 +132,7 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     metric_dict: dict[str, Any] = {}
     folds: list[dict[str, Any]] = []
     for run in runs:
-        # Re-seeded per checkpoint.
-        if cfg.get("seed") is not None:
-            L.seed_everything(cfg.seed, workers=True)
-        algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)
-        callbacks = _callbacks(cfg, run.fold_label)
-        logger = instantiate_loggers(cfg.get("logger"))
-        nest_under(logger, run.mlflow_run_id)
-        trainer: Trainer = hydra.utils.instantiate(
-            cfg.trainer, callbacks=callbacks, logger=logger
-        )
-        if logger:
-            objects = {"cfg": cfg, "algorithm": algorithm, "trainer": trainer}
-            log_hyperparameters({**objects, "fold_idx": run.fold_label})
-
-        log.info(f"[{run.fold_label}] Testing {run.checkpoint_path}")
-        # weights_only=False: the hyperparameters are plain containers, torch.load 2.6 rejects.
-        trainer.test(
-            model=algorithm,
-            datamodule=datamodule,
-            ckpt_path=run.checkpoint_path,
-            weights_only=False,
-        )
-        metrics = trainer.callback_metrics
+        metrics, algorithm = _test_checkpoint(cfg, run, datamodule)
         metric_dict.update(
             {f"{run.fold_label}/{key}": value for key, value in metrics.items()}
         )

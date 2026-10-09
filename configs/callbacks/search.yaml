@@ -10,19 +10,4 @@ defaults:
   - _self_
 
 model_checkpoint:
-  dirpath: ${paths.output_dir}/checkpoints
-  filename: "epoch_{epoch:03d}"
-  monitor: val/acc
-  mode: max
-  save_top_k: 1
   save_last: false # the best epoch is all a trial keeps: the tuned model is refit from the catalogue
-  auto_insert_metric_name: false
-
-early_stopping:
-  monitor: val/acc
-  mode: max
-  min_delta: 1.0e-4
-  # Above the 50-epoch trial length, so no trial stops early: a trial is judged on its best epoch,
-  # and a one-cycle schedule (JetFormer) earns its accuracy in the anneal. check_finite still ends a
-  # trial whose val/acc turns NaN.
-  patience: 100

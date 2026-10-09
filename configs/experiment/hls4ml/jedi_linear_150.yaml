@@ -2,27 +2,15 @@
 # JEDI-linear at 150 constituents at the algorithm defaults, which are the published point: a
 # starting point, not tuned values. data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: jedi_linear
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "jedi_linear", "nconst-150"]
 
 experiment_name: hls4ml_jedi_linear_nconst150
 
-# Set by a V100 pre-flight at the largest search point (hidden 128, head [64, 32, 16],
-# 61 125 parameters on four features; 2026-09-30, reserved memory): 0.77 GiB and 6.3 ms/step at 2048
-# jets, which fits a 1g MIG slice.
 data:
   nconstituents: 150
-  batch_size: 2048
-  n_folds: 5
   # The online transform of a 2048 x 150 batch takes 16 single-threaded workers to keep up with
   # the step (4 leave the GPU waiting 20 ms a batch); a job pinned with taskset needs as many CPUs.
   num_workers: 16
-
-trainer:
-  max_epochs: 200

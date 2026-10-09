@@ -1,18 +1,18 @@
 """LLoCa (arXiv:2505.20280), Lorentz local canonicalisation.
 
 The frames-net, the local frames and the tensorial attention of the LLoCa-Transformer
-are imported through the ``lloca`` package. This module only wraps that package into
-a jet tagger.
+are imported through the ``lloca`` package. This module only wraps that package into a
+jet tagger.
 
-The metric is (+, -, -, -), the energy first, and the momenta are in GeV.
-Batches must be de-normalised before they reach this module.
+The metric is (+, -, -, -), the energy first, and the momenta are in GeV. Batches must
+be de-normalised before they reach this module.
 
 Symmetry. Each constituent is read in a frame of its own. The frame is  predicted
 equivariantly from the whole jet. The logits are invariant under whichever group the
 frames co-transform with. That group is set by the ``frames`` attribute: the full
 Lorentz group for ``lorentz`` (a learned boost and rotation), SO(2) about the beam times
-boosts along it for ``z``, SO(2) about the beam for ``so2`` and SO(3) for ``so3``.
-The readout is the mean over the real constituents.
+boosts along it for ``z``, SO(2) about the beam for ``so2`` and SO(3) for ``so3``. The
+readout is the mean over the real constituents.
 """
 
 from functools import partial
@@ -67,9 +67,9 @@ class LLoCaClassifier(nn.Module):
     :param attn_scalars: scalar channels of each attention head.
     :param attn_vectors: four-vector channels of each attention head.
     :param framesnet_hidden: width of the two hidden layers of the frames-net MLP.
-    :param mass_reg: mass floor in ``units``, applied inside the frames-net: a
-        lighter constituent is given this mass there, which keeps the pair sums the
-        frames-net normalises off the light cone.
+    :param mass_reg: mass floor in ``units``, applied inside the frames-net: a lighter
+        constituent is given this mass there, which keeps the pair sums the frames-net
+        normalises off the light cone.
     :param units: GeV per unit of everything the package sees, 20 as in the L-GATr-slim
         row; the LLoCa references feed GeV.
     :param n_class: classes, read off the mean of the backbone outputs.

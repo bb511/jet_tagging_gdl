@@ -79,7 +79,7 @@ repos:
             "--extend-ignore",
             # RST304: flake8-rst-docstrings knows no Sphinx role, and the docstrings of
             # this repository use :class:, :meth:, :func:, :attr:, :mod: and :data:.
-            "E203,E402,E501,F401,F841,RST2,RST301,RST304",
+            "E203,E402,E501,RST2,RST301,RST304",
             "--exclude",
             "logs/*,data/*",
           ]
@@ -102,7 +102,6 @@ repos:
     hooks:
       - id: prettier
         types: [yaml]
-        exclude: "environment.yaml"
 
   # shell scripts linter
   - repo: https://github.com/shellcheck-py/shellcheck-py
@@ -123,8 +122,6 @@ repos:
           # mdformat-gfm's autolink plugin needs the linkify rule, which markdown-it-py
           # only registers when linkify-it-py is installed.
           - linkify-it-py
-          # - mdformat-toc
-          # - mdformat-black
 
   # word spelling linter
   - repo: https://github.com/codespell-project/codespell
@@ -132,26 +129,6 @@ repos:
     hooks:
       - id: codespell
         args:
-          - --skip=logs/**,data/**,*.ipynb
+          - --skip=logs/**,data/**
           # fpr: the false-positive-rate families of src/symmetry.py.
           - --ignore-words-list=fpr
-
-  # jupyter notebook cell output clearing
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.6.1
-    hooks:
-      - id: nbstripout
-
-  # jupyter notebook linting
-  - repo: https://github.com/nbQA-dev/nbQA
-    rev: 1.9.1
-    hooks:
-      - id: nbqa-black
-      - id: nbqa-isort
-        args: ["--profile=black"]
-      - id: nbqa-flake8
-        args:
-          [
-            "--extend-ignore=E203,E402,E501,F401,F841",
-            "--exclude=logs/*,data/*",
-          ]

@@ -40,7 +40,6 @@ draws the ROC curves of the two evaluations, one panel per class, on a logarithm
 axis.
 """
 
-from __future__ import annotations
 
 import argparse
 import csv

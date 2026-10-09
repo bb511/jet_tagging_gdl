@@ -5,31 +5,21 @@
 defaults:
   - override /data: jet_level
   - override /algorithm: jet_level_noeta52
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "jet_level_noeta52", "nconst-150"]
 
 experiment_name: hls4ml_jet_level_noeta52_nconst150
 
 data:
-  nconstituents: 150
   # A row exact under the beam boost cannot see the jet rapidity, so this row is its ceiling.
   exclude: [j_eta]
-  batch_size: 2048
-  n_folds: 5
 
 # The probe would transform nothing and report a perfect invariance that was never tested. Under
 # callbacks=search this leaves a node without _target_, which instantiate_callbacks skips.
 callbacks:
   invariance_metric:
     probe: false
-
-# The trainer's 16-mixed, as for the constituent MLP.
-trainer:
-  max_epochs: 200
 
 # Judged against the networks rather than beside them, so its rows skip the <features>/ directory.
 results_table:

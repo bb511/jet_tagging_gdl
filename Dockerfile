@@ -29,9 +29,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      git \
       ca-certificates \
-      openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv \
@@ -74,7 +72,6 @@ RUN apt-get update \
       curl \
       wget \
       sqlite3 \
-      tini \
       ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 

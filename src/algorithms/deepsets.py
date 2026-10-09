@@ -5,16 +5,14 @@ Their moment rows also read the jet moments of [pt, etarel, phirel], to which th
 pinned.
 """
 
-import torch
 from torch import nn
 
-from src.algorithms import JetTaggingModule
+from src.algorithms import JetTaggingModule, denorm_factors
 from src.algorithms.components.deepsets import (
     MOMENT_FEATURES,
     DeepSetsNet,
     JEDILinearNet,
 )
-from src.data.components.augmentation import get_norm_scale
 
 
 class DeepSets(JetTaggingModule):
@@ -74,12 +72,12 @@ class _MomentsRow(JetTaggingModule):
 
     def _on_features_resolved(self) -> None:
         """Cache the factors returning [pt, etarel, phirel] to GeV and radians."""
-        scales = [get_norm_scale(self.norm_scales, name) for name in MOMENT_FEATURES]
-        self.net.moments.denorm_scales.copy_(torch.tensor(scales))
+        factors = denorm_factors(self.norm_scales, MOMENT_FEATURES)
+        self.net.moments.denorm_scales.copy_(factors)
 
 
 class DeepSetsMoments(_MomentsRow):
-    """DeepSets whose rho also reads the jet moments"""
+    """DeepSets whose rho also reads the jet moments."""
 
     def build_net(
         self,

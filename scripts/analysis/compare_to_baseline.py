@@ -45,10 +45,7 @@ writes ``results/px_py_pz_e/deltas_augmentation_vs_baseline.csv``, named after b
 second reference does not overwrite the first.
 """
 
-from __future__ import annotations
-
 import argparse
-import csv
 import math
 import sys
 from pathlib import Path
@@ -57,7 +54,10 @@ import common
 
 # common puts the repository root on the import path, which the two src imports below need.
 from src.symmetry import (
+    ACCURACY_TRANSFORMED,
     FLIP_FAMILIES,
+    FLIP_RECOVER,
+    FLIP_STABLE,
     PERFORMANCE_FAMILIES,
     RETENTION_FAMILIES,
     TABULATED_GROUPS,
@@ -67,9 +67,9 @@ from src.utils.bootstrap import bootstrap_ci, bootstrap_pvalue
 # The metrics whose difference is the run minus its baseline; every other one is read the other way
 # round, so that positive is the better model throughout.
 HIGHER_IS_BETTER = (
-    "accuracy_transformed",
-    "flip_recover",
-    "flip_stable",
+    ACCURACY_TRANSFORMED,
+    FLIP_RECOVER,
+    FLIP_STABLE,
     "test_acc",
     *RETENTION_FAMILIES,
     *PERFORMANCE_FAMILIES,
@@ -249,16 +249,6 @@ def compare(
     return rows
 
 
-def write_deltas(rows: list[dict[str, object]], output_path: Path) -> None:
-    """Write the deltas table, replacing whatever stood there: it is derived from its
-    inputs."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _trimmed_stem(path: Path) -> str:
     """A table's stem without the ``results_table_`` the callback puts on every one of
     them."""
@@ -322,7 +312,7 @@ def main() -> None:
     output_path = args.out or default_output(
         args.run_table, args.baseline_table, args.baseline_model
     )
-    write_deltas(rows, output_path)
+    common.write_csv(output_path, rows, COLUMNS)
     print(f"[write] {len(rows)} delta rows -> {output_path}")
 
 

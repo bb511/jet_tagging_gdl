@@ -1,22 +1,13 @@
 # @package _global_
 # JetFormer at 50 constituents; data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: jetformer
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "jetformer", "nconst-50"]
 
 experiment_name: hls4ml_jetformer_nconst50
 
 data:
   nconstituents: 50
-  batch_size: 2048
-  n_folds: 5
-
 # No algorithm block: its defaults are the published configuration, until the searches replace them.
-trainer:
-  max_epochs: 200

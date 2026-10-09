@@ -5,11 +5,7 @@ from typing import Any
 from lightning import LightningModule
 from lightning.pytorch.loggers import Logger, MLFlowLogger
 from lightning_utilities.core.rank_zero import rank_zero_only
-from omegaconf import OmegaConf
-
-from src.utils import pylogger
-
-log = pylogger.RankedLogger(__name__, rank_zero_only=True)
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 
 def nest_under(loggers: list[Logger], parent_run_id: str | None) -> None:
@@ -31,43 +27,44 @@ def log_hyperparameters(object_dict: dict[str, Any]) -> None:
     attached logger.
 
     :param object_dict: holds ``cfg``, ``algorithm`` and ``trainer``; an evaluation adds
-        the runtime-only ``fold_idx`` and ``run_stage``, which a training reads off the
-        config.
+        the runtime-only ``fold_idx``, which a training reads off the config.
     """
-    if not object_dict["trainer"].logger:
-        log.warning("Logger not found! Skipping hyperparameter logging...")
-        return
-
-    cfg = OmegaConf.to_container(object_dict["cfg"])
-    algorithm = object_dict["algorithm"]
-    hparams = _config_hparams(cfg, object_dict)
+    cfg, algorithm = object_dict["cfg"], object_dict["algorithm"]
+    hparams = _config_hparams(cfg, object_dict.get("fold_idx"))
     hparams.update(_algorithm_hparams(cfg, algorithm))
-
     for logger in object_dict["trainer"].loggers:
         logger.log_hyperparams(hparams)
 
 
-def _config_hparams(cfg: dict[str, Any], object_dict: dict[str, Any]) -> dict[str, Any]:
+def _resolved(node: DictConfig | ListConfig | None) -> dict | list | None:
+    """*node* as plain containers, its interpolations resolved.
+
+    The config is resolved node by node, never as a whole: a composition with
+    ``return_hydra_config`` leaves ``hydra.sweep.subdir`` at ``${hydra.job.num}``, which
+    has no value.
+    """
+    return None if node is None else OmegaConf.to_container(node, resolve=True)
+
+
+def _config_hparams(cfg: DictConfig, fold_idx: str | None) -> dict[str, Any]:
     """The parts of the composed config worth keeping beside a run."""
     return {
-        "data": cfg["data"],
-        "trainer": cfg["trainer"],
-        "callbacks": cfg.get("callbacks"),
-        "extras": cfg.get("extras"),
+        "data": _resolved(cfg.data),
+        "trainer": _resolved(cfg.trainer),
+        "callbacks": _resolved(cfg.get("callbacks")),
+        "extras": _resolved(cfg.get("extras")),
         "task_name": cfg.get("task_name"),
-        "tags": cfg.get("tags"),
+        "tags": _resolved(cfg.get("tags")),
         "ckpt_path": cfg.get("ckpt_path"),
         "seed": cfg.get("seed"),
         "experiment_name": cfg.get("experiment_name"),
         "run_name": cfg.get("run_name"),
-        "fold_idx": object_dict.get("fold_idx", cfg.get("run_label")),
-        "run_stage": object_dict.get("run_stage", cfg.get("run_stage")),
+        "fold_idx": cfg.get("run_label") if fold_idx is None else fold_idx,
+        "run_stage": cfg.get("run_stage"),
     }
 
 
-def _algorithm_hparams(
-    cfg: dict[str, Any], algorithm: LightningModule
-) -> dict[str, Any]:
+def _algorithm_hparams(cfg: DictConfig, algorithm: LightningModule) -> dict[str, Any]:
     """The algorithm's config, its parameter counts and its per-jet FLOP and eBOP
     counts.
 
@@ -76,8 +73,8 @@ def _algorithm_hparams(
     """
     parameters = list(algorithm.parameters())
     return {
-        "algorithm": cfg["algorithm"],
-        "algorithm/name": cfg["algorithm"].get("name"),
+        "algorithm": _resolved(cfg.algorithm),
+        "algorithm/name": cfg.algorithm.get("name"),
         "algorithm/params/total": sum(p.numel() for p in parameters),
         "algorithm/params/trainable": sum(
             p.numel() for p in parameters if p.requires_grad

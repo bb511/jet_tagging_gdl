@@ -29,6 +29,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from src.algorithms.components.mlp import _dense
+
 RANK_SCALARS = 2
 
 
@@ -63,23 +65,11 @@ def _relative_angles(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return eta, phi
 
 
-def _mlp(dims: list[int], dropout: float) -> nn.Sequential:
-    """Stack ``len(dims) - 1`` linear layers, ReLU between them and dropout in front."""
-    layers: list[nn.Module] = []
-    for i in range(len(dims) - 1):
-        if dropout > 0.0:
-            layers.append(nn.Dropout(dropout))
-        layers.append(nn.Linear(dims[i], dims[i + 1]))
-        if i < len(dims) - 2:
-            layers.append(nn.ReLU())
-    return nn.Sequential(*layers)
-
-
 class ChannelLinear(nn.Module):
     """Mix the vector channels with one weight matrix shared by the four components.
 
-    The four components pertain to the lifted inputs.
-    No bias, since a constant vector would not transform.
+    The four components pertain to the lifted inputs. No bias, since a constant vector
+    would not transform.
     """
 
     def __init__(self, c_in: int, c_out: int) -> None:
@@ -164,7 +154,7 @@ class EquivariantBlock(nn.Module):
         self.invariants = FormInvariants(vector_channels, invariants)
         width = s_in + self.invariants.width + 1
         self.norm = nn.BatchNorm1d(width)
-        self.mlp = _mlp([width, *[scalar_channels] * mlp_layers], dropout)
+        self.mlp = _dense([width, *[scalar_channels] * mlp_layers], False, dropout)
         self.gate = ChannelGate(scalar_channels, vector_channels) if gate else None
         self.residual = residual
 
@@ -190,8 +180,8 @@ class EquivariantBlock(nn.Module):
 class Stream(nn.Module):
     """JEDI-linear's per-constituent network (arXiv:2508.15468) with one context layer.
 
-    This acts over the scalars.
-    Both pools are sums over the real ranks, which need no per-jet division.
+    This acts over the scalars. Both pools are sums over the real ranks, which need no
+    per-jet division.
     """
 
     def __init__(self, channels: int) -> None:
@@ -317,7 +307,7 @@ class VectorNeuronsClassifier(nn.Module):
         self.readout = FormInvariants(vector_channels, invariants)
         width = scalar_channels + self.readout.width + 1
         self.head_norm = nn.BatchNorm1d(width)
-        self.head = _mlp([width, *head_layers, n_class], dropout)
+        self.head = _dense([width, *head_layers, n_class], False, dropout)
 
     def _first_scalars(
         self, u: torch.Tensor, unit: torch.Tensor, p: torch.Tensor, keep: torch.Tensor

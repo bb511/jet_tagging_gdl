@@ -49,4 +49,7 @@ scheduler:
   interval: step
   frequency: 1
 
-compile: false
+# Compiled, as in the searches at 50 and 150 constituents (those at 16 ran eager): 25 to 35 % less
+# time per step and about 10 % less peak memory than eager (olgpu V100, 2026-09-30), with logits
+# within about 1e-6 of the eager network's, at a one-off compile of 1 to 1.5 min per fit.
+compile: true

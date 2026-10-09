@@ -1,5 +1,6 @@
 """Measure the invariance of a trained classifier under various symmetry groups."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,10 +29,12 @@ from src.symmetry import (
 )
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 # Per class, the background and the signal jets of one score set: (classes,) each.
 Counts = tuple[np.ndarray, np.ndarray]
+# A batch to the transformed batch and the draws behind it, one per jet.
+DrawingTransform = Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
 
 
 @dataclass
@@ -47,6 +50,17 @@ class FlipCounts:
     correct_before: int = 0
     stable: int = 0
 
+    def rates(self) -> dict[str, float]:
+        """The group's transition probabilities, NaN when nothing is counted."""
+        wrong, recovered = self.wrong_before, self.recovered
+        correct, stable = self.correct_before, self.stable
+        seen, nan = correct + wrong, float("nan")
+        return {
+            FLIP_RECOVER: recovered / wrong if wrong else nan,
+            FLIP_STABLE: stable / correct if correct else nan,
+            ACCURACY_TRANSFORMED: (stable + recovered) / seen if seen else nan,
+        }
+
 
 class FlipProbe:
     """Compute how often a group's transform moves the predicted class."""
@@ -55,12 +69,6 @@ class FlipProbe:
         # Per group, how many jets changed their predicted class under the transform.
         self.flips = dict.fromkeys(GROUPS, 0)
         self.counts = {group: FlipCounts() for group in GROUPS}
-
-    @property
-    def n_jets(self) -> int:
-        # Total number of jets.
-        counts = self.counts[GROUPS[0]]
-        return counts.correct_before + counts.wrong_before
 
     def update(
         self,
@@ -86,7 +94,7 @@ class FlipProbe:
             seen = counts.correct_before + counts.wrong_before
             rate = self.flips[group] / seen if seen else float("nan")
             results[key(group, FLIP)] = rate
-            results |= {key(group, family): v for family, v in _rates(counts).items()}
+            results |= {key(group, family): v for family, v in counts.rates().items()}
         return results
 
 
@@ -128,12 +136,14 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return shifted / shifted.sum(axis=1, keepdims=True)
 
 
-def _one_vs_rest(logits: np.ndarray) -> np.ndarray:
-    """Per class c, the log-odds z_c - logsumexp_{k != c} z_k, shape (jets, classes).
+def one_vs_rest(logits: np.ndarray) -> np.ndarray:
+    """Per class c, the log-odds z_c - logsumexp_{k != c} z_k in float64, shape (jets,
+    classes): the scores `clean_metrics` reads its working points and AUC off.
 
-    It orders the jets as the softmax column of c does, without the ties the softmax
+    They order the jets as the softmax column of c does, without the ties the softmax
     saturates into at float precision.
     """
+    logits = logits.astype(np.float64)
     classes = range(logits.shape[1])
     rest = [np.logaddexp.reduce(np.delete(logits, c, axis=1), axis=1) for c in classes]
     return logits - np.stack(rest, axis=1)
@@ -167,14 +177,9 @@ def _passing(scores: np.ndarray, signal: np.ndarray, thresholds: np.ndarray) -> 
     return (above & ~signal).sum(axis=0), (above & signal).sum(axis=0)
 
 
-def _clean_value(
-    point: WorkingPoint,
-    background: np.ndarray,
-    signal: np.ndarray,
-    n_background: np.ndarray,
-    n_signal: np.ndarray,
-) -> np.ndarray:
+def _clean_value(point: WorkingPoint, clean: Counts, totals: Counts) -> np.ndarray:
     """Per class, the rejection 1/eps_B or the TPR at *point* on the clean scores."""
+    (background, signal), (n_background, n_signal) = clean, totals
     if point.fixed == "signal":
         # Floored at one passing background jet, so that a point nothing passes reads
         # n_B, a finite lower bound, rather than infinity.
@@ -242,7 +247,7 @@ def _clean_metrics(
     """The groupless families: each point's clean rejection or TPR, and the AUC."""
     results: dict[str, float] = {}
     for frozen in points:
-        values = _clean_value(frozen.point, *frozen.counts, *totals)
+        values = _clean_value(frozen.point, frozen.counts, totals)
         results |= _macro(None, clean_family(frozen.point), values)
     columns = range(scores.shape[1])
     auc = [_class_auc(signal[:, c], scores[:, c]) for c in columns]
@@ -265,7 +270,7 @@ def _clean_reading(
     logits: the one-vs-rest scores, the signal mask (jets, classes), the working points
     frozen on the scores, and the per-class totals."""
     signal = labels[:, None] == np.arange(clean.shape[1])
-    scores = _one_vs_rest(clean)
+    scores = one_vs_rest(clean)
     return scores, signal, _frozen_points(scores, signal), _totals(signal)
 
 
@@ -279,12 +284,6 @@ def clean_metrics(logits: np.ndarray, labels: np.ndarray) -> dict[str, float]:
     """
     clean = _finite(logits, "clean")
     return {} if clean is None else _clean_metrics(*_clean_reading(clean, labels))
-
-
-def one_vs_rest(logits: np.ndarray) -> np.ndarray:
-    """The per-class scores `clean_metrics` reads its working points and AUC off: the
-    log-odds of each class against the rest, in float64, shape (jets, classes)."""
-    return _one_vs_rest(logits.astype(np.float64))
 
 
 def _point_metrics(
@@ -310,7 +309,7 @@ def _group_metrics(
     logits = _finite(logits, group)
     if logits is None:
         return {}
-    scores = _one_vs_rest(logits)
+    scores = one_vs_rest(logits)
     tv = 0.5 * np.abs(p_clean - _softmax(logits)).sum(axis=1).mean()
     results = {key(group, TOTAL_VARIATION): float(tv)}
     for frozen in points:
@@ -348,6 +347,29 @@ def _save(path: Path, arrays: dict[str, np.ndarray]) -> None:
         np.savez(handle, **arrays)
     partial.replace(path)
     log.info(f"Per-jet test outputs written to {path}")
+
+
+def _drawing_transforms(
+    datamodule: Any, transform_kwargs: dict[str, float | bool]
+) -> dict[str, DrawingTransform]:
+    """One drawing transform per group, in the order of `src.symmetry.GROUPS`, on the
+    record's columns.
+
+    :raises ValueError: unless the datamodule keeps every record column in its test
+        batches, where the transforms find the momenta.
+    """
+    names = getattr(datamodule, "feature_names", None)
+    if not getattr(datamodule, "keep_full_features_at_test", False) or names is None:
+        raise ValueError(
+            f"{type(datamodule).__name__} does not keep every record column in its "
+            "test batches, so the probe has no momenta to transform. Inputs that no "
+            "group acts on take probe: false."
+        )
+    scales = datamodule.norm_scales
+    return {
+        group: make_drawing_transform(group, names, scales, **transform_kwargs)
+        for group in GROUPS
+    }
 
 
 class InvarianceMetricCallback(Callback):
@@ -391,36 +413,20 @@ class InvarianceMetricCallback(Callback):
 
     def _reset(self) -> None:
         """Drop the state of the previous test pass; a fold reuses the same callback."""
-        self._model_feature_names: list[str] | None = None
-        self._full_feature_names: list[str] | None = None
-        self._norm_scales: dict[str, float] | None = None
+        self._transforms: dict[str, DrawingTransform] = {}
         self._flip = FlipProbe()
         self._store = OutputStore()
 
     def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Read the feature layout from the data; the probe stays off otherwise."""
+        """Build the pass's transforms on the datamodule's columns, unless the probe is
+        off."""
         self._reset()
         if not self.probe:
             log.info("Invariance probe off: the clean metrics alone are logged.")
             return
-        datamodule = getattr(trainer, "datamodule", None)
-        if datamodule is None or datamodule.feature_names is None:
-            log.warning("The datamodule has no features; skipped.")
-            return
-        self._full_feature_names = list(datamodule.feature_names)
-        self._model_feature_names = _model_names(datamodule)
-        self._norm_scales = datamodule.norm_scales
-        log.info(f"Invariance probe ready on features {self._model_feature_names}.")
-
-    def _names_for(self, width: int) -> list[str]:
-        """Collect the first *width* features of the data.
-
-        A test batch has either all 16 columns (under ``keep_full_features_at_test``, or
-        always under the SCL) or the reduced set that the network consumes.
-        """
-        if width == len(self._full_feature_names):
-            return self._full_feature_names
-        return self._model_feature_names
+        datamodule = trainer.datamodule
+        self._transforms = _drawing_transforms(datamodule, self.transform_kwargs)
+        log.info(f"Invariance probe ready on the columns {datamodule.feature_names}.")
 
     @torch.no_grad()
     def on_test_batch_end(
@@ -434,8 +440,6 @@ class InvarianceMetricCallback(Callback):
     ) -> None:
         """Keep one test batch's clean logits and, under the probe, how each group's
         transform moves them."""
-        if self.probe and self._model_feature_names is None:
-            return
         x, y = batch
         targets = y.argmax(dim=1)
         # The clean (unaugmented data) logits are recomputed here due to precision:
@@ -459,13 +463,7 @@ class InvarianceMetricCallback(Callback):
 
         :return: the transformed logits and the draws behind them.
         """
-        transform = make_drawing_transform(
-            group,
-            self._names_for(x.shape[-1]),
-            self._norm_scales,
-            **self.transform_kwargs,
-        )
-        x_sym, draw = transform(x)
+        x_sym, draw = self._transforms[group](x)
         logits_sym = pl_module(x_sym)
         self._flip.update(group, clean, logits_sym, targets)
         return logits_sym, draw
@@ -490,23 +488,3 @@ class InvarianceMetricCallback(Callback):
         if not self.probe:
             return clean_metrics(arrays["logits_clean"], arrays["labels"])
         return self._flip.metrics() | output_metrics(arrays)
-
-
-def _rates(counts: FlipCounts) -> dict[str, float]:
-    """A group's transition probabilities, NaN when nothing is counted."""
-    wrong, recovered = counts.wrong_before, counts.recovered
-    correct, stable = counts.correct_before, counts.stable
-    seen, nan = correct + wrong, float("nan")
-    return {
-        FLIP_RECOVER: recovered / wrong if wrong else nan,
-        FLIP_STABLE: stable / correct if correct else nan,
-        ACCURACY_TRANSFORMED: (stable + recovered) / seen if seen else nan,
-    }
-
-
-def _model_names(datamodule: Any) -> list[str]:
-    """The record features the model consumes, in the order that it consumes them."""
-    indices = datamodule.feature_indices()
-    if indices is None:
-        return list(datamodule.features)
-    return [datamodule.feature_names[index] for index in indices]

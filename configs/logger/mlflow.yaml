@@ -6,6 +6,3 @@ mlflow:
   experiment_name: ${experiment_name}
   run_name: ${run_name}
   tracking_uri: file:${paths.log_dir}/mlflow/mlruns
-  tags: null
-  prefix: ""
-  artifact_location: null

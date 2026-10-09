@@ -3,13 +3,10 @@
 # the float vn finals, whose main run algorithm.init_from names; one constant beta per run, and the
 # last epoch is the model. Symmetry-embedded, so it runs the baseline regime only.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: vn_hgq
   - override /callbacks: quantised
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "vn_hgq", "nconst-50"]
 
 experiment_name: hls4ml_vn_hgq_nconst50
@@ -18,8 +15,6 @@ data:
   nconstituents: 50
   # The network's own columns; required_features makes setup() refuse any other list.
   features: [pt, eta, phi]
-  batch_size: 2048
-  n_folds: 5
   # In the driver: forked loader workers do not mix with the threads JAX has started.
   num_workers: 0
   pin_memory: false

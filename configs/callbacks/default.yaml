@@ -12,16 +12,4 @@ defaults:
   - _self_
 
 model_checkpoint:
-  dirpath: ${paths.output_dir}/checkpoints
-  filename: "epoch_{epoch:03d}"
-  monitor: val/acc
-  mode: max
-  save_top_k: 1
   save_last: true
-  auto_insert_metric_name: false
-
-early_stopping:
-  monitor: val/acc
-  mode: max
-  min_delta: 1.0e-4 # matches the scheduler threshold, so sub-threshold noise counts for neither
-  patience: 100 # longer than the scheduler patience (80), so the rate drops before the run ends

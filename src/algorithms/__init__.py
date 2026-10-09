@@ -1,7 +1,7 @@
 # Shared training logic for the jet-tagging architectures.
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -11,30 +11,16 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification import MulticlassAccuracy
 
 from src.algorithms.losses.symmetry import SymmetryConsistencyLoss
-from src.algorithms.utils.bitops import record_ebops
-from src.algorithms.utils.flops import record_flops
+from src.algorithms.utils.bitops import count_ebops_per_jet
+from src.algorithms.utils.flops import count_flops_per_jet
+from src.data.components.augmentation import (
+    get_norm_scale,
+    make_transform,
+    resolve_feature_indices,
+)
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
-
-
-def resolve_feature_indices(
-    model_features: list[str], feature_names: list[str]
-) -> list[int]:
-    """Feature indices of *model_features* inside *feature_names*.
-
-    Names match bare or with the record's ``j1_`` prefix, so ``px`` finds ``j1_px``.
-    """
-    index_of = {name: idx for idx, name in enumerate(feature_names)}
-    missing = [
-        f for f in model_features if f not in index_of and f"j1_{f}" not in index_of
-    ]
-    if missing:
-        raise ValueError(
-            f"Feature {missing[0]!r} is absent from the data columns {feature_names}. "
-            f"data.features must contain {', '.join(model_features)}."
-        )
-    return [index_of.get(f, index_of.get(f"j1_{f}")) for f in model_features]
+log = RankedLogger(__name__)
 
 
 class JetTaggingModule(LightningModule):
@@ -47,10 +33,16 @@ class JetTaggingModule(LightningModule):
     # Features the network needs, in its own order; None means "whatever the data give".
     required_features: list[str] | None = None
 
-    # Filled by setup() from the datamodule.
+    # Filled by setup() from the datamodule; the transform under the SCL alone.
     feature_names: list[str] | None = None
     model_feature_indices: list[int] | None = None
     norm_scales: dict[str, float] | None = None
+    _symm_transform: Callable[[torch.Tensor], torch.Tensor] | None = None
+
+    # Set by _record_costs at construction, per fully occupied jet.
+    flops_total: float
+    ebops_total: float
+    ebops_unpriced: float
 
     def __init__(
         self,
@@ -95,10 +87,15 @@ class JetTaggingModule(LightningModule):
         self._record_costs(nconstituents, nbr_feats)
 
     def _record_costs(self, nconstituents: int, nbr_feats: int) -> None:
-        """Store the per-jet FLOPs and eBOPs of the model as ``flops_total`` and
-        ``ebops_total``, its unpriced elements as ``ebops_unpriced``."""
-        record_flops(self, nconstituents, nbr_feats)
-        record_ebops(self, nconstituents, nbr_feats)
+        """Set ``flops_total``, ``ebops_total`` and ``ebops_unpriced``.
+
+        The FLOP pass draws its example and any dropout mask from the global stream, so
+        it is part of every run's initialisation stream; the eBOP pass leaves the stream
+        untouched.
+        """
+        self.flops_total = count_flops_per_jet(self, nconstituents, nbr_feats)
+        bitops = count_ebops_per_jet(self, nconstituents, nbr_feats)
+        self.ebops_total, self.ebops_unpriced = bitops.ebops, bitops.unpriced
 
     def _build_metrics(self, output_dim: int, method: str) -> None:
         """Register the metric objects; the SCL trackers exist only under
@@ -147,45 +144,31 @@ class JetTaggingModule(LightningModule):
 
         :param batch: the pair ``(x, y)``, of shapes (jets, constituents, features) and
             one-hot (jets, classes).
-        :return: dict of ``loss``, ``cls_loss``, ``logits``, ``preds``, ``targets``. If
-            the method uses symmetry loss, you also include the SCL term added to the
-            cross entropy term.
+        :return: dict of ``loss``, ``logits``, ``preds``, ``targets`` and, under the
+            SCL, ``symm_loss``, in which case ``loss`` is the cross entropy plus the
+            weighted SCL term.
         """
         x, y = batch
         y = y.argmax(dim=1)
-
         logits = self(x)
-        cls_loss = F.cross_entropy(logits, y)
-        preds = logits.argmax(dim=1)
-        out = {
-            "loss": cls_loss,
-            "cls_loss": cls_loss,
-            "logits": logits,
-            "preds": preds,
-            "targets": y,
-        }
-
+        loss = F.cross_entropy(logits, y)
+        out = dict(loss=loss, logits=logits, preds=logits.argmax(dim=1), targets=y)
         if self.symm_loss is not None:
             partner_logits = self(self._partner_batch(x))
-            out["loss"], out["symm_loss"] = self.symm_loss(
-                cls_loss, logits, partner_logits
-            )
-
+            out["loss"], out["symm_loss"] = self.symm_loss(loss, logits, partner_logits)
         return out
 
     def _partner_batch(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute a transformed jet and return it, given an original jet.
+        """Return *x* with one transformation of the SCL's group drawn per jet.
 
         :raises RuntimeError: when `setup` has not set the columns of *x*.
         """
-        if self.feature_names is None:
+        if self._symm_transform is None:
             raise RuntimeError(
                 "feature_names is unset, so the columns of x cannot be named. Run under "
                 "a trainer whose datamodule setup() has resolved the feature layout."
             )
-        return self.symm_loss.transform(
-            x, self.feature_names, self.norm_scales, **self.transform_kwargs
-        )
+        return self._symm_transform(x)
 
     def on_train_start(self) -> None:
         """Clean up the sanity check values, and compile the net if asked."""
@@ -261,13 +244,19 @@ class JetTaggingModule(LightningModule):
         )
 
     def setup(self, stage: str) -> None:
-        """Resolve the feature layout from the datamodule."""
+        """Resolve the feature layout from the datamodule and, under the SCL, build the
+        transform of its partner batches, which draws only when called."""
         # _trainer rather than trainer: the public property raises when the module stands alone.
         datamodule = getattr(self._trainer, "datamodule", None)
         if datamodule is None:
             return
         self._resolve_features(datamodule)
         self.norm_scales = datamodule.norm_scales
+        if self.symm_loss is not None:
+            group = self.symm_loss.group
+            self._symm_transform = make_transform(
+                group, self.feature_names, self.norm_scales, **self.transform_kwargs
+            )
         self._on_features_resolved()
 
     def _compile_net(self) -> None:
@@ -347,3 +336,46 @@ class JetTaggingModule(LightningModule):
             kwargs["total_steps"] = int(self.trainer.estimated_stepping_batches)
         scheduler_cfg["scheduler"] = scheduler_fn(optimizer=optimizer, **kwargs)
         return scheduler_cfg
+
+
+def denorm_factors(
+    norm_scales: dict[str, float] | None, names: Sequence[str]
+) -> torch.Tensor:
+    """Return the factors taking the stored columns *names* back to physical units."""
+    return torch.tensor([get_norm_scale(norm_scales, name) for name in names])
+
+
+class DenormalisedModule(JetTaggingModule):
+    """A row whose network reads its `required_features` in physical units.
+
+    Each subclass's ``build_net`` calls `_register_denorm_scales` before it builds the
+    network; `setup` then fills the factors from the datamodule's ``norm_scales``.
+    """
+
+    def _register_denorm_scales(self) -> None:
+        """Register ``denorm_scales``, ones until the features are resolved."""
+        self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
+
+    def _on_features_resolved(self) -> None:
+        """Cache the factors returning `required_features` to physical units."""
+        self.denorm_scales.copy_(
+            denorm_factors(self.norm_scales, self.required_features)
+        )
+
+    def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """Undo the normalisation of a batch, keeping its column order."""
+        return x * self.denorm_scales
+
+
+class FourMomentumModule(DenormalisedModule):
+    """A row whose network reads the four-momentum alone."""
+
+    required_features = ["px", "py", "pz", "e"]
+
+    def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """Undo the normalisation of a batch and hand it over as four-momenta.
+
+        :param x: (jets, constituents, 4), the columns [px, py, pz, e] as stored.
+        :return: (jets, constituents, 4), the columns [E, px, py, pz] in GeV.
+        """
+        return super()._prepare_inputs(x)[..., [3, 0, 1, 2]]

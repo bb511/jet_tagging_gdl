@@ -1,8 +1,8 @@
 """PELICAN, the permutation-equivariant Lorentz aggregator of arXiv:2307.16506.
 
-A jet is converted to the Minkowski products of its constituents.
-The netowrk is a stack of 15 linear maps that take this set of products to another,
-interleaved with channel mixes, as described in (Maron et al., arXiv:1812.09902).
+A jet is converted to the Minkowski products of its constituents. The network is a stack
+of 15 linear maps that take this set of products to another, interleaved with channel
+mixes, as described in (Maron et al., arXiv:1812.09902).
 
 Shape conventions. Every jet is specified by its constituents, and every constituent is
 specified by its momentum 4-vector in GeV. The number of constituents is padded to N for
@@ -134,8 +134,8 @@ class LinEq2to2(nn.Module):
         """Return the re-masked, LeakyReLU image of the pair tensor *x*.
 
         The 10 aggregation operations are scaled by *scale*, which is a learned scale
-        through *alpha*. When *alpha=0*, the aggretagion operations are means, and
-        when *alpha=1* the aggregation operations are effectively sums.
+        through *alpha*. When *alpha=0*, the aggregation operations are means, and when
+        *alpha=1* the aggregation operations are effectively sums.
         """
         scale = (nobj / self.nbar).view(-1, 1, 1, 1) ** self.alphas
         diag, rows, cols, trace, total = pair_reductions(x, nobj)

@@ -36,7 +36,7 @@ from src.utils.checkpoints import (
     write_manifest,
 )
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 
 def _fold_kwargs(cfg: DictConfig) -> dict[str, int]:
@@ -110,7 +110,6 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     log.info("Instantiating callbacks...")
     callbacks: list[Callback] = instantiate_callbacks(cfg.get("callbacks"))
-    # The results table writes its row at test end, in src/eval.py; here it would only log.
 
     log.info("Instantiating loggers...")
     logger: list[Logger] = instantiate_loggers(cfg.get("logger"))
@@ -128,8 +127,6 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         "cfg": cfg,
         "datamodule": datamodule,
         "algorithm": algorithm,
-        "callbacks": callbacks,
-        "logger": logger,
         "trainer": trainer,
     }
 

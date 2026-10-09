@@ -22,15 +22,15 @@ from torch.utils.data import DataLoader
 
 from src.data.components.augmentation import (
     Transform,
-    feature_index,
     make_transform,
     rebase_on_kept_axis,
+    resolve_feature_indices,
 )
 from src.data.components.dataset import HLS4MLDataset
 from src.symmetry import SCHEMES
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 REPO_ID = "fastmachinelearning/hls4ml_lhc_jets_150p"
 
@@ -48,6 +48,11 @@ warnings.filterwarnings(
     message=r"Your `IterableDataset` has `__len__` defined\..*",
     category=UserWarning,
 )
+
+
+def record_snapshot(revision: str | None) -> str:
+    """The root of the record's hub snapshot at *revision*, None meaning the head."""
+    return snapshot_download(REPO_ID, repo_type="dataset", revision=revision)
 
 
 def fold_indices(
@@ -84,11 +89,13 @@ class HLS4MLDataModule(LightningDataModule):
     :param n_folds: setting this to 1 uses the record's own train and validation splits;
         k >= 2 pools them and splits them again, with `fold_idx` choosing which fold is served.
     :param kfold_seed: fixes the kfold splitting so its reproducible.
-    :param fold_idx: the fold served, counted from zero, which `set_fold` moves and train.py
-        derives from its `fold` knob; ignored at n_folds 1.
-    :param keep_full_features_at_test: keep all the data features in the test batches,
-        in case they are required at test time to compute quantities of interest.
+    :param fold_idx: the fold served, counted from zero, which train.py derives from its
+        `fold` knob; ignored at n_folds 1.
     """
+
+    # Test batches keep all 16 record columns whatever the model reads, so that the
+    # invariance probe finds the momenta it transforms.
+    keep_full_features_at_test = True
 
     def __init__(
         self,
@@ -105,7 +112,6 @@ class HLS4MLDataModule(LightningDataModule):
         n_folds: int = 1,
         kfold_seed: int = 42,
         fold_idx: int = 0,
-        keep_full_features_at_test: bool = True,
     ) -> None:
         super().__init__()
         _validate_run(method, augmentation_scheme)
@@ -129,8 +135,7 @@ class HLS4MLDataModule(LightningDataModule):
         # folding
         self.n_folds = n_folds
         self.kfold_seed = kfold_seed
-        self.fold_idx = fold_idx if n_folds >= 2 else 0
-        self.keep_full_features_at_test = keep_full_features_at_test
+        self.fold_idx = fold_idx
 
         # Filled at instantiation.
         self.record = None
@@ -144,27 +149,20 @@ class HLS4MLDataModule(LightningDataModule):
         self._ensure_record().prepare()
 
     def setup(self, stage: str | None = None) -> None:
-        """Build the datasets of *stage* (``fit``, ``validate`` or ``test``, None for
-        all)."""
+        """Build the datasets of *stage* (``fit`` or ``test``, None for both)."""
         record = self._ensure_record()
         indices = self.feature_indices()
 
         if stage in (None, "fit") and self.data_train is None:
             self._setup_fit(record, indices)
-        if stage in (None, "validate") and self.data_val is None:
-            self._setup_validate(record, indices)
-        if stage in (None, "test", "predict") and self.data_test is None:
-            self._setup_test(record, indices)
-
-    @property
-    def norm_params(self) -> dict[str, tuple[str, float]] | None:
-        """Get the normalisation parameters used in normalising the data."""
-        return self.record.norm_params if self.record is not None else None
+        if stage in (None, "test") and self.data_test is None:
+            self._setup_test(record)
 
     @property
     def norm_scales(self) -> dict[str, float] | None:
-        """Per-feature factors that return the normalised values to GeV."""
-        params = self.norm_params
+        """Per-feature factors that return the normalised values to GeV, None until the
+        record has its normalisation."""
+        params = None if self.record is None else self.record.norm_params
         return (
             None
             if params is None
@@ -172,32 +170,12 @@ class HLS4MLDataModule(LightningDataModule):
         )
 
     def feature_indices(self) -> list[int] | None:
-        """Maps the list of features you give it to the indices in the actual data."""
+        """The record columns of ``features``, None when they are every column in the
+        record's order."""
         names = list(self._ensure_record().feature_names)
-        indices = [_column(feature, names) for feature in self.features]
+        indices = resolve_feature_indices(self.features, names)
 
         return None if indices == list(range(len(names))) else indices
-
-    def set_fold(self, fold_idx: int) -> None:
-        """Set which fold will be served next."""
-        if self.n_folds >= 2 and not 0 <= fold_idx < self.n_folds:
-            raise ValueError(
-                f"fold_idx {fold_idx} is out of range for n_folds={self.n_folds}."
-            )
-
-        self.fold_idx = fold_idx if self.n_folds >= 2 else 0
-        self.data_train = None
-        self.data_val = None
-
-    @property
-    def n_train_samples(self) -> int:
-        """Jets in the training half of the current fold, 0 before :meth:`setup`."""
-        return 0 if self.data_train is None else self.data_train.n
-
-    @property
-    def n_val_samples(self) -> int:
-        """Jets in the validation half of the current fold, 0 before :meth:`setup`."""
-        return 0 if self.data_val is None else self.data_val.n
 
     def train_dataloader(self) -> DataLoader:
         return self._make_dataloader(self.data_train, self.num_workers)
@@ -219,16 +197,11 @@ class HLS4MLDataModule(LightningDataModule):
         folds."""
         return self._load(self._ensure_record(), split)
 
-    def _record_root(self) -> str:
-        """Where the data is stored on the machine."""
-        return snapshot_download(REPO_ID, repo_type="dataset", revision=self.revision)
-
     def _record_overrides(self, root: str) -> list[str]:
         """What to override when composing the record's own configuration."""
-        # nconstituents None and <= 0 both mean 'keep them all' here.
         return [
             f"paths.root_dir={root}",
-            f"data.nconstituents={self.nconstituents if self.nconstituents else 0}",
+            f"data.nconstituents={self.nconstituents}",
             f"paths.base_data_dir={self.cache_dir}",
         ]
 
@@ -241,7 +214,7 @@ class HLS4MLDataModule(LightningDataModule):
         if self.record is not None:
             return self.record
 
-        root = self._record_root()
+        root = record_snapshot(self.revision)
         if root not in sys.path:
             sys.path.insert(0, root)
 
@@ -280,15 +253,10 @@ class HLS4MLDataModule(LightningDataModule):
         self.data_val = self._dataset(x_val, y_val)
         log.info(f"Fit: x_train {tuple(x_train.shape)}, x_val {tuple(x_val.shape)}")
 
-    def _setup_validate(self, record, indices: list[int] | None) -> None:
-        x_val, y_val = self._load(record, "validation")
-        x_val = _reduce(x_val, indices, self._keeps_full_width)
-        self.data_val = self._dataset(x_val, y_val)
-
-    def _setup_test(self, record, indices: list[int] | None) -> None:
+    def _setup_test(self, record) -> None:
+        """Build the test dataset at the record's full width, as
+        `keep_full_features_at_test` states."""
         x_test, y_test = self._load(record, "test")
-        keep_full = self._keeps_full_width or self.keep_full_features_at_test
-        x_test = _reduce(x_test, indices, keep_full)
         # Every test jet is scored, so that each row of the results counts the same jets.
         self.data_test = self._dataset(x_test, y_test, drop_last=False)
         log.info(f"Test: x_test {tuple(x_test.shape)}, y_test {tuple(y_test.shape)}")
@@ -404,16 +372,6 @@ def _validate_run(method: str, augmentation_scheme: str) -> None:
             f"Unsupported augmentation_scheme {augmentation_scheme!r}, expected one of "
             f"{list(SCHEMES)}."
         )
-
-
-def _column(feature: str, names: list[str]) -> int:
-    idx = feature_index(names, feature)
-    if idx is None:
-        raise ValueError(
-            f"Feature {feature!r} is absent from the record columns {names}."
-        )
-
-    return idx
 
 
 def _reduce(

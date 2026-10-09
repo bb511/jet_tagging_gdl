@@ -1,21 +1,15 @@
 # @package _global_
 # DeepSets at 50 constituents; data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: deepsets
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "deepsets", "nconst-50"]
 
 experiment_name: hls4ml_deepsets_nconst50
 
 data:
   nconstituents: 50
-  batch_size: 2048
-  n_folds: 5
 
 # From the earlier study's 32-constituent search: a starting point, not tuned at this count.
 algorithm:
@@ -23,6 +17,3 @@ algorithm:
   rho_layers: [32, 32, 16]
   optimizer:
     lr: 2.8e-3
-
-trainer:
-  max_epochs: 200

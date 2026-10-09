@@ -17,18 +17,15 @@ def plot(
     probs: np.ndarray,
     class_names: Sequence[str],
     save_dir: Path,
-    split: str = "test",
 ) -> Path:
-    """Plot the one-vs-rest ROC curve of every jet class.
+    """Plot the one-vs-rest ROC curve of every jet class on the test set.
 
     :param labels: true class index per jet, shape (jets,).
     :param probs: class probabilities, shape (jets, classes), columns ordered as
         *class_names*.
-    :param split: the split the scores come from; it names the file and the title.
     """
     plt.style.use(hep.style.CMS)
     n_classes = probs.shape[1]
-    names = list(class_names)[:n_classes]
     one_vs_rest = label_binarize(labels, classes=list(range(n_classes)))
     fig, axes = plt.subplots(
         1,
@@ -39,12 +36,12 @@ def plot(
         sharey=True,
         squeeze=False,
     )
-    for column, name in enumerate(names):
+    for column, name in enumerate(class_names):
         _draw(axes[0][column], one_vs_rest[:, column], probs[:, column], name)
     axes[0][0].set_ylabel("True positive rate")
-    fig.suptitle(f"One-vs-rest ROC, {split} set")
+    fig.suptitle("One-vs-rest ROC, test set")
     fig.tight_layout()
-    return save_figure(fig, save_dir, f"roc_curves_{split}")
+    return save_figure(fig, save_dir, "roc_curves_test")
 
 
 def _draw(ax: Axes, truth: np.ndarray, score: np.ndarray, name: str) -> None:

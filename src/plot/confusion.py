@@ -17,14 +17,12 @@ def plot(
     preds: np.ndarray,
     class_names: Sequence[str],
     save_dir: Path,
-    split: str = "test",
 ) -> Path:
-    """Plot the confusion matrix of one pass, as counts and as fractions.
+    """Plot the confusion matrix of the test set, as counts and as fractions.
 
     :param labels: true class index per jet, shape (jets,).
     :param preds: predicted class index per jet, shape (jets,).
     :param class_names: display names of the classes, in label order.
-    :param split: the split the predictions come from; it names the file and the title.
     """
     plt.style.use(hep.style.CMS)
     names = list(class_names)
@@ -35,9 +33,9 @@ def plot(
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), dpi=120)
     _draw(fig, axes[0], counts, names, "counts", "d", None)
     _draw(fig, axes[1], fractions, names, "row-normalised", ".2f", (0.0, 1.0))
-    fig.suptitle(f"Confusion matrix, {split} set")
+    fig.suptitle("Confusion matrix, test set")
     fig.tight_layout()
-    return save_figure(fig, save_dir, f"confusion_matrix_{split}")
+    return save_figure(fig, save_dir, "confusion_matrix_test")
 
 
 def _draw(

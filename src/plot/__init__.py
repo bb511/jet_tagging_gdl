@@ -22,6 +22,5 @@ def save_figure(fig: Figure, save_dir: Path, name: str) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
     path = save_dir / f"{name}.png"
     fig.savefig(path, dpi=200, bbox_inches="tight")
-    fig.clear()
     plt.close(fig)
     return path

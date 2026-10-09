@@ -3,29 +3,21 @@
 # PELICAN is a symmetry-embedded class, so it runs the baseline regime only; data.method and
 # data.augmentation_scheme still take CLI overrides, but anything else is outside the study design.
 defaults:
-  - override /data: hls4ml
   - override /algorithm: pelican
-  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "pelican", "nconst-16"]
 
 experiment_name: hls4ml_pelican_nconst16
 
 # The pair tensor costs B * N^2 per channel, so memory follows the squared slot count rather than
-# the multiplicity; at 18 slots the usual batch fits anywhere: 3.7 GB peak at the largest search
-# point (5 blocks, 35/35), 0.12 s per step on a V100 (measured 2026-09-13).
+# the multiplicity; at 18 slots the usual batch fits anywhere.
 data:
   nconstituents: 16
-  batch_size: 2048
-  n_folds: 5
 
 # fp32, not the trainer's 16-mixed: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6
 # GeV^2, above the fp16 maximum of 65 504, before the input embedding compresses them.
 trainer:
-  max_epochs: 200
   precision: 32
 
 # TF32 matmuls on Ampere and later. The fp32 range that made these experiments force precision 32

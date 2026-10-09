@@ -5,19 +5,11 @@
 defaults:
   - override /data: jet_level
   - override /algorithm: jet_level_bdt_all53
-  - override /callbacks: default
   - override /trainer: cpu
-  - override /logger: mlflow
 
-seed: 12345
 tags: ["hls4ml", "jet_level_bdt_all53", "nconst-150"]
 
 experiment_name: hls4ml_jet_level_bdt_all53_nconst150
-
-data:
-  nconstituents: 150
-  batch_size: 2048
-  n_folds: 5
 
 # The probe would transform nothing and report a perfect invariance that was never tested. Under
 # callbacks=search this leaves a node without _target_, which instantiate_callbacks skips.
@@ -29,7 +21,6 @@ callbacks:
 # torch operation has a precision to reduce and no gradient to clip, and Lightning refuses clipping
 # under manual optimisation.
 trainer:
-  max_epochs: 200
   precision: 32
   gradient_clip_val: null
 

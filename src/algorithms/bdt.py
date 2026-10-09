@@ -16,11 +16,11 @@ from src.algorithms.components.bdt import BoostedTrees
 class BoostedTreesClassifier(JetTaggingModule):
     """A ``HistGradientBoostingClassifier`` in the place of a network.
 
-    Training is manual and has no torch optimiser.
-    This is a hacky way to have BDTs with consistent design.
-    The trees are fitted on the last batch of an epoch, because Lightning validates an
-    epoch before ``on_train_epoch_end``. Validation and test run the base class's steps
-    on the trees' log-probabilities. The costs reported by the trees are NaN.
+    Training is manual and has no torch optimiser. This is a hacky way to have BDTs with
+    consistent design. The trees are fitted on the last batch of an epoch, because
+    Lightning validates an epoch before ``on_train_epoch_end``. Validation and test run
+    the base class's steps on the trees' log-probabilities. The costs reported by the
+    trees are NaN.
     """
 
     def build_net(self, trees_per_epoch: int = 10, **tree_kwargs) -> nn.Module:

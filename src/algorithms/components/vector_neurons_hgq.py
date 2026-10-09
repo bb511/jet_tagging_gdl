@@ -1,10 +1,10 @@
 """Quantisation-aware port of the vector neurons to HGQ2 on Keras and JAX.
 
-The port reproduces ``VectorNeuronsClassifier`` (components/vector_neurons.py)
-The pT sort, the leader constituent subtraction and the wrap of phi stay outside the
-model and hence are not counted in latency or resources.
-The first two layers quantise p_T and the angles.
-Every later product, sum and affine map reads its inputs through a quantiser of its own.
+The port reproduces ``VectorNeuronsClassifier`` (components/vector_neurons.py). The pT
+sort, the leader constituent subtraction and the wrap of phi stay outside the model and
+hence are not counted in latency or resources. The first two layers quantise p_T and the
+angles. Every later product, sum and affine map reads its inputs through a quantiser of
+its own.
 
 Vectors are stored (jets, 4, channels) such that every channel mixing is a dense layer
 on the last axis (more efficient). p_T is counted in units of 16 GeV so it can be
@@ -93,12 +93,13 @@ _PLATFORMS = {"gpu": "cuda,cpu", "cuda": "cuda,cpu", "cpu": "cpu"}
 class Quantisation:
     """The quantisers of the port.
 
-    :param *_kif: (keep_negative, integer bits, fraction bits) fix the trigger words
-        and the logits.
-    :param *_bits: the widths that ``seed_datalane_bits`` and ``seed_weight_bits`` give
-        to the trainable quantisers before training.
-    :param float_mode: replaces every quantiser but the gate's by an identity, for
-        the comparison with the float network.
+    The fields ending in ``_kif``, (keep_negative, integer bits, fraction bits), fix the
+    trigger words and the logits; those ending in ``_bits`` are the widths that
+    ``seed_datalane_bits`` and ``seed_weight_bits`` give to the trainable quantisers
+    before training.
+
+    :param float_mode: replaces every quantiser but the gate's by an identity, for the
+        comparison with the float network.
     :param fold_norm: builds no batch normalisation, the copy of a float network folding
         each into the dense layer that reads it.
     :param round_mode: HGQ2's rounding of every trainable datalane: RND adds half an LSB
@@ -403,7 +404,8 @@ def build_port(
     n_class: int = 5,
     quantisation: Quantisation | None = None,
 ) -> tuple[keras.Model, keras.Model]:
-    """Build the port and the model of its input words.
+    """Build the port and the model of its input words, wiring the stages in the order
+    of ``VectorNeuronsClassifier.forward``.
 
     Call ``configure_jax`` first: the layers take Keras's floatx at construction.
 
@@ -414,18 +416,21 @@ def build_port(
     """
     if not log2(units).is_integer():
         raise ValueError(f"units must be a power of two, got {units}.")
-    q = quantisation or Quantisation()
-    widths = (vector_channels, scalar_channels, invariants, tensor_invariants)
     port = _Port(
-        q, nconstituents, *widths, stream_channels, mlp_layers, gate, dropout, units
+        q=quantisation or Quantisation(),
+        nconstituents=nconstituents,
+        vector=vector_channels,
+        scalar=scalar_channels,
+        invariants=invariants,
+        tensors=tensor_invariants,
+        stream=stream_channels,
+        mlp_layers=mlp_layers,
+        gate=gate,
+        dropout=dropout,
+        units=units,
     )
-    return _build(port, num_blocks, head_layers, n_class)
-
-
-def _build(port: _Port, num_blocks: int, head_layers: Sequence[int], n_class: int):
-    """Wire the stages in the order of ``VectorNeuronsClassifier.forward``."""
     with LayerConfigScope(beta0=0.0, enable_ebops=True):
-        x = keras.Input((port.nconstituents, 3), name="constituents")
+        x = keras.Input((nconstituents, 3), name="constituents")
         pt, angles = _words(port, x)
         p, keep, n, tail, u = _lift(port, pt, angles)
         v, s = _first_block(port, u, _first_scalars(port, p, keep, tail, u), n)

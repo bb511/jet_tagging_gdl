@@ -20,15 +20,17 @@ import torch
 from torch import nn
 
 
+def _norm_layer(dim: int, normalization: str) -> nn.Module:
+    return nn.BatchNorm1d(dim) if normalization == "batch" else nn.LayerNorm(dim)
+
+
 class SeqNorm(nn.Module):
     """BatchNorm1d or LayerNorm over the channel axis of a (jets, tokens, channels)."""
 
     def __init__(self, dim: int, normalization: str = "batch") -> None:
         super().__init__()
         self.normalization = normalization
-        self.norm = (
-            nn.BatchNorm1d(dim) if normalization == "batch" else nn.LayerNorm(dim)
-        )
+        self.norm = _norm_layer(dim, normalization)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Normalise over the channel axis, transposing for BatchNorm1d."""
@@ -128,11 +130,7 @@ class JetFormerNet(nn.Module):
         self.blocks = nn.ModuleList(
             [JetFormerBlock(*block_args) for _ in range(num_transformers)]
         )
-        self.norm = (
-            nn.BatchNorm1d(embed_dim)
-            if normalization == "batch"
-            else nn.LayerNorm(embed_dim)
-        )
+        self.norm = _norm_layer(embed_dim, normalization)
         self.classifier = nn.Linear(embed_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

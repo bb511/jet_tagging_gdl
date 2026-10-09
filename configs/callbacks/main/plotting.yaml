@@ -1,6 +1,4 @@
-# ROC curves and confusion matrices, written under the run directory. No training curves: the
-# per-epoch metrics are in MLflow.
+# ROC curves and confusion matrices of the test pass, written under the run directory. No
+# training curves: the per-epoch metrics are in MLflow.
 
 _target_: src.callbacks.plotting.PlottingCallback
-# In logit-column order, kept in step with src.symmetry.CLASS_NAMES.
-class_names: ["g", "q", "W", "Z", "t"]

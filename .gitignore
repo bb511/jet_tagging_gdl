@@ -108,12 +108,6 @@ dmypy.json
 
 # Lightning-Hydra-Template
 configs/local/default.yaml
-/data/
-/logs/
-/outputs/
-/checkpoints/
-/results/
-/results_archive/
 .env
 .env.*
 

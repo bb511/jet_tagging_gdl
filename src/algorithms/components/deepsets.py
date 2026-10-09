@@ -13,6 +13,7 @@ import math
 import torch
 from torch import nn
 
+from src.algorithms.components.mlp import _dense
 from src.algorithms.components.vector_neurons import (
     _form_matrix,
     _sort_by_pt,
@@ -51,35 +52,10 @@ def _masked_pool(h: torch.Tensor, real: torch.Tensor, aggregation: str) -> torch
     return total / h.shape[1]
 
 
-def _dense(
-    dims: list[int], final_activation: bool, dropout: float = 0.0
-) -> nn.Sequential:
-    """Stack ``len(dims) - 1`` linear layers, with dropout in front of each and a ReLU
-    between them and, if asked, after the last."""
-    layers: list[nn.Module] = []
-    for i in range(len(dims) - 1):
-        if dropout > 0.0:
-            layers.append(nn.Dropout(dropout))
-        layers.append(nn.Linear(dims[i], dims[i + 1]))
-        if final_activation or i < len(dims) - 2:
-            layers.append(nn.ReLU())
-    return nn.Sequential(*layers)
-
-
-def _check_choices(aggregation: str) -> None:
-    """Refuse a pooling this module does not provide, by name."""
-    if aggregation not in AGGREGATIONS:
-        raise ValueError(
-            f"aggregation must be one of {list(AGGREGATIONS)}, got {aggregation!r}."
-        )
-
-
-def _check_moments(moments: str) -> None:
-    """Refuse a moment set this module does not provide, by name."""
-    if moments not in MOMENT_SETS:
-        raise ValueError(
-            f"moments must be one of {list(MOMENT_SETS)}, got {moments!r}."
-        )
+def _check_choice(name: str, value: str, choices: tuple[str, ...]) -> None:
+    """Refuse a *value* of the option *name* that is not one of *choices*."""
+    if value not in choices:
+        raise ValueError(f"{name} must be one of {list(choices)}, got {value!r}.")
 
 
 def _check_deepsets_options(
@@ -87,8 +63,8 @@ def _check_deepsets_options(
 ) -> None:
     """Refuse an unknown pooling or moment set, a moments-only network without moments,
     and phi widths given to a network without phi or missing from one with it."""
-    _check_choices(aggregation)
-    _check_moments(moments)
+    _check_choice("aggregation", aggregation, AGGREGATIONS)
+    _check_choice("moments", moments, MOMENT_SETS)
     if moments_only and moments == "none":
         raise ValueError("moments_only needs a moment set, but moments is 'none'.")
     if (phi_layers is None) != moments_only:
@@ -278,8 +254,8 @@ class JEDILinearNet(nn.Module):
         moments: str = "none",
     ) -> None:
         super().__init__()
-        _check_choices(aggregation)
-        _check_moments(moments)
+        _check_choice("aggregation", aggregation, AGGREGATIONS)
+        _check_choice("moments", moments, MOMENT_SETS)
         self.aggregation = aggregation
         # A plain attribute under "none", as in DeepSetsNet.
         self.moments = None if moments == "none" else JetMoments(moments)

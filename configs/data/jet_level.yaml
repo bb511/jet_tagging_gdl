@@ -24,8 +24,12 @@ transform_kwargs: {}
 nconstituents: 150
 
 batch_size: 2048
+# Loader processes; the driver alone serves a split held in memory and never transformed.
+num_workers: 0
+pin_memory: false
 
-# 1: the record's split; k >= 2: pool train+val and re-split (experiments set 5). The seed is that
-# of configs/data/hls4ml.yaml, so that fold i holds the networks' jets.
-n_folds: 1
+# k >= 2: pool train+val and re-split into k folds; 1: the record's split, which the searches
+# and the debug configs pass. The seed is that of configs/data/hls4ml.yaml, so that fold i holds
+# the networks' jets.
+n_folds: 5
 kfold_seed: 42

@@ -17,9 +17,7 @@ The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -101,9 +99,7 @@ EMBEDDED = {
     "jedi_linear_moments",
     "moments_only",
 }
-# The rows trained at baseline alone, which today are the embedded class and the jet-level rows.
-# A row that reads data.features but runs the baseline alone would join this set and not
-# EMBEDDED, so that every feature set still had catalogues for it.
+# The rows trained at baseline alone: the embedded rows and the jet-level rows.
 BASELINE_ONLY = set(EMBEDDED) | set(JET_LEVEL)
 # Trained quantisation-aware from a float row's checkpoint, with no study: outside MODELS, so
 # that no catalogue of theirs is generated; scripts/hls4ml/run<row>_*.sh are hand-written.
@@ -127,14 +123,6 @@ SEP = "# " + 72 * "-"
 # (trial number, objective value, params) of the study a block was tuned on.
 Trial = tuple[int, float, dict[str, str]]
 Variant = tuple[str, str, str]
-
-
-def find_repo_root(start: Path) -> Path:
-    """Walk up from ``start`` to the directory holding ``.project-root``."""
-    for p in [start, *start.parents]:
-        if (p / ".project-root").exists():
-            return p
-    return start
 
 
 def study_name(model: str, nconst: int, method: str, scheme: str) -> str:
@@ -161,27 +149,33 @@ def _best_within_budget(complete: list[FrozenTrial]) -> Trial | None:
     )
 
 
-def best_trial(db: Path, study: str) -> Trial | None:
-    """Best of the first ``TRIAL_BUDGET`` completed trials of ``study``, or None when
-    there is no such study or no completed trial.
-
-    The window holds COMPLETE trials alone, in trial-number order, so failed, pruned and
-    waiting trials and the orphan running rows of killed drivers take no place in it.
+def _complete_trials(db: Path, study: str) -> list[FrozenTrial]:
+    """The COMPLETE trials of ``study``, none when the database or the study is absent.
 
     Optuna is imported here, not at module scope, so the generator runs with no study
     database present, which is the state the checked-in catalogues were generated in.
     """
     if not db.exists():
-        return None
+        return []
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     try:
         loaded = optuna.load_study(study_name=study, storage=f"sqlite:///{db}")
     except KeyError:  # no such study
-        return None
+        return []
     complete = (optuna.trial.TrialState.COMPLETE,)
-    return _best_within_budget(loaded.get_trials(deepcopy=False, states=complete))
+    return loaded.get_trials(deepcopy=False, states=complete)
+
+
+def best_trial(db: Path, study: str) -> Trial | None:
+    """Best of the first ``TRIAL_BUDGET`` completed trials of ``study``, or None when
+    there is no such study or no completed trial.
+
+    The window holds COMPLETE trials alone, in trial-number order, so failed, pruned and
+    waiting trials and the orphan running rows of killed drivers take no place in it.
+    """
+    return _best_within_budget(_complete_trials(db, study))
 
 
 def overrides_of(params: dict[str, str]) -> list[str]:
@@ -386,43 +380,6 @@ def render(model: str, task: str, dbs: Path, layout: Layout) -> str:
     return "\n".join(out).rstrip("\n") + "\n"
 
 
-def count_commands(lib: Path, text: str) -> int:
-    """Commands lib.sh's own parser finds in ``text``.
-
-    Fed back through the submitters' parser rather than a second implementation of it
-    here, so the two cannot disagree about what a block is.
-    """
-    with tempfile.NamedTemporaryFile("w", suffix=".sh") as fh:
-        fh.write(text)
-        fh.flush()
-        script = f'. "{lib}"; extract_cmds "$1"'
-        found = subprocess.run(
-            ["bash", "-c", script, "_", fh.name],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    return len([line for line in found.stdout.splitlines() if line.strip()])
-
-
-def _catalogue(
-    model: str, task: str, dbs: Path, layout: Layout, lib: Path
-) -> tuple[str, int]:
-    """One catalogue's text, and the number of commands lib.sh's parser finds in it.
-
-    :raises SystemExit: when the parser does not find the model's whole grid, which
-        means the generated layout and the parser have drifted apart.
-    """
-    text = render(model, task, dbs, layout)
-    found = count_commands(lib, text)
-    expected = len(NCONSTITUENTS_OF[model]) * len(VARIANTS_OF[model])
-    if found != expected:
-        sys.exit(
-            f"error: {model} {task}: lib.sh parsed {found} commands, expected {expected}"
-        )
-    return text, found
-
-
 def _show(path: Path, repo: Path) -> str:
     """Repo-relative when the path is inside the repository, absolute otherwise."""
     try:
@@ -431,18 +388,16 @@ def _show(path: Path, repo: Path) -> str:
         return str(path)
 
 
-def _emit(text: str, path: Path, found: int, repo: Path, dry_run: bool) -> int:
+def _emit(text: str, path: Path, repo: Path, dry_run: bool) -> int:
     """Write one catalogue, or report what writing it would do; 1 when it would change
     it."""
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-        print(f"wrote {_show(path, repo)}: {found} commands")
+        print(f"wrote {_show(path, repo)}")
         return 0
     same = path.exists() and path.read_text() == text
-    print(
-        f"{_show(path, repo)}: {found} commands, {'unchanged' if same else 'WOULD CHANGE'}"
-    )
+    print(f"{_show(path, repo)}: {'unchanged' if same else 'WOULD CHANGE'}")
     return 0 if same else 1
 
 
@@ -463,19 +418,19 @@ def models_of(layout: Layout) -> list[str]:
 def _generate(dbs: Path, out: Path, repo: Path, layout: Layout, dry_run: bool) -> int:
     """Write or check every catalogue; returns how many differ from a fresh
     generation."""
-    lib = repo / "scripts" / "cluster" / "lib.sh"
     stale = 0
     for model in models_of(layout):
         for task in ("train", "eval"):
-            text, found = _catalogue(model, task, dbs, layout, lib)
+            text = render(model, task, dbs, layout)
             path = out / f"run{model}_{task}.sh"
-            stale += _emit(text, path, found, repo, dry_run)
+            stale += _emit(text, path, repo, dry_run)
     return stale
 
 
 def _parse_args() -> argparse.Namespace:
     """Command line: where the studies are, where the catalogues go, and what to
     write."""
+    # Four flat add_argument declarations: helpers would only scatter the CLI.
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--dbs",
@@ -516,7 +471,7 @@ def _default(given: str | None, root: Path, layout: Layout) -> Path:
 def main() -> int:
     """Generate every catalogue, or report which of them a regeneration would change."""
     args = _parse_args()
-    repo = find_repo_root(Path(__file__).resolve().parent)
+    repo = Path(__file__).resolve().parents[2]
     layout = Layout(features=_features(args.features))
     dbs = _default(args.dbs, repo / "logs" / "optuna" / "hls4ml", layout)
     out = _default(args.out, repo / "scripts" / "hls4ml", layout)

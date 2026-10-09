@@ -1,14 +1,12 @@
 """Vector neurons, wired into the shared training loop."""
 
-import torch
 from torch import nn
 
-from src.algorithms import JetTaggingModule
+from src.algorithms import DenormalisedModule
 from src.algorithms.components.vector_neurons import VectorNeuronsClassifier
-from src.data.components.augmentation import get_norm_scale
 
 
-class VectorNeurons(JetTaggingModule):
+class VectorNeurons(DenormalisedModule):
     """Jet tagger built on vector neurons (arXiv:2104.12229).
 
     The inputs are lifted from (p_T, eta, phi) to own 4-vectors, exact under the
@@ -33,7 +31,7 @@ class VectorNeurons(JetTaggingModule):
         units: float = 20.0,
     ) -> nn.Module:
         """Build the network; the arguments are in components/vector_neurons.py."""
-        self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
+        self._register_denorm_scales()
         return VectorNeuronsClassifier(
             nconstituents=self.hparams.nconstituents,
             head_layers=head_layers,
@@ -49,18 +47,3 @@ class VectorNeurons(JetTaggingModule):
             units=units,
             n_class=self.hparams.output_dim,
         )
-
-    def _on_features_resolved(self) -> None:
-        """Cache the returning [pt, eta, phi] to GeV and radians, in that order."""
-        scales = [
-            get_norm_scale(self.norm_scales, name) for name in self.required_features
-        ]
-        self.denorm_scales.copy_(torch.tensor(scales))
-
-    def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
-        """Undo the normalisation of a batch.
-
-        :param x: (jets, constituents, 3), the columns [pt, eta, phi] as stored.
-        :return: the same columns in GeV and radians.
-        """
-        return x * self.denorm_scales

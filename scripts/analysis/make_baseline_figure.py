@@ -22,8 +22,6 @@ Reads results_table_*.csv files, keeps the augmentation_scheme=none rows and wri
     python3 scripts/analysis/make_baseline_figure.py results/embedded/results_table_baseline.csv
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from pathlib import Path
@@ -33,14 +31,10 @@ import common
 # make_figures.py applies the thesis rcParams on import and owns the drawing helpers and the
 # palette the two figures share; everything taken from it is spelled make_figures.<name> below.
 import make_figures
+import numpy as np
+from matplotlib.axes import Axes
 
-COL, GROUPS, OFFSET = make_figures.COL, make_figures.GROUPS, make_figures.OFFSET
-
-
-def _folds(row: dict[str, str], key: str) -> list[float] | None:
-    """One ``_folds`` cell of a results row, or None when no fold reported the
-    quantity."""
-    return common.parse_folds(row.get(key, ""))
+from src.symmetry import ACCURACY_TRANSFORMED, FLIP, FLIP_RECOVER
 
 
 def _group_entry(
@@ -52,10 +46,10 @@ def _group_entry(
     reconstruction from the transition rates, which is what it used to be before the
     table carried the column.
     """
-    acc_t = _folds(row, f"{scheme}_accuracy_transformed_folds")
-    flip = _folds(row, f"{scheme}_flip_folds")
-    recover = _folds(row, f"{scheme}_flip_recover_folds")
-    distance = _folds(row, f"{scheme}_{metric}_folds")
+    acc_t = common.parse_folds(row.get(f"{scheme}_{ACCURACY_TRANSFORMED}_folds"))
+    flip = common.parse_folds(row.get(f"{scheme}_{FLIP}_folds"))
+    recover = common.parse_folds(row.get(f"{scheme}_{FLIP_RECOVER}_folds"))
+    distance = common.parse_folds(row.get(f"{scheme}_{metric}_folds"))
     if acc_t is None or flip is None or recover is None or distance is None:
         return None
     if len(acc_t) != len(acc):
@@ -71,14 +65,14 @@ def _group_entry(
 def _row_entry(row: dict[str, str], metric: str) -> dict | None:
     """One results row as the entry a panel reads, or None when it carries no per-fold
     accuracy."""
-    acc = _folds(row, "test_acc_folds")
+    acc = common.parse_folds(row.get("test_acc_folds"))
     if acc is None:
         return None
     entry = {
         "acc": common.stats([100.0 * a for a in acc]),
         "flops": common.opt_float(row, "flops_mean"),
     }
-    for group, scheme in GROUPS.items():
+    for group, scheme in make_figures.GROUPS.items():
         entry[group] = _group_entry(row, acc, scheme, metric)
     return entry
 
@@ -86,7 +80,7 @@ def _row_entry(row: dict[str, str], metric: str) -> dict | None:
 def _read_rows(paths: list[Path]) -> list[dict[str, str]]:
     """The augmentation_scheme=none rows of every table named on the command line."""
     rows = [row for path in paths for row in common.read_csv(path)]
-    return [row for row in rows if row.get("augmentation_scheme", "").lower() == "none"]
+    return [row for row in rows if common.scheme_of(row) == "none"]
 
 
 def _model_rank(model: str) -> tuple[int, str]:
@@ -122,7 +116,7 @@ def _row_specs(metric: str) -> list[tuple[str, str, str]]:
     ]
 
 
-def _annotate_clean(ax, entries_by_n) -> None:
+def _annotate_clean(ax: Axes, entries_by_n: list[dict | None]) -> None:
     """Print the clean accuracy per N at the top of the delta-accuracy panel."""
     for k, entry in enumerate(entries_by_n):
         if not entry:
@@ -142,29 +136,35 @@ def _annotate_clean(ax, entries_by_n) -> None:
         )
 
 
-def _panel(ax, entries_by_n, key: str) -> list[float]:
+def _panel(ax: Axes, entries_by_n: list[dict | None], key: str) -> list[float]:
     """One (row, model) panel: a bar cluster per group, recover bands on the flip-rate
     row."""
     extent: list[float] = []
-    for group in GROUPS:
+    for group in make_figures.GROUPS:
         # (constituent-count index, mean, deviation), for the entries that hold this group.
         vals = [
             (k, *e[group][key])
             for k, e in enumerate(entries_by_n)
             if e and e.get(group)
         ]
-        xs = [k + OFFSET[group] for k, _, _ in vals]
+        xs = [k + make_figures.OFFSET[group] for k, _, _ in vals]
         ys, es = [m for _, m, _ in vals], [s for _, _, s in vals]
         bands = [
             (x, entries_by_n[k][group]["recover"]) for x, (k, _, _) in zip(xs, vals)
         ]
-        extent += make_figures._draw_group(
-            ax, xs, ys, es, COL[group], bands if key == "flip" else []
+        extent += make_figures.draw_group(
+            ax, xs, ys, es, make_figures.COL[group], bands if key == "flip" else []
         )
     return extent
 
 
-def _draw_rows(axes, specs, data, models, ns) -> None:
+def _draw_rows(
+    axes: np.ndarray,
+    specs: list[tuple[str, str, str]],
+    data: dict[tuple[str, int], dict],
+    models: list[str],
+    ns: list[int],
+) -> None:
     """The bar rows, each scaled to its own extent; the clean accuracy annotates the
     first."""
     for i, (key, _, ylabel) in enumerate(specs):
@@ -176,12 +176,19 @@ def _draw_rows(axes, specs, data, models, ns) -> None:
                 _annotate_clean(axes[i, j], entries)
         # The clean-accuracy annotation sits at the top of its panel, so that row is given room.
         headroom = 0.3 if key == "dacc" else 0.0
-        make_figures._finish_row(
+        make_figures.finish_row(
             axes[i], ylabel, extent, ns, i == len(specs) - 1, headroom
         )
 
 
-def draw(data, models, ns, metric: str, out_dir: Path, name: str) -> None:
+def draw(
+    data: dict[tuple[str, int], dict],
+    models: list[str],
+    ns: list[int],
+    metric: str,
+    out_dir: Path,
+    name: str,
+) -> None:
     """Draw the figure and write it as ``<name>.svg`` under ``out_dir``."""
     specs = _row_specs(metric)
     fig, axes = make_figures.scaffold([label for _, label, _ in specs], models)
@@ -189,12 +196,12 @@ def draw(data, models, ns, metric: str, out_dir: Path, name: str) -> None:
     flops = [
         [(data.get((model, n)) or {}).get("flops") for n in ns] for model in models
     ]
-    make_figures._flops_footer(axes[len(specs)], flops, ns)
+    make_figures.flops_footer(axes[len(specs)], flops, ns)
     # Four legend entries do not fit on one row of a single-column figure.
     legend_rows = 1 if len(models) > 1 else 2
-    make_figures._legend(fig, ncol=4 // legend_rows)
+    make_figures.legend(fig, ncol=4 // legend_rows)
     fig.tight_layout(rect=[0.0, 0.035 * legend_rows, 1, 0.975], h_pad=0.4)
-    make_figures._save(fig, out_dir, name, [])
+    make_figures.save(fig, out_dir, name, [])
 
 
 def _parse_args() -> argparse.Namespace:

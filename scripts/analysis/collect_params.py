@@ -25,15 +25,14 @@ quantised run whose float network cannot be traced gives one in ``params`` alone
     python3 scripts/analysis/collect_params.py <root> [<root> ...] --out params.csv
 """
 
-from __future__ import annotations
-
 import argparse
-import csv
 import json
 import operator
 import re
 import sys
 from pathlib import Path
+
+import common
 
 COLUMNS = [
     "model",
@@ -176,15 +175,6 @@ def collect(roots: list[Path]) -> list[dict[str, object]]:
     return sorted(rows, key=key)
 
 
-def write(rows: list[dict[str, object]], out: Path) -> None:
-    """Rewrite *out* from the rows: unlike a results table, it is never appended to."""
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _parse_args() -> argparse.Namespace:
     """Command line: the roots to read and the table to write."""
     parser = argparse.ArgumentParser(
@@ -204,7 +194,7 @@ def main() -> None:
     """Write one row per main run under every root the command line names."""
     args = _parse_args()
     rows = collect(args.roots)
-    write(rows, args.out)
+    common.write_csv(args.out, rows, COLUMNS)
     print(f"[done] {len(rows)} main runs -> {args.out}")
 
 

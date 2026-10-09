@@ -17,6 +17,7 @@ axis. This is computed based on the constituent values present in the data.
 
 import math
 from collections.abc import Callable, Sequence
+from functools import partial
 
 import torch
 
@@ -49,6 +50,24 @@ def feature_index(feature_names: Sequence[str], name: str) -> int | None:
     """Return the feature of *name*, bare or ``j1_``-prefixed, or None."""
     names = list(feature_names)
     return next((names.index(c) for c in (name, f"j1_{name}") if c in names), None)
+
+
+def resolve_feature_indices(
+    model_features: list[str], feature_names: list[str]
+) -> list[int]:
+    """Return the index of each of *model_features* in *feature_names*, matched by
+    `feature_index`.
+
+    :raises ValueError: if a feature is absent, bare and prefixed.
+    """
+    indices = [feature_index(feature_names, name) for name in model_features]
+    missing = [name for name, index in zip(model_features, indices) if index is None]
+    if missing:
+        raise ValueError(
+            f"Feature {missing[0]!r} is absent from the data columns {feature_names}. "
+            f"data.features must contain {', '.join(model_features)}."
+        )
+    return indices
 
 
 def get_norm_scale(norm_scales: dict[str, float] | None, name: str) -> float:
@@ -84,6 +103,10 @@ def sample_haar_so3_rot_matrices(
     A Gaussian in R^4 is isotropic: the normalised draws are uniform on the unit
     quaternions. This is just the Haar measure on SO(3). The clamp forbids the all-zero
     draw.
+
+    The draw is not restricted to the detector: about 3.5 % of the rotated jets have a
+    constituent beyond ``|eta| = 3``, accepted because SO(3) is the control for a group
+    that is not a symmetry of the data.
     """
     quat = torch.randn(max(num_rotations, 0), 4, device=device)
     x, y, z, w = (quat / quat.norm(dim=1, keepdim=True).clamp(min=1e-8)).unbind(dim=1)
@@ -96,17 +119,18 @@ def sample_haar_so3_rot_matrices(
 
 
 def _sample_boosts(
-    nbr_rot: int, eta_max: float, isotropic: bool, device: torch.device | None
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    nbr_rot: int, device: torch.device | None, eta_max: float, isotropic: bool
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Draw one boost per jet, shape (nbr_rot, 4, 4), acting on [E, px, py, pz].
 
     The rapidity is drawn uniform on [-eta_max, eta_max]. Along the beam this is the
     symmetry of a pp collision. We also draw isotropic Lorentz rotations, which are not
     a symmetry of the data but are used later to test models that claim to be fully
-    Lorentz invariant or equivariant.
+    Lorentz invariant or equivariant. Boosting without caring about the detector bounds
+    creates 0.2% jets that would not be seen by the detector normally.
 
-    :return: the boosts, their rapidities, shape (nbr_rot,), and their unit axes, shape
-        (nbr_rot, 3).
+    :return: the boosts and the draw: the rapidity, shape (nbr_rot,), or under
+        *isotropic* the rapidity followed by the unit axis, shape (nbr_rot, 4).
     """
     beam = torch.eye(3, device=device)[2].expand(nbr_rot, 3)
     axis = torch.randn(nbr_rot, 3, device=device) if isotropic else beam
@@ -122,7 +146,7 @@ def _sample_boosts(
         (torch.cosh(xi) - 1)[:, None, None] * axis[:, :, None] * axis[:, None, :]
     )
 
-    return boosts, xi, axis
+    return boosts, torch.cat([xi[:, None], axis], dim=1) if isotropic else xi
 
 
 def _read_four_momenta(
@@ -225,53 +249,15 @@ def rebase_on_kept_axis(
     return _write(x, feature_names, norm_scales, kept, active)
 
 
-def apply_random_so2(
-    x: torch.Tensor,
-    feature_names: Sequence[str],
-    norm_scales: dict[str, float] | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Rotate every jet about the beam by its own angle; return the batch and the
-    angles."""
-    mats, thetas = sample_so2_rot_matrices(x.shape[0], x.device)
-    return _apply(x, mats, feature_names, norm_scales), thetas
-
-
-def apply_random_so3(
-    x: torch.Tensor,
-    feature_names: Sequence[str],
-    norm_scales: dict[str, float] | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Rotate every jet by its own Haar-random matrix.
-
-    The draw is not restricted to the detector: about 3.5 % of the rotated jets have a
-    constituent beyond ``|eta| = 3``, accepted because SO(3) is the control for a group
-    that is not a symmetry of the data.
-
-    :return: the rotated batch and the matrices it was rotated by, shape (jets, 3, 3).
-    """
-    mats = sample_haar_so3_rot_matrices(x.shape[0], x.device)
-    return _apply(x, mats, feature_names, norm_scales), mats
-
-
-def apply_random_lorentz(
-    x: torch.Tensor,
-    feature_names: Sequence[str],
-    eta_max: float = 1.0,
-    norm_scales: dict[str, float] | None = None,
-    isotropic: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Boost every jet by its own rapidity, uniform on [-eta_max, eta_max].
-
-    Along the beam by default or in a random direction if *isotropic* is True. Boosting
-    without caring about the detector bounds creates 0.2% jets that would not be seen by
-    the detector normally.
-
-    :return: the batch and the draw: the rapidity, shape (jets,), or under *isotropic*
-        the rapidity followed by the unit axis, shape (jets, 4).
-    """
-    boosts, xi, axis = _sample_boosts(x.shape[0], eta_max, isotropic, x.device)
-    draw = torch.cat([xi[:, None], axis], dim=1) if isotropic else xi
-    return _apply(x, boosts, feature_names, norm_scales), draw
+# Per group of src.symmetry.GROUPS, (jets, device, eta_max) -> the matrices acting on
+# each jet and the draws behind them; eta_max reaches the boosts alone. A rotation of
+# SO(3) is stored as its own matrix.
+_SAMPLERS = {
+    "so2": lambda n, device, eta_max: sample_so2_rot_matrices(n, device),
+    "so3": lambda n, device, eta_max: (sample_haar_so3_rot_matrices(n, device),) * 2,
+    "lorentz": partial(_sample_boosts, isotropic=False),
+    "lorentz_iso": partial(_sample_boosts, isotropic=True),
+}
 
 
 def make_drawing_transform(
@@ -288,16 +274,17 @@ def make_drawing_transform(
     ``lorentz``; the rapidity and the unit axis, shape (jets, 4), for ``lorentz_iso``.
     The arguments are those of `make_transform`, which draws the same numbers.
     """
-    names, iso, eta_max = list(feature_names), scheme == "lorentz_iso", lorentz_eta_max
-    if scheme == "so2":
-        return lambda x: apply_random_so2(x, names, norm_scales)
-    if scheme == "so3":
-        return lambda x: apply_random_so3(x, names, norm_scales)
-    if scheme in ("lorentz", "lorentz_iso"):
-        return lambda x: apply_random_lorentz(x, names, eta_max, norm_scales, iso)
-    raise ValueError(
-        f"Transformation scheme must be one of {list(GROUPS)}, got {scheme!r}..."
-    )
+    if scheme not in _SAMPLERS:
+        raise ValueError(
+            f"Transformation scheme must be one of {list(GROUPS)}, got {scheme!r}..."
+        )
+    names, sample = list(feature_names), _SAMPLERS[scheme]
+
+    def drawing(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        mats, draw = sample(x.shape[0], x.device, lorentz_eta_max)
+        return _apply(x, mats, names, norm_scales), draw
+
+    return drawing
 
 
 def make_transform(

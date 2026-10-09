@@ -36,14 +36,12 @@ from src.algorithms.components.vector_neurons_hgq import (
     set_beta,
     total_ebops,
 )
-from src.algorithms.components.vector_neurons_port import (
-    ARCHITECTURE_KEYS,
-    LEGACY_DEFAULTS,
-    _checkpoint_path,
+from src.algorithms.utils.flops import count_flops_per_jet
+from src.algorithms.utils.vector_neurons_port import (
+    architecture,
     copy_float_weights,
     load_float_network,
 )
-from src.algorithms.utils.flops import count_flops_per_jet
 from src.algorithms.vector_neurons import VectorNeurons
 from src.callbacks.invariance import InvarianceMetricCallback
 from src.utils.pylogger import RankedLogger
@@ -54,14 +52,11 @@ from src.utils.pylogger import RankedLogger
 import keras
 from hgq.utils.sugar import PieceWiseSchedule
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 # Jets per Keras call on a whole split, so that the torch intermediates of one chunk
 # alone are held at a time.
 CHUNK = 65536
-# A float checkpoint must match these to be copied. The units differ by design: the copy
-# folds them into the batch normalisations.
-ARCHITECTURE = tuple(key for key in ARCHITECTURE_KEYS if key != "units")
 VERSIONED = ("keras", "hgq2", "jax")
 
 
@@ -141,20 +136,34 @@ class VectorNeuronsHGQ(VectorNeurons):
         configure_jax(jax_platform, jax_devices, floatx)
         # Keras draws the initial weights from a generator of its own, seeded from torch.
         keras.utils.set_random_seed(torch.initial_seed() % 2**32)
-        self.register_buffer("denorm_scales", torch.ones(len(self.required_features)))
+        self._register_denorm_scales()
         self.automatic_optimization = False
-        q = self.quantisation = Quantisation(**(quantisation or {}))
-        n, n_class = self.hparams.nconstituents, self.hparams.output_dim
-        widths = (vector_channels, scalar_channels, invariants, tensor_invariants)
-        layers = (*widths, stream_channels, mlp_layers, gate, dropout, units, n_class)
-        return KerasNetwork(*build_port(n, head_layers, num_blocks, *layers, q))
+        self.quantisation = Quantisation(**(quantisation or {}))
+        model, inputs_model = build_port(
+            nconstituents=self.hparams.nconstituents,
+            head_layers=head_layers,
+            num_blocks=num_blocks,
+            vector_channels=vector_channels,
+            scalar_channels=scalar_channels,
+            invariants=invariants,
+            tensor_invariants=tensor_invariants,
+            stream_channels=stream_channels,
+            mlp_layers=mlp_layers,
+            gate=gate,
+            dropout=dropout,
+            units=units,
+            n_class=self.hparams.output_dim,
+            quantisation=self.quantisation,
+        )
+        return KerasNetwork(model, inputs_model)
 
     def _record_costs(self, nconstituents: int, nbr_feats: int) -> None:
         """Price the FLOPs on the float network of this architecture, as the ``vn`` row
         is priced; the EBOPs are NaN until the trace at test time."""
-        hparams, n_class = self.hparams, self.hparams.output_dim
-        kwargs = {k: hparams[k] for k in ARCHITECTURE_KEYS if k in hparams}
-        twin = VectorNeuronsClassifier(nconstituents, n_class=n_class, **kwargs)
+        n_class = self.hparams.output_dim
+        twin = VectorNeuronsClassifier(
+            nconstituents, n_class=n_class, **architecture(self.hparams)
+        )
         self.flops_total = count_flops_per_jet(twin, nconstituents, nbr_feats)
         self.ebops_total = self.ebops_unpriced = math.nan
 
@@ -202,28 +211,13 @@ class VectorNeuronsHGQ(VectorNeurons):
         datalanes."""
         model, q = self.net.keras_model, self.quantisation
         if self.hparams.init_from:
-            net, units = self._float_network(), self.hparams.units
-            copy_float_weights(model, net, units, fold_norm=q.fold_norm)
+            net = load_float_network(self.hparams.init_from, like=self.hparams)
+            log.info(f"Copying the float network of {self.hparams.init_from}")
+            copy_float_weights(model, net, self.hparams.units, fold_norm=q.fold_norm)
         seed_weight_bits(model, q.weight_bits)
         jets = datamodule.data_train.X[: self.hparams.calibration_jets]
         ebops = seed_datalane_bits(model, self._keras_inputs(jets), q.data_bits)
         log.info(f"{ebops} EBOPs at {q.data_bits} data and {q.weight_bits} weight bits")
-
-    def _float_network(self) -> VectorNeuronsClassifier:
-        """The trained float network ``init_from`` names.
-
-        :raises ValueError: when its architecture is not this port's.
-        """
-        path = _checkpoint_path(Path(self.hparams.init_from))
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-        theirs = {**LEGACY_DEFAULTS, **checkpoint["hyper_parameters"]}
-        ours = {**LEGACY_DEFAULTS, **self.hparams}
-        differ = [k for k in ARCHITECTURE if theirs.get(k) != ours.get(k)]
-        if differ:
-            pairs = ", ".join(f"{k} {theirs.get(k)} vs {ours.get(k)}" for k in differ)
-            raise ValueError(f"{path} holds another architecture: {pairs}.")
-        log.info(f"Copying the float network of {path}")
-        return load_float_network(path)
 
     def configure_optimizers(self) -> None:
         """Compile the port with the Keras optimiser and the learning-rate schedule of

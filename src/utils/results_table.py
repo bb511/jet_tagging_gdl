@@ -39,11 +39,11 @@ from src.symmetry import (
 from src.utils.bootstrap import bootstrap_ci
 from src.utils.pylogger import RankedLogger
 
-log = RankedLogger(__name__, rank_zero_only=True)
+log = RankedLogger(__name__)
 
 
 def _fold_values(folds: list[dict[str, object]], name: str) -> list[float]:
-    return [_to_float(fold.get(name)) for fold in folds]
+    return [float(fold.get(name, math.nan)) for fold in folds]
 
 
 def _performance_columns(folds: list[dict[str, object]]) -> dict[str, object]:
@@ -89,8 +89,8 @@ class ResultsTable:
         invariance_metric: str = TOTAL_VARIATION,
     ) -> None:
         self.model_name = model_name
-        self.augmentation_scheme = str(augmentation_scheme).lower()
-        self.nconstituents = int(nconstituents)
+        self.augmentation_scheme = augmentation_scheme
+        self.nconstituents = nconstituents
         self.invariance_metric = invariance_metric
         self.judged_group = _judged_group(self.augmentation_scheme)
         # A selected metric that is itself tabulated would fill two identical column families.
@@ -220,14 +220,6 @@ def _table_path(base: Path, subdir: str | None, display_method: str) -> Path:
     """
     directory = base.parent / subdir if subdir else base.parent
     return directory / f"{base.stem}_{display_method}{base.suffix}"
-
-
-def _to_float(value) -> float:
-    """Read a metric out of Lightning's dicts, whether it is a tensor, a number or
-    absent."""
-    if value is None:
-        return float("nan")
-    return float(value.item()) if hasattr(value, "item") else float(value)
 
 
 def _mean(values: Sequence[float]) -> float:

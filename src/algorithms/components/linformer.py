@@ -1,4 +1,4 @@
-"""Single-head Linformer jet tagger in float of Laatu et al. (arXiv:2510.24784).
+"""Single-head Linformer jet tagger in float (Laatu et al., arXiv:2510.24784).
 
 The attention component is the Linformer of Wang et al. (arXiv:2006.04768) as
 ``QLinformerAttention`` of github.com/calad0i/HGQ2 (``src/hgq/layers/attn/linformer.py``)
@@ -20,21 +20,9 @@ The slots are read in the record's order; there's no sort in the record.
 import torch
 from torch import nn
 
-from src.algorithms.components.deepsets import _check_choices, _masked_pool
+from src.algorithms.components.deepsets import AGGREGATIONS, _check_choice, _masked_pool
 from src.algorithms.components.jetformer import SeqNorm
-
-
-def _pool(h: torch.Tensor, real: torch.Tensor, aggregation: str) -> torch.Tensor:
-    """Pool (jets, constituents, width) over the real constituents, to (jets, width).
-
-    :param real: (jets, constituents, 1), True for a real constituent.
-    :param aggregation: one of `AGGREGATIONS`. ``sum_over_n`` divides the masked sum by
-        the slot count N, the same for every jet: the reference's global average pool,
-        restricted to the real constituents.
-    """
-    if aggregation == "sum_over_n":
-        return _masked_pool(h, real, "sum") / h.shape[1]
-    return _masked_pool(h, real, aggregation)
+from src.algorithms.components.mlp import dense_stack
 
 
 def _slot_projection(nconstituents: int, kv_proj_dim: int) -> nn.Parameter:
@@ -50,8 +38,8 @@ class LinformerAttention(nn.Module):
     Before its dense layer, the key input is projected over the slot axis by E_k, a
     bias-free (N, k) matrix, and the value input by E_v, a second one; the key dense
     layer has no bias. Padded slots are zeroed before both projections. Their queries
-    are still computed, and the tokens they give enter the batch statistics
-    of the feed-forward BatchNorm.
+    are still computed, and the tokens they give enter the batch statistics of the
+    BatchNorm in the feed-forward sub-layer.
     """
 
     def __init__(self, dim: int, nconstituents: int, kv_proj_dim: int) -> None:
@@ -86,15 +74,6 @@ def _token_dense(in_dim: int, out_dim: int, batchnorm: bool) -> nn.Sequential:
     return nn.Sequential(nn.Linear(in_dim, out_dim), norm, nn.ReLU())
 
 
-def _head(widths: list[int], out_dim: int, batchnorm: bool) -> nn.Sequential:
-    """Stack Linear, BatchNorm if asked and ReLU for each *width*, then a linear."""
-    layers: list[nn.Module] = []
-    for width_in, width_out in zip(widths, widths[1:]):
-        norm = nn.BatchNorm1d(width_out) if batchnorm else nn.Identity()
-        layers += [nn.Linear(width_in, width_out), norm, nn.ReLU()]
-    return nn.Sequential(*layers, nn.Linear(widths[-1], out_dim))
-
-
 class LinformerNet(nn.Module):
     """Embed the constituents, run one Linformer block and read the pool of its tokens.
 
@@ -124,14 +103,14 @@ class LinformerNet(nn.Module):
         batchnorm: bool = True,
     ) -> None:
         super().__init__()
-        _check_choices(aggregation)
+        _check_choice("aggregation", aggregation, AGGREGATIONS)
         self.aggregation = aggregation
         self.embed = _token_dense(in_dim, embed_dim, batchnorm)
         self.attention = LinformerAttention(embed_dim, nconstituents, kv_proj_dim)
         self.feed_forward = nn.Sequential(
             _token_dense(embed_dim, ff_dim, batchnorm), nn.Linear(ff_dim, embed_dim)
         )
-        self.head = _head([embed_dim, *head_layers], out_dim, batchnorm)
+        self.head = dense_stack(embed_dim, head_layers, out_dim, batchnorm)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the class logits."""
@@ -141,4 +120,4 @@ class LinformerNet(nn.Module):
         h = self.embed(x)
         h = h + self.attention(h, real)
         h = h + self.feed_forward(h)
-        return self.head(_pool(h, real, self.aggregation))
+        return self.head(_masked_pool(h, real, self.aggregation))
