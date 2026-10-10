@@ -1,0 +1,77 @@
+# JEDI-linear trained quantisation-aware with HGQ2 (Keras on JAX) for synthesis with alkaid: the
+# jedi_linear_moments network behind fixed-point quantisers, read from the words of pt, etarel and
+# phirel; moments: none builds the control without the moments. Lightning keeps the loop and Keras
+# owns the weights, the optimiser and the step. The architecture keys are those of
+# jedi_linear_moments.yaml and the training keys those of vn_hgq.yaml (tests/test_configs.py keeps
+# both in step). Per-nconstituents values in configs/experiment/hls4ml/jedi_linear_hgq_<N>.yaml.
+_target_: src.algorithms.jedi_linear_hgq.JEDILinearHGQ
+_convert_: all # the quantisation, the beta schedule and the device list reach Python as containers
+name: jedi_linear_hgq
+
+nconstituents: ${data.nconstituents}
+nbr_feats: 3 # not ${len:...}: the net reads pt, etarel and phirel alone, so features must be those
+output_dim: 5
+
+# Interpolated as in jedi_linear_moments.yaml. The Keras step has no SCL term, so setup() refuses
+# symm_loss.
+method: ${data.method}
+group: ${data.augmentation_scheme}
+symm_loss_weight: 0.1
+transform_kwargs: ${data.transform_kwargs}
+
+hidden: 64 # width of every per-constituent layer, of the context and of the pooled vector
+head_layers: [64, 32, 16] # hidden widths of the MLP on the pooled vector and the moments
+aggregation: sum # sum, max or sum_over_n over the real constituents, for both pools
+# uniform: the five moments of every real constituent; rankcut: those and the moments of the
+# leading 1, 2, 4 and 8 by p_T, of which the port builds the 20 that do not vanish; none: the
+# control, the head reading the pooled vector alone.
+moments: uniform
+# GeV per unit of p_T: a power of two, so that p is a shift of the p_T word. The copy of a float
+# network folds the moments' 20 GeV into the head's first layer.
+units: 16.0
+
+quantisation:
+  # (keep_negative, integer bits, fraction bits) of the words: p_T on [0, 4096) GeV at 0.25 GeV and
+  # etarel and phirel on [-2, 2) rad at 2^-8 rad, then the logits.
+  pt_kif: [0, 12, 2]
+  angle_kif: [1, 1, 8]
+  output_kif: [1, 6, 8]
+  data_bits: 14 # i + f of every trainable datalane, seeded before training
+  weight_bits: 8 # bits of every weight and bias
+  float_mode: false # true: every quantiser is the identity
+  # The port has no batch normalisation: the copy of init_from folds the moments' into the head's
+  # first layer, so the row refuses false.
+  fold_norm: true
+  # Rounding of every trainable datalane: TRN, truncation, a free drop of bits, where RND to nearest
+  # costs a half-LSB constant adder in the RTL. The fixed quantisers keep RND.
+  round_mode: TRN
+
+beta: 1.0e-7 # weight of the EBOPs in the loss, constant over the run unless a schedule is set
+beta_schedule: null # [[epoch, beta, linear|log|constant], ...] of HGQ2's PieceWiseSchedule
+# A float jedi_linear_moments (or, for the control, jedi_linear) run directory, manifest or .ckpt
+# of the same architecture on [pt, etarel, phirel], copied first.
+init_from: null
+calibration_jets: 100000 # training jets on which the datalane bits are seeded
+floatx: float64 # Keras's float type; float64 reproduces the fixed-point arithmetic exactly
+# JAX runs on the trainer's accelerator and devices; setting these apart runs it elsewhere.
+jax_platform: ${trainer.accelerator}
+jax_devices: ${trainer.devices}
+
+optimizer:
+  _target_: keras.optimizers.AdamW
+  _partial_: true
+  weight_decay: 0.05
+  epsilon: 1.0e-8
+  global_clipnorm: 1.0 # in place of the trainer's clipping, which manual optimisation refuses
+
+# Stepped per batch by Keras. decay_steps and warmup_steps are injected by configure_optimizers, the
+# run length being known only once the trainer is attached.
+scheduler:
+  _target_: keras.optimizers.schedules.CosineDecay
+  _partial_: true
+  initial_learning_rate: 1.0e-3
+  alpha: 1.0e-2 # the rate ends at 1e-5
+  warmup_target: null # a rate: warm up to it from initial_learning_rate over warmup_fraction
+warmup_fraction: 0.0 # of the steps
+
+compile: false

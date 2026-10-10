@@ -149,7 +149,6 @@ class HLS4MLDataModule(LightningDataModule):
 
         # Filled at instantiation.
         self.record = None
-        self.feature_names: list[str] | None = None
         self.data_train: HLS4MLDataset | None = None
         self.data_val: HLS4MLDataset | None = None
         self.data_test: HLS4MLDataset | None = None
@@ -160,13 +159,17 @@ class HLS4MLDataModule(LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         """Build the datasets of *stage* (``fit`` or ``test``, None for both)."""
-        record = self._ensure_record()
         indices = self.feature_indices()
 
         if stage in (None, "fit") and self.data_train is None:
-            self._setup_fit(record, indices)
+            self._setup_fit(indices)
         if stage in (None, "test") and self.data_test is None:
-            self._setup_test(record)
+            self._setup_test()
+
+    @property
+    def feature_names(self) -> list[str]:
+        """The record's columns, in the order its loader stores them."""
+        return list(self._ensure_record().feature_names)
 
     @property
     def norm_scales(self) -> dict[str, float] | None:
@@ -182,7 +185,7 @@ class HLS4MLDataModule(LightningDataModule):
     def feature_indices(self) -> list[int] | None:
         """The record columns of ``features``, None when they are every column in the
         record's order."""
-        names = list(self._ensure_record().feature_names)
+        names = self.feature_names
         indices = resolve_feature_indices(self.features, names)
 
         return None if indices == list(range(len(names))) else indices
@@ -205,7 +208,7 @@ class HLS4MLDataModule(LightningDataModule):
         """The jets of the record's own *split*, every column, rebased as setup()
         rebases them, and their labels; setup("fit") pools and re-splits them under
         folds."""
-        return self._load(self._ensure_record(), split)
+        return self._load(split)
 
     def _record_overrides(self, root: str) -> list[str]:
         """What to override when composing the record's own configuration."""
@@ -231,24 +234,29 @@ class HLS4MLDataModule(LightningDataModule):
         self.record = instantiate(
             compose_record_config(root, self._record_overrides(root)).data
         )
-        self.feature_names = list(self.record.feature_names)
         log.info(f"Record {REPO_ID} at {root}, cache {self.record.cache_folder}")
 
         return self.record
 
-    def _load(self, record, split: str) -> tuple[torch.Tensor, torch.Tensor]:
+    def _read(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """The jets of the record's own *split*, every column as the loader stores them,
+        and their one-hot labels."""
+        data = self._ensure_record().load(split)
+        return data.x, data.y
+
+    def _load(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the jets and the labels of *split*, rebased on the kept axis unless
         `full_axis` is set."""
-        data = record.load(split)
-        x, scales = data.x.clone(), self.norm_scales
+        x, y = self._read(split)
+        x, scales = x.clone(), self.norm_scales
         if not self.full_axis:
             for chunk in x.split(REBASE_CHUNK):
                 chunk.copy_(rebase_on_kept_axis(chunk, self.feature_names, scales))
-        return x, data.y
+        return x, y
 
-    def _setup_fit(self, record, indices: list[int] | None) -> None:
+    def _setup_fit(self, indices: list[int] | None) -> None:
         """Build the training and validation datasets for the current fold."""
-        x_train, y_train, x_val, y_val = self._fit_arrays(record)
+        x_train, y_train, x_val, y_val = self._fit_arrays()
         transform = self._train_transform(indices)
         shuffler = torch.Generator()
         shuffler.manual_seed(torch.initial_seed())
@@ -265,10 +273,10 @@ class HLS4MLDataModule(LightningDataModule):
         self.data_val = self._dataset(x_val, y_val)
         log.info(f"Fit: x_train {tuple(x_train.shape)}, x_val {tuple(x_val.shape)}")
 
-    def _setup_test(self, record) -> None:
+    def _setup_test(self) -> None:
         """Build the test dataset at the record's full width, as
         `keep_full_features_at_test` states."""
-        x_test, y_test = self._load(record, "test")
+        x_test, y_test = self._load("test")
         # Every test jet is scored, so that each row of the results counts the same jets.
         self.data_test = self._dataset(x_test, y_test, drop_last=False)
         log.info(f"Test: x_test {tuple(x_test.shape)}, y_test {tuple(y_test.shape)}")
@@ -293,12 +301,12 @@ class HLS4MLDataModule(LightningDataModule):
         return transform if indices is None else _reduce_after(transform, indices)
 
     def _fit_arrays(
-        self, record
+        self,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """The training and validation tensors for the current fold, with
         normalisation."""
-        x_train, y_train = self._load(record, "train")
-        x_val, y_val = self._load(record, "validation")
+        x_train, y_train = self._load("train")
+        x_val, y_val = self._load("validation")
         if self.n_folds <= 1:
             return x_train, y_train, x_val, y_val
 

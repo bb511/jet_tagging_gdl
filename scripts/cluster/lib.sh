@@ -87,6 +87,19 @@ selected() {
     return 1
 }
 
+# The name of catalogue $1's log directory, <its directory>_<its stem>. A
+# feature-set catalogue of the replica, under scripts/top_tagging/<label>/,
+# carries the data set in front, since <label>_<stem> alone also names the
+# hls4ml catalogue of the same label.
+catalogue_stem() {
+    local dir prefix=""
+    dir=$(dirname "$1")
+    if [ "$(basename "$(dirname "$dir")")" = top_tagging ]; then
+        prefix=top_tagging_
+    fi
+    printf "%s%s_%s" "$prefix" "$(basename "$dir")" "$(basename "$1" .sh)"
+}
+
 # Every command and every log directory is relative to the repository root.
 require_repo_root() {
     if [ ! -f .project-root ]; then

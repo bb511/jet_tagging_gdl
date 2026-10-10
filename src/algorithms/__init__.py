@@ -274,14 +274,7 @@ class JetTaggingModule(LightningModule):
         self._on_features_resolved()
 
     def _compile_net(self) -> None:
-        """Compile the network in place, so that a checkpoint keeps the eager key names
-        that ``eval.py``, which never compiles, loads."""
-        # At train start, not in setup(): Lightning's model summary runs one forward under
-        # FlopCounterMode at fit start, and a compiled call made under that mode leaves the module
-        # call marked to run eager for the rest of the process. A search driver also fits trial
-        # after trial in one process, and every new architecture adds graphs to the compiler's
-        # cache; past its recompile limit (8 entries, about four trials) every later trial runs
-        # eager. The reset clears both.
+        """Compile the network in place."""
         torch.compiler.reset()
         self.net.compile()
 

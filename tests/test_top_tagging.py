@@ -10,7 +10,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
 from src.algorithms.utils.schedules import warmup_restarts_decay
-from src.data.components import top_tagging
+from src.data import top_tagging_datamodule as top_tagging
 from src.data.components.augmentation import compute_eta, compute_phi, compute_pt
 from src.data.hls4ml_datamodule import fold_indices
 from src.data.top_tagging_datamodule import TopTaggingDataModule

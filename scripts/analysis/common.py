@@ -40,8 +40,9 @@ AUG_ORDER = {
     **{group: i + 1 for i, group in enumerate(("lorentz", "so2", "so3"))},
 }
 
-# vn_hgq precedes vn: a name that is no key, such as vn_hgq_beta<tag>, takes the label of
-# the first key it contains.
+# vn_hgq precedes vn, and jedi_linear_hgq and jedi_linear_moments precede jedi_linear: a
+# name that is no key, such as vn_hgq_beta<tag>, takes the label of the first key it
+# contains.
 MODEL_DISPLAY = {
     "deepsets": "DeepSets",
     "mlp": "MLP",
@@ -57,10 +58,11 @@ MODEL_DISPLAY = {
     "lloca_so3": "LLoCa (SO(3))",
     "vn_hgq": "Vector neurons (HGQ2)",
     "vn": "Vector neurons",
+    "jedi_linear_hgq": "JEDI-linear (HGQ2)",
+    "jedi_linear_moments": "JEDI-linear + moments",
     "jedi_linear": "JEDI-linear",
     "linformer": "Linformer",
     "deepsets_moments": "DeepSets + moments",
-    "jedi_linear_moments": "JEDI-linear + moments",
     "moments_only": "Moments only",
     "jet_level_all53": "Jet observables (53)",
     "jet_level_noeta52": "Jet observables w/o eta (52)",

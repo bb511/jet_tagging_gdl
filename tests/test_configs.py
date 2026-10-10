@@ -47,8 +47,8 @@ SEARCHES = sorted(path.stem for path in SEARCH_DIR.glob("*.yaml"))
 CHEAP_SEARCHES = ("vn_cheap_optuna", "vn_cheap_axis_optuna")
 # Digests of each experiment's state-dict layout at N = 16, 50 and 150 (the jet-level
 # rows at 150 alone): the keys in order with their shapes and dtypes, then the Keras
-# weights of vn_hgq, from the K1 golden of commit 50d78b93. The checkpoints of the
-# finals hold these layouts, and eval.py loads them strictly.
+# weights of the quantised rows, those of vn_hgq from the K1 golden of commit 50d78b93.
+# The checkpoints of the finals hold these layouts, and eval.py loads them strictly.
 LAYOUTS = {
     "deepsets": "9294bcdce881 181f7342cf6e 181f7342cf6e",
     "mlp": "3d445a0a0618 78bf9b67580c 8a92848f3053",
@@ -73,6 +73,7 @@ LAYOUTS = {
     "jet_level_bdt_all53": "0454180ac26f",
     "jet_level_bdt_noeta52": "0454180ac26f",
     "vn_hgq": "8d315eab0580 a376435f525e 9845c7c24750",
+    "jedi_linear_hgq": "42393fcb63ad 1989a15afe4f f5284ab5a705",
 }
 LAYOUT = {
     f"{row}_{n}": digest
@@ -128,6 +129,20 @@ COPIES = [
         "algorithm/vn_hgq",
         "_target_ name units optimizer scheduler quantisation beta beta_schedule "
         "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
+    ),
+    (
+        "algorithm/jedi_linear_moments",
+        "algorithm/jedi_linear_hgq",
+        "_target_ name units optimizer scheduler quantisation beta beta_schedule "
+        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
+    ),
+    (
+        "algorithm/vn_hgq",
+        "algorithm/jedi_linear_hgq",
+        "_target_ name num_blocks vector_channels scalar_channels invariants "
+        "tensor_invariants stream_channels mlp_layers gate head_layers dropout "
+        "axis_offset hidden aggregation moments quantisation.gate_f "
+        "quantisation.fold_norm quantisation.round_mode",
     ),
     (
         "search/deepsets",
@@ -229,7 +244,10 @@ def test_the_configs_are_those_the_row_lists_name() -> None:
         f"{row}_{n}" for row in TOP_TAGGING for n in TOP_TAGGING_NCONSTITUENTS
     }
     assert set(TOP_SEARCHES) == {
-        f"{row}_optuna" for row in set(TOP_TAGGING) - set(TOP_TAGGING_RECIPES)
+        f"{row}{scl}_optuna"
+        for row in set(TOP_TAGGING) - set(TOP_TAGGING_RECIPES)
+        for scl in ("", "_scl")
+        if not (row in BASELINE_ONLY and scl)
     }
 
 
@@ -407,26 +425,38 @@ def test_every_top_tagging_experiment_builds_a_two_class_row(
 def test_every_top_tagging_search_holds_its_experiments_point(
     search: str, tmp_path: Path
 ) -> None:
-    model = search.removesuffix("_optuna")
+    model = search.removesuffix("_optuna").removesuffix("_scl")
+    method, scheme = (
+        ("symm_loss", "so2") if "_scl" in search else ("augmentation", "none")
+    )
     overrides = (
         f"experiment=top_tagging/{model}_100",
         f"hparams_search=top_tagging/{search}",
+        f"data.method={method}",
+        f"data.augmentation_scheme={scheme}",
     )
     cfg = compose_root("train.yaml", *overrides, "trainer=cpu", "logger=none")
     HydraConfig().set_config(point_into(cfg, tmp_path))
     found = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
     point = _flat({"algorithm": OmegaConf.to_container(cfg.algorithm, resolve=True)})
+    baseline = OmegaConf.load(TOP_SEARCH_DIR / f"{model}_optuna.yaml")
+    own = OmegaConf.to_container(baseline.hydra.sweeper.params)
     parser = OverridesParser.create()
     database = f"logs/optuna/top_tagging/{model}.db"
+    weight = "algorithm.symm_loss_weight"
 
-    assert found["study_name"] == f"top_tagging_{model}_nconst100_augmentation_none"
+    assert found["study_name"] == f"top_tagging_{model}_nconst100_{method}_{scheme}"
     assert found["storage"] == f"sqlite:///{database}?timeout=600"
-    # The experiment's values, which a campaign enqueues as trial 0 under these names,
-    # lie in the space, and the learning rate spans a factor 3 either side at most.
-    for key, spec in found["params"].items():
+    # The SCL space is the baseline one with the consistency-loss weight alone added.
+    assert (weight in found["params"]) == (method == "symm_loss")
+    assert {k: v for k, v in found["params"].items() if k != weight} == own
+    # The experiment's values, the optimum of one of the configurations whose optima a
+    # campaign enqueues as trial 0, lie in the space, the learning rate a factor 3 or
+    # more inside either end.
+    for key, spec in own.items():
         sweep = parser.parse_override(f"{key}={spec}").value()
         if isinstance(sweep, IntervalSweep):
-            assert sweep.start < point[key] < sweep.end <= 9 * sweep.start
+            assert sweep.start <= point[key] / 3 and 3 * point[key] <= sweep.end
         else:
             assert point[key] in sweep.list
 

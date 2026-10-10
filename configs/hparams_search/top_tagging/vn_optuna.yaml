@@ -1,6 +1,9 @@
 # @package _global_
-# The top-tagging search at N = 100: the hls4ml space of this name narrowed around its N = 150
-# optimum, each size to that value and its grid neighbours, the lr to a factor 3, the rest kept.
+# The top-tagging search at N = 100 around the row's hls4ml optimum at N = 150: each size runs from
+# the hls4ml step below the optimum's value, if any, to one step beyond the hls4ml grid, the lr a
+# factor 3 either side, and every other key over its hls4ml choices. The step beyond answers the
+# studies of 2026-10-09, narrowed to the optimum's neighbours, whose best trial sat at the upper
+# edge of a size in five of nine rows.
 
 defaults:
   - override /hydra/sweeper: optuna
@@ -25,13 +28,13 @@ hydra:
       n_startup_trials: 20
 
     params:
-      algorithm.num_blocks: choice(2, 3)
-      algorithm.vector_channels: choice(16, 32)
-      algorithm.scalar_channels: choice(32, 64)
-      algorithm.invariants: choice(16, 32)
-      algorithm.tensor_invariants: choice(1, 2, 4)
-      algorithm.stream_channels: choice(16, 32)
-      algorithm.head_layers: choice([32], [64,32])
+      algorithm.num_blocks: choice(2, 3, 4)
+      algorithm.vector_channels: choice(16, 32, 64)
+      algorithm.scalar_channels: choice(32, 64, 128, 256)
+      algorithm.invariants: choice(16, 32, 64)
+      algorithm.tensor_invariants: choice(1, 2, 4, 8)
+      algorithm.stream_channels: choice(16, 32, 64)
+      algorithm.head_layers: choice([32], [64,32], [128,64], [256,128])
       algorithm.dropout: choice(0.0, 0.1, 0.2)
-      algorithm.optimizer.lr: tag(log, interval(1.65e-3, 1.47e-2))
+      algorithm.optimizer.lr: tag(log, interval(1.64e-3, 1.48e-2))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-4, 1e-3, 1e-2, 5e-2)

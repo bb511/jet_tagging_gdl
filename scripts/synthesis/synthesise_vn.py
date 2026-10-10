@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Synthesise an exported ``vn_hgq`` network with alkaid and append one CSV row.
+"""Synthesise an exported quantised network with alkaid and append one CSV row.
 
-The input is what ``src/eval.py`` leaves for a ``vn_hgq`` checkpoint: the directory
-``outputs/<label>_hgq/`` (``model.keras``, ``inputs.npz``, ``export.json``) and the
-probe's ``outputs/<label>.npz``, whose clean logits are the bit-exact reference.
+The input is what ``src/eval.py`` leaves for a ``vn_hgq`` or ``jedi_linear_hgq``
+checkpoint: the directory ``outputs/<label>_hgq/`` (``model.keras``, ``inputs.npz``,
+``export.json``) and the probe's ``outputs/<label>.npz``, whose clean logits are the
+bit-exact reference. The top module is named by ``--project``, else by the ``port`` of
+``export.json``, else ``vn_hgq``, the name of the exports written before that key existed.
 
 1. Keras runs on JAX's CPU backend at the ``floatx`` of ``export.json`` (float64
    reproduces the fixed-point arithmetic exactly, float32 does not); another backend is
@@ -27,7 +29,7 @@ probe's ``outputs/<label>.npz``, whose clean logits are the bit-exact reference.
 7. unless ``--no-cosim``, Verilator co-simulates ``--cosim-jets`` jets, which must
    match alkaid's emulation exactly;
 8. unless ``--no-vivado``, Vivado implements the project out of context through
-   alkaid's ``build_vivado_prj.tcl`` (reports in ``prj/output_vn_hgq/reports/``);
+   alkaid's ``build_vivado_prj.tcl`` (reports in ``prj/output_<project>/reports/``);
 9. alkaid's project report (``prj/report.json``) and ``check.json`` make one row of
    ``--csv``; the Vivado columns hold NaN when Vivado has not run. An existing
    ``--csv`` whose header is not today's is refused before step 1.
@@ -61,8 +63,9 @@ import numpy as np
 
 LOG = logging.getLogger("synthesise_vn")
 
-# The top module, which also names the Vivado output directory output_<PROJECT>/.
-PROJECT = "vn_hgq"
+# The top module of an export whose export.json names no port: those of vn_hgq written
+# before the key existed. It also names the Vivado output directory output_<project>/.
+DEFAULT_PROJECT = "vn_hgq"
 VIVADO_ARGS = (
     "-mode",
     "batch",
@@ -143,9 +146,10 @@ CSV_FIELDS = (
 )
 
 OPTIONS: tuple[tuple[str, dict[str, Any]], ...] = (
-    ("--export-dir", {"type": Path, "help": "outputs/<label>_hgq/ of a vn_hgq eval"}),
+    ("--export-dir", {"type": Path, "help": "outputs/<label>_hgq/ of a quantised eval"}),
     ("--outputs-npz", {"type": Path, "help": "the probe's outputs/<label>.npz"}),
     ("--out", {"type": Path, "required": True, "help": "for check.json and prj/"}),
+    ("--project", {"help": "top module; None: export.json's port, else vn_hgq"}),
     ("--csv", {"type": Path, "help": "CSV appended to; None: <out>/synthesis.csv"}),
     ("--part", {"default": "xcvu13p-flga2577-2-e", "help": "FPGA part"}),
     ("--clock", {"type": float, "default": 5.0, "help": "clock period (ns)"}),
@@ -226,7 +230,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def _float64_kept(name: str) -> Callable[[Any], Any]:
     """Keras's elementwise *name* on JAX, computed in float64 for a float64 tensor.
 
-    A copy of ``_float64_kept`` in src/algorithms/components/vector_neurons_hgq.py,
+    A copy of ``_float64_kept`` in src/algorithms/components/hgq_port.py,
     since this script imports nothing from src.
     """
     import jax
@@ -250,7 +254,7 @@ def _keep_float64_rounding() -> None:
     Keras 3.15 casts it to float32 there on JAX, so HGQ2's rounding floor(x 2^f + 1/2)
     misrounds a value within float32 resolution of a tie, and the Keras check would
     report logits that differ from alkaid's where the hardware agrees. The component
-    src/algorithms/components/vector_neurons_hgq.py applies the same patch at import.
+    src/algorithms/components/hgq_port.py applies the same patch at import.
     """
     from keras.src import backend as keras_backend
 
@@ -426,6 +430,7 @@ def run_record(args: argparse.Namespace, export: dict[str, Any]) -> dict[str, An
     return {
         "model": export["row"],
         **{key: export[key] for key in ("nconstituents", "beta", "ebops")},
+        "project": args.project,
         **target,
         "latency_cutoff": args.latency_cutoff,
         "ternary": args.ternary,
@@ -459,7 +464,7 @@ def write_rtl(args: argparse.Namespace, comb: Any, meta: dict[str, Any]) -> Any:
 
     kwargs = {name: getattr(args, key) for key, name in RTL_OPTIONS.items()}
     kwargs["ternary_fuse"] = args.ternary == "fused"
-    rtl = RTLModel(comb, args.out / "prj", PROJECT, flavor="verilog", **kwargs)
+    rtl = RTLModel(comb, args.out / "prj", args.project, flavor="verilog", **kwargs)
     rtl.write(meta)
     return rtl
 
@@ -526,9 +531,15 @@ def predict(
     return comb, y_keras, y_alkaid
 
 
+def project_name(args: argparse.Namespace, export: dict[str, Any]) -> str:
+    """The top module: ``--project``, else the export's port, else the default."""
+    return args.project or export.get("port", DEFAULT_PROJECT)
+
+
 def build(args: argparse.Namespace) -> None:
     """Steps 1 to 7: load, predict, trace, emulate, write the project, co-simulate."""
     export = read_json(args.export_dir / "export.json")
+    args.project = project_name(args, export)
     model = _timed("loading", load_model, args.export_dir, export["floatx"])
     words, logits, labels = load_reference(args.export_dir, args.outputs_npz)
     parts = split_inputs(model, words)

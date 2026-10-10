@@ -2,11 +2,12 @@
 """Collect the parameter and FLOP counts of every main training run into one table.
 
 The results tables carry the FLOPs and the eBOPs per jet but no parameter count, which
-only the training run's MLflow params hold, as ``algorithm/params/total``. A ``vn_hgq``
-row, whose weights are Keras variables and whose torch count is zero, is given the count
-of the float network it was copied from: its ``algorithm/init_from`` names that
-network's run directory, relative to the root, and the count is that of the run whose
-main manifest entry stands there. Its own ``algorithm/keras_params`` is not used, since
+only the training run's MLflow params hold, as ``algorithm/params/total``. A quantised
+row (``vn_hgq``, ``jedi_linear_hgq``), whose weights are Keras variables and whose torch
+count is zero, is given the count of the float network it was copied from: its
+``algorithm/init_from`` names that network's run directory, or a ``.ckpt`` in its
+``checkpoints/``, relative to the root, and the count is that of the run whose main
+manifest entry stands there. Its own ``algorithm/keras_params`` is not used, since
 Keras counts the quantisers' per-weight bit widths beside the weights. The BDT rows have
 no network, so their count is ``nan``.
 
@@ -100,10 +101,17 @@ def _param(run: Path | None, key: str) -> str:
     return path.read_text().strip() if path and path.is_file() else NAN
 
 
+def _run_dir(init_from: str) -> Path:
+    """The run directory an ``init_from`` names: itself, or that of a ``.ckpt`` in its
+    ``checkpoints/``."""
+    path = Path(init_from)
+    return path.parents[1] if path.suffix == ".ckpt" else path
+
+
 def _float_params(root: Path, run: Path) -> str:
     """The count of the float network a quantised run names as its ``init_from``."""
     source = _param(run, "algorithm/init_from")
-    manifest = root / source / MANIFEST
+    manifest = root / _run_dir(source) / MANIFEST
     entry = _main_entry(manifest) if source != NAN and manifest.is_file() else None
     float_run = _store_run(root, entry.get("mlflow_run_id") if entry else None)
     count = _param(float_run, "algorithm/params/total")
@@ -113,10 +121,10 @@ def _float_params(root: Path, run: Path) -> str:
 
 
 def _params(root: Path, run: Path | None, model: str) -> str:
-    """The torch count; the float network's on a ``vn_hgq`` row, none on a BDT row."""
+    """The torch count; the float network's on a quantised row, none on a BDT row."""
     if "bdt" in model or run is None:
         return NAN
-    if model.startswith("vn_hgq"):
+    if model.startswith(("vn_hgq", "jedi_linear_hgq")):
         return _float_params(root, run)
     return _param(run, "algorithm/params/total")
 

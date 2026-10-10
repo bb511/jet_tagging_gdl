@@ -33,9 +33,8 @@ class VectorNeurons(DenormalisedModule):
     ) -> nn.Module:
         """Build the network; the arguments are in components/vector_neurons.py."""
         if axis_offset:
-            # Meaningful under HLS4MLDataModule(full_axis=True) alone: rebased columns
-            # measure the offset from the kept constituents, which the network reads anyway.
             self.required_features = [*self.required_features, "etarel", "phirel"]
+
         self._register_denorm_scales()
         return VectorNeuronsClassifier(
             nconstituents=self.hparams.nconstituents,

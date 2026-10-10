@@ -1,0 +1,14 @@
+# @package _global_
+
+# The top-tagging SCL regimes (data.method=symm_loss) add the consistency-loss weight, over its
+# hls4ml interval, to deepsets_optuna.yaml.
+defaults:
+  - top_tagging/deepsets_optuna
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      # Weighs the consistency term against the cross-entropy: log-scaled, from a light regulariser
+      # (1e-3) to dominating the total loss (10).
+      algorithm.symm_loss_weight: tag(log, interval(1e-3, 10))

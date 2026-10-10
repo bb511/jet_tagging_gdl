@@ -24,7 +24,7 @@ transposed weight.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -91,18 +91,20 @@ def _checkpoint_path(init_from: Path) -> Path:
 
 
 def _check_architecture(
-    path: Path, theirs: dict[str, Any], ours: dict[str, Any]
+    path: Path,
+    theirs: dict[str, Any],
+    ours: dict[str, Any],
+    keys: Sequence[str] = ARCHITECTURE_KEYS,
 ) -> None:
-    """Refuse the checkpoint *path* unless its architecture *theirs* is *ours*.
+    """Refuse the checkpoint *path* unless its architecture *theirs* is *ours* on every
+    key of *keys*.
 
     The units may differ: the copy folds them into the batch normalisations.
 
     :raises ValueError: naming every argument that differs.
     """
     differ = [
-        key
-        for key in ARCHITECTURE_KEYS
-        if key != "units" and theirs.get(key) != ours.get(key)
+        key for key in keys if key != "units" and theirs.get(key) != ours.get(key)
     ]
     if differ:
         pairs = ", ".join(f"{k} {theirs.get(k)} vs {ours.get(k)}" for k in differ)
@@ -204,6 +206,17 @@ def copy_batch_norm(
     layer.moving_variance.assign(var_eps - layer.epsilon)
 
 
+def fold_statistics(
+    norm: nn.BatchNorm1d, scales: np.ndarray, rows: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the scale a and the offset t of the map y = a x + t that *norm* computes
+    in eval mode, x being the port's input: torch's channels permuted by *rows* and
+    scaled by *scales*."""
+    gamma, beta, mean, var_eps = _port_statistics(norm, scales, rows)
+    a = gamma / np.sqrt(var_eps)
+    return a, beta - a * mean
+
+
 def _fold_norm(
     dense: keras.Layer,
     norm: nn.BatchNorm1d,
@@ -212,12 +225,11 @@ def _fold_norm(
 ) -> None:
     """Fold *norm*, on the statistics ``copy_batch_norm`` would give the port, into the
     copied *dense* that reads its output."""
-    gamma, beta, mean, var_eps = _port_statistics(norm, scales, rows)
-    a = gamma / np.sqrt(var_eps)
+    a, t = fold_statistics(norm, scales, rows)
     # (in, out), the input channels in the port's order.
     kernel = np.asarray(dense.kernel)
     bias = np.asarray(dense.bias)
-    dense.bias.assign(bias + (beta - a * mean) @ kernel)
+    dense.bias.assign(bias + t @ kernel)
     dense.kernel.assign(a[:, None] * kernel)
 
 

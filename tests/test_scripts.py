@@ -36,6 +36,10 @@ STUDY = "mlp_nconst16_augmentation_none"
 # Each completed trial carries its own value as its one parameter, so that a test sees
 # whose parameters came back.
 VALUES = CategoricalDistribution((0.5, 0.8, 0.9))
+# The five grid rows, whose top-tagging searches cover every regime and two more feature
+# sets, each in a directory of its own under the value it sets data.features to.
+TOP_TAGGING_GRID = sorted(set(TOP_TAGGING) & (set(MODELS) - set(EMBEDDED)))
+TOP_TAGGING_FEATURES = {"pt_eta_phi": "[pt,eta,phi]", "px_py_pz_e": "[px,py,pz,e]"}
 
 
 def _blocks(catalogue: Path) -> list[dict[str, str]]:
@@ -219,12 +223,13 @@ def test_the_submitters_select_blocks_by_index_and_label(
     )
 
 
+@pytest.mark.parametrize("dataset", ["hls4ml", "top_tagging"])
 def test_submit_search_refuses_a_feature_block_without_its_own_storage(
-    tmp_path: Path,
+    dataset: str, tmp_path: Path
 ) -> None:
-    # The study name ignores the feature set, so its trials would join the
-    # four-momentum study of the same name.
-    text = (ROOT / "scripts/hls4ml/pt_eta_phi/runmlp_search.sh").read_text()
+    # The study name ignores the feature set, so its trials would join the default
+    # set's study of the same name.
+    text = (ROOT / f"scripts/{dataset}/pt_eta_phi/runmlp_search.sh").read_text()
     catalogue = tmp_path / "runmlp_search.sh"
     lines = [line for line in text.splitlines() if "hydra.sweeper.storage" not in line]
     catalogue.write_text("\n".join(lines))
@@ -265,8 +270,9 @@ def test_submit_train_lays_the_folds_out_under_the_main_run() -> None:
 
 
 def test_the_submitters_read_the_top_tagging_catalogues() -> None:
-    # The nine search catalogues are hand-written, one block each, and must keep to the
-    # replica's budget; the train and eval ones are generated.
+    # The nine search catalogues are hand-written, every regime of the grid rows and the
+    # baseline alone of the others, and must keep to the replica's budget; the train and
+    # eval ones are generated.
     searches = {
         path.name.removeprefix("run").removesuffix("_search.sh"): path
         for path in (ROOT / "scripts" / "top_tagging").glob("run*_search.sh")
@@ -274,25 +280,39 @@ def test_the_submitters_read_the_top_tagging_catalogues() -> None:
     search = "scripts/top_tagging/rundeepsets_search.sh"
     listed = _submit("submit_search.sh", "--list", search)
     folds = ("--folds", "2", "--gpus", "0,1")
-    # Each dry run with the commands it prints: the train one a main run and two folds.
+    # Each dry run with the label and the count of the commands it prints: the train one
+    # a main run and two folds.
     runs = [
-        (_submit("submit_search.sh", search), 1),
+        (_submit("submit_search.sh", "--only", "symm_lorentz", search), "[7/7]", 1),
         (
             _submit(
                 "submit_train.sh", *folds, "scripts/top_tagging/runlorentznet_train.sh"
             ),
+            "[1/1]",
             3,
         ),
-        (_submit("submit_eval.sh", "scripts/top_tagging/runlorentznet_eval.sh"), 1),
+        (
+            _submit("submit_eval.sh", "scripts/top_tagging/runlorentznet_eval.sh"),
+            "[1/1]",
+            1,
+        ),
     ]
+    variants = [variant for variant, _, _ in generator.VARIANTS]
 
     assert set(searches) == set(TOP_TAGGING) - set(TOP_TAGGING_RECIPES)
     for row, path in searches.items():
-        (block,) = _blocks(path)
-        assert block["experiment"] == f"top_tagging/{row}_100"
-        assert block["hparams_search"] == f"top_tagging/{row}_optuna"
-        assert block["hydra.sweeper.n_trials"] == "100"
-        assert block["trainer.max_epochs"] == "50"
+        blocks = _blocks(path)
+        assert [_variant(block) for block in blocks] == (
+            variants if row in TOP_TAGGING_GRID else variants[:1]
+        )
+        for block in blocks:
+            scl = "_scl" if block["data.method"] == "symm_loss" else ""
+            assert block["experiment"] == f"top_tagging/{row}_100"
+            assert block["hparams_search"] == f"top_tagging/{row}{scl}_optuna"
+            assert block["hydra.sweeper.n_trials"] == "100"
+            assert block["trainer.max_epochs"] == "50"
+            assert "data.features" not in block
+            assert "hydra.sweeper.storage" not in block
     assert listed.stdout.splitlines()[1].split() == [
         "1",
         "deepsets_nconst100_baseline",
@@ -300,10 +320,59 @@ def test_the_submitters_read_the_top_tagging_catalogues() -> None:
         "100",
         "50",
     ]
-    for found, count in runs:
-        lines = [line for line in found.stdout.splitlines() if line.startswith("[1/1]")]
+    assert listed.stdout.splitlines()[7].split()[2] == "top_tagging/deepsets_scl_optuna"
+    for found, label, count in runs:
+        lines = [line for line in found.stdout.splitlines() if line.startswith("[")]
         assert found.returncode == 0, found.stderr
-        assert len(lines) == count and not any("hls4ml" in line for line in lines)
+        assert len(lines) == count and all(line.startswith(label) for line in lines)
+        assert not any("hls4ml" in line for line in lines)
+
+
+@pytest.mark.parametrize("label", sorted(TOP_TAGGING_FEATURES))
+def test_a_top_tagging_feature_set_adds_its_columns_and_its_database(
+    label: str,
+) -> None:
+    # Block for block the default set's catalogue, with the two overrides that send the
+    # trials to a database of the feature set's own.
+    directory = ROOT / "scripts" / "top_tagging" / label
+
+    assert {path.name for path in directory.iterdir()} == {
+        f"run{row}_search.sh" for row in TOP_TAGGING_GRID
+    }
+    for row in TOP_TAGGING_GRID:
+        storage = f"'sqlite:///logs/optuna/top_tagging/{label}/{row}.db?timeout=600'"
+        added = {
+            "data.features": TOP_TAGGING_FEATURES[label],
+            "hydra.sweeper.storage": storage,
+        }
+        default = _blocks(directory.parent / f"run{row}_search.sh")
+        catalogue = directory / f"run{row}_search.sh"
+        assert _blocks(catalogue) == [block | added for block in default]
+        found = _submit("submit_search.sh", "--only", "symm_lorentz", str(catalogue))
+        (line,) = [line for line in found.stdout.splitlines() if line.startswith("[")]
+        assert found.returncode == 0, found.stderr
+        assert line.startswith("[7/7]") and f"/top_tagging/{label}/{row}.db" in line
+
+
+def test_a_top_tagging_feature_set_logs_apart_from_hls4ml() -> None:
+    # scripts/hls4ml/<label>/ and scripts/top_tagging/<label>/ hold catalogues of one
+    # name, whose drivers would otherwise share a log directory.
+    script = f'. "{LIB}"; for f in "$@"; do catalogue_stem "$f"; echo; done'
+    paths = [
+        f"scripts/{dataset}/{label}rundeepsets_search.sh"
+        for dataset in ("hls4ml", "top_tagging")
+        for label in ("", "pt_eta_phi/")
+    ]
+    found = subprocess.run(
+        ["bash", "-c", script, "_", *paths], capture_output=True, text=True, check=True
+    )
+
+    assert found.stdout.split() == [
+        "hls4ml_rundeepsets_search",
+        "pt_eta_phi_rundeepsets_search",
+        "top_tagging_rundeepsets_search",
+        "top_tagging_pt_eta_phi_rundeepsets_search",
+    ]
 
 
 def _results_row(directory: Path, scheme: str, tv: float, acc: float) -> Path:

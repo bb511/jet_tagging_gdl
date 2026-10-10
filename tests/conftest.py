@@ -10,6 +10,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -76,7 +77,7 @@ CPU_ROWS = ("jet_level_bdt_all53", "jet_level_bdt_noeta52")
 BASELINE_ONLY = (*EMBEDDED, *JET_LEVEL)
 # Trained quantisation-aware from a float row's checkpoint, outside MODELS: no study,
 # hand-written catalogues, and an algorithm that needs the optional hgq dependencies.
-QUANTISED = ("vn_hgq",)
+QUANTISED = ("vn_hgq", "jedi_linear_hgq")
 NCONSTITUENTS = (16, 50, 150)
 # The record's 16 constituent columns, in its own order.
 RECORD_COLUMNS = (
@@ -476,9 +477,9 @@ TOP_TAGGING = (
 TOP_TAGGING_NCONSTITUENTS = (100,)
 # The columns of the converted cache, in its order.
 TOP_TAGGING_COLUMNS = ("px", "py", "pz", "e", "pt", "eta", "phi", "etarel", "phirel")
-# Jets per raw file of the synthetic record, read in chunks of 32: the training file in
-# three, the test split ending in a partial batch of 16. N = 8 truncates the jets of
-# more constituents.
+# Jets per raw file of the synthetic record, converted in chunks of 32: the training
+# file in three, the test split ending in a partial chunk of 8. N = 8 truncates the jets
+# of more constituents.
 TOP_TAGGING_SIZES = {"train.h5": 96, "val.h5": 32, "test.h5": 40}
 TOP_TAGGING_N = 8
 # The jets of every synthetic file whose first two constituents are swapped.
@@ -506,20 +507,25 @@ def top_tagging_raw(name: str) -> tuple[np.ndarray, np.ndarray]:
     return padded, np.arange(n_jets) % 2
 
 
-def _read_top_tagging(path: Path) -> Any:
+def _write_top_tagging_raw(path: Path) -> None:
+    # The raw file as the record stores it: a pandas HDFStore table "table" of the 800
+    # momentum columns and is_signal_new.
+    from src.data.top_tagging_datamodule import RAW_COLUMNS
+
     p4, flags = top_tagging_raw(path.name)
-    for start in range(0, len(p4), 32):
-        yield p4[start : start + 32], flags[start : start + 32]
+    frame = pd.DataFrame(p4.reshape(len(p4), -1), columns=RAW_COLUMNS)
+    frame["is_signal_new"] = flags
+    frame.to_hdf(path, key="table", format="table")
 
 
 @pytest.fixture
 def top_tagging_cache(tmp_path: Path) -> Path:
     # The cache root of the synthetic record at N = TOP_TAGGING_N, as the datamodule's
-    # cache_dir: the cache exists, so nothing is downloaded.
-    from src.data.components.top_tagging import convert
+    # cache_dir: the raw files and the cache exist, so nothing is downloaded.
+    from src.data.top_tagging_datamodule import convert
 
-    def count(path: Path) -> int:
-        return TOP_TAGGING_SIZES[path.name]
-
-    convert(tmp_path / "raw", tmp_path, TOP_TAGGING_N, _read_top_tagging, count, 50)
+    (tmp_path / "raw").mkdir()
+    for name in TOP_TAGGING_SIZES:
+        _write_top_tagging_raw(tmp_path / "raw" / name)
+    convert(tmp_path / "raw", tmp_path, TOP_TAGGING_N, chunk=32)
     return tmp_path

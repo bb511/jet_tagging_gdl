@@ -1,8 +1,8 @@
 # @package callbacks
 
-# A quantisation-aware run (vn_hgq), whose last epoch is the model: the checkpoint keeps the newest
-# epoch alone and nothing stops the run early. No LearningRateMonitor, which reads a torch
-# optimiser: the rate lives in Keras and is logged as train/lr.
+# A quantisation-aware run (vn_hgq, jedi_linear_hgq), whose last epoch is the model: the checkpoint
+# keeps the newest epoch alone and nothing stops the run early. No LearningRateMonitor, which reads
+# a torch optimiser: the rate lives in Keras and is logged as train/lr.
 defaults:
   - util@model_checkpoint: model_checkpoint
   - util@model_summary: model_summary

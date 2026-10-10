@@ -108,7 +108,7 @@ EMBEDDED = {
 BASELINE_ONLY = set(EMBEDDED) | set(JET_LEVEL)
 # Trained quantisation-aware from a float row's checkpoint, with no study: outside MODELS, so
 # that no catalogue of theirs is generated; scripts/hls4ml/run<row>_*.sh are hand-written.
-QUANTISED = ["vn_hgq"]
+QUANTISED = ["vn_hgq", "jedi_linear_hgq"]
 
 VARIANTS_OF = {
     model: VARIANTS[:1] if model in BASELINE_ONLY else VARIANTS

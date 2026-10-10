@@ -86,7 +86,7 @@ load_env "$dry"
 PYTHON=${PYTHON:-python3}
 [ "$dry" -eq 1 ] || require_imports "$PYTHON" "hydra, optuna"
 
-stem="$(basename "$(dirname "$file")")_$(basename "$file" .sh)"
+stem=$(catalogue_stem "$file")
 logdir="logs/searches/$stem"
 sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 [ "$dry" -eq 1 ] || mkdir -p "$logdir"

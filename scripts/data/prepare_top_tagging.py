@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.data.components.top_tagging import prepare, read_meta
+from src.data.top_tagging_datamodule import TopTaggingDataModule, read_meta
 
 # The datamodule's default, cache_dir: ${paths.base_data_dir}/top_tagging.
 DEFAULT_CACHE = REPO_ROOT / "data" / "top_tagging"
@@ -33,9 +33,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    folder = prepare(args.cache_dir, args.nconstituents)
-    print(folder)
-    print(read_meta(folder)["splits"])
+    datamodule = TopTaggingDataModule(
+        cache_dir=str(args.cache_dir), nconstituents=args.nconstituents
+    )
+    datamodule.prepare_data()
+    print(datamodule.cache_folder)
+    print(read_meta(datamodule.cache_folder)["splits"])
 
 
 if __name__ == "__main__":

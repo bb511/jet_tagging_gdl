@@ -2,9 +2,10 @@
 # ========================================================================
 # VN_HGQ TRAINING COMMANDS
 # ========================================================================
-# Thirty-six train runs: twenty-eight at 16 constituents (the float reference,
+# Thirty-eight train runs: twenty-eight at 16 constituents (the float reference,
 # one block per beta, the latency ablation, the full-axis designs and the beta
-# scan of the chosen two), then eight at 50 and 150. Hand-written: vn_hgq has
+# scan of the chosen two), then eight at 50 and 150, then the chosen two at 16
+# with JEDI-linear's training recipe. Hand-written: vn_hgq has
 # no study and the reference is a variant of a study's best, so
 # scripts/optuna/make_train_catalogues.py neither writes nor regenerates
 # this file.
@@ -69,6 +70,15 @@
 # logs/train/hls4ml/vn/nconst<N>/baseline_1block_<tag>. Blocks 33 to 36
 # fine-tune them at beta=3e-07 with folded normalisations and truncating data
 # lanes (baseline_<tag>_foldtrn_beta3e-07), each after its float run.
+# Blocks 37 and 38 train D2 and A2 with the recipe of the published JEDI-linear
+# (arXiv:2508.15468; configs/sweep-n16-f3.yaml and src/train.py of its code),
+# from the same float runs: 7000 epochs at batches of 2790, Adam without
+# weight decay or clipping, a cosine from 3e-3 to 1e-6 over nine tenths of
+# each 100 epochs and flat for the rest (CosineRestarts), and beta ramped
+# linearly from 2e-08 to 3e-07 over 2000 epochs, then logarithmically to 3e-06
+# at the last. A checkpoint is kept every 50 epochs: the designs are picked
+# from the front of their calibrated evaluations, not from the last epoch
+# (baseline_<tag>_foldtrn_jedirecipe).
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/cluster/submit_train.sh, which queues them on a GPU or slurm.
@@ -1079,3 +1089,87 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst150/baseline_cheap_axis_h32_foldtrn_beta3e-07
+
+# ========================================================================
+# vn_hgq  nconst=16  (D2 and A2 trained with JEDI-linear's recipe)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# D2 (block 19) with JEDI-linear's recipe: 7000 epochs, ramped beta, restarting cosine, a checkpoint every 50 epochs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     data.batch_size=2790 \
+#     +callbacks.model_checkpoint.every_n_epochs=50 \
+#     callbacks.model_checkpoint.save_top_k=-1 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     trainer.max_epochs=7000 \
+#     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_jedirecipe
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# A2 (block 24) with JEDI-linear's recipe: 7000 epochs, ramped beta, restarting cosine, a checkpoint every 50 epochs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.axis_offset=true \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     algorithm.invariants=32 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=128 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     data.batch_size=2790 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     +callbacks.model_checkpoint.every_n_epochs=50 \
+#     callbacks.model_checkpoint.save_top_k=-1 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     trainer.max_epochs=7000 \
+#     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe
