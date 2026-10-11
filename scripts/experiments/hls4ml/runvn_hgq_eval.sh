@@ -2,10 +2,12 @@
 # ========================================================================
 # VN_HGQ EVALUATION COMMANDS
 # ========================================================================
-# Thirty-six eval runs, one per block of runvn_hgq_train.sh: twenty-eight at
+# Thirty-nine eval runs, one per block of runvn_hgq_train.sh: twenty-eight at
 # 16 constituents (the float reference, one per beta, the latency ablation,
 # the full-axis designs and the beta scan of the chosen two), then eight at 50
-# and 150. Hand-written: vn_hgq has no study and the reference is a variant
+# and 150, then the two-block finals at 16 with the full-axis offset, then
+# one picked checkpoint of each of the chosen two trained with JEDI-linear's
+# recipe. Hand-written: vn_hgq has no study and the reference is a variant
 # of a study's best, so scripts/experiments/make_train_catalogues.py neither
 # writes nor regenerates this file.
 # Baseline only: the vector neurons embed the symmetry, so the augmentation
@@ -56,6 +58,16 @@
 # to 36 of runvn_hgq_train.sh, rows vn_<tag> and vn_hgq_<tag>_foldtrn_beta3e-07
 # (tags cheap_h32 and cheap_axis_h32; the row's nconstituents tells the counts
 # apart), those with the offset with the probe off.
+# Block 37 evaluates block 39 of runvn_hgq_train.sh, the two-block finals with
+# the full-axis offset, row vn_axis, with the probe off. Blocks 38 and 39
+# evaluate one checkpoint each (ckpt_path) of blocks 37 and 38 of
+# runvn_hgq_train.sh, D2 and A2 with JEDI-linear's recipe, rows
+# vn_hgq_<tag>_foldtrn_jedirecipe_epoch<epoch>. Each is the point of the
+# design's accuracy-EBOPs front, restricted to test accuracies within 2 points
+# of the design's best (past it the networks collapse), whose stage count at
+# the published JEDI-linear's pipelining (2 ns clock, cutoff 2.7) is nearest
+# that of its Tables I and II (23 and 19): epoch 1099 for D2 and epoch 1899
+# for A2, both at 24 to 25 stages for either table.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/experiments/submit_eval.sh, which queues them on a GPU or slurm.
@@ -1203,3 +1215,125 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst150/baseline_cheap_axis_h32_foldtrn_beta3e-07
+
+# ========================================================================
+# vn  nconst=16  (the two-block finals with the full-axis offset)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, two blocks, full-axis offset axis:
+# the finals' network, the leader's eta and phi from the full jet's axis
+# as two more first-block scalars
+# hand-written: best trial 155 of vn_nconst16_augmentation_none with the offset
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.dropout=0.0 \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.invariants=8 \
+#     algorithm.name=vn_axis \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=2 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn/nconst16/baseline_axis \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn/nconst16/baseline_axis
+
+# ========================================================================
+# vn_hgq  nconst=16  (D2 and A2 trained with JEDI-linear's recipe, the picked checkpoints)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# D2 with JEDI-linear's recipe (block 37 of runvn_hgq_train.sh), the checkpoint of epoch 1099
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_jedirecipe_epoch1099 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     ckpt_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_jedirecipe/checkpoints/epoch_1099.ckpt \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_jedirecipe_epoch1099
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# A2 with JEDI-linear's recipe (block 38 of runvn_hgq_train.sh), the checkpoint of epoch 1899
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     algorithm.invariants=32 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_axis_a2_foldtrn_jedirecipe_epoch1899 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=128 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     ckpt_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe/checkpoints/epoch_1899.ckpt \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe_epoch1899

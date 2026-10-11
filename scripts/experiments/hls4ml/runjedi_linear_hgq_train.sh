@@ -2,9 +2,10 @@
 # ========================================================================
 # JEDI_LINEAR_HGQ TRAINING COMMANDS
 # ========================================================================
-# Nineteen train runs: thirteen at 16 constituents, the float control, then
+# Twenty train runs: thirteen at 16 constituents, the float control, then
 # the moments design, the control and the tuned control each fine-tuned at
-# four betas, and six at 50 and 150 at the beta chosen at 16, 1e-07.
+# four betas, six at 50 and 150 at the beta chosen at 16, 1e-07, and the
+# tuned control at 16 in float on the full jet's axis.
 # Hand-written: jedi_linear_hgq has no study and starts from float runs, so
 # scripts/experiments/make_train_catalogues.py neither writes nor regenerates
 # this file.
@@ -62,6 +63,11 @@
 # head's first layer and truncates every trainable data lane
 # (quantisation.fold_norm and round_mode TRN, the recipe of the folded vn
 # designs), so no block overrides either.
+# Block 20 trains the tuned control at 16 in float with etarel and phirel
+# measured from the full jet's axis (data.full_axis=true), in
+# logs/train/hls4ml/pt_etarel_phirel/jedi_linear/nconst16/baseline_axis. With
+# block 39 of runvn_hgq_train.sh, it separates the full axis, on which the
+# published JEDI-linear's inputs are measured, from its 7000-epoch recipe.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/experiments/submit_train.sh, which queues them on a GPU or slurm.
@@ -470,3 +476,29 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/train/hls4ml/jedi_linear_hgq/nconst150/baseline_tuned_beta1e-07
+
+# ========================================================================
+# jedi_linear  nconst=16  (the tuned control on the full jet's axis)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# jedi_linear nconst=16 baseline on [pt, etarel, phirel] from the full jet's
+# axis: the tuned control in float
+# hand-written: best trial 107 of jedi_linear_nconst16_augmentation_none on
+# [pt, etarel, phirel] with data.full_axis=true
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.aggregation=sum \
+#     algorithm.head_layers='[32,32,16]' \
+#     algorithm.hidden=128 \
+#     algorithm.optimizer.lr=0.003110744733957464 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     data.features='[pt,etarel,phirel]' \
+#     data.full_axis=true \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/pt_etarel_phirel/jedi_linear/nconst16/baseline_axis

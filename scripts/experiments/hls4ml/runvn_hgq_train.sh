@@ -2,10 +2,11 @@
 # ========================================================================
 # VN_HGQ TRAINING COMMANDS
 # ========================================================================
-# Thirty-eight train runs: twenty-eight at 16 constituents (the float reference,
+# Thirty-nine train runs: twenty-eight at 16 constituents (the float reference,
 # one block per beta, the latency ablation, the full-axis designs and the beta
 # scan of the chosen two), then eight at 50 and 150, then the chosen two at 16
-# with JEDI-linear's training recipe. Hand-written: vn_hgq has
+# with JEDI-linear's training recipe, then the two-block finals at 16 with the
+# full-axis offset. Hand-written: vn_hgq has
 # no study and the reference is a variant of a study's best, so
 # scripts/experiments/make_train_catalogues.py neither writes nor regenerates
 # this file.
@@ -79,6 +80,10 @@
 # at the last. A checkpoint is kept every 50 epochs: the designs are picked
 # from the front of their calibrated evaluations, not from the last epoch
 # (baseline_<tag>_foldtrn_jedirecipe).
+# Block 39 trains the two-block finals of runvn_train.sh at 16 in float with
+# the leader's offset from the full jet's axis (baseline_axis). With block 20
+# of runjedi_linear_hgq_train.sh, it separates the full axis, on which the
+# published JEDI-linear's inputs are measured, from its 7000-epoch recipe.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/experiments/submit_train.sh, which queues them on a GPU or slurm.
@@ -1173,3 +1178,36 @@
 #     trainer.devices=[0] \
 #     trainer.max_epochs=7000 \
 #     hydra.run.dir=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe
+
+# ========================================================================
+# vn  nconst=16  (the two-block finals with the full-axis offset)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# vn nconst=16 baseline, two blocks, full-axis offset axis:
+# the finals' network, the leader's eta and phi from the full jet's axis
+# as two more first-block scalars
+# hand-written: best trial 155 of vn_nconst16_augmentation_none with the offset
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/vn_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.axis_offset=true \
+#     algorithm.dropout=0.0 \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.invariants=8 \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=2 \
+#     algorithm.optimizer.lr=0.004986660327956767 \
+#     algorithm.optimizer.weight_decay=0.05 \
+#     algorithm.scalar_channels=32 \
+#     algorithm.stream_channels=8 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/vn/nconst16/baseline_axis

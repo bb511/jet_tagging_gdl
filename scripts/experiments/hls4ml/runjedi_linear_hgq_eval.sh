@@ -2,11 +2,12 @@
 # ========================================================================
 # JEDI_LINEAR_HGQ EVALUATION COMMANDS
 # ========================================================================
-# Nineteen eval runs, one per block of runjedi_linear_hgq_train.sh: thirteen at
+# Twenty eval runs, one per block of runjedi_linear_hgq_train.sh: thirteen at
 # 16 constituents, the float control, then the moments design, the control and
-# the tuned control each at four betas, and six at 50 and 150 at beta=1e-07
+# the tuned control each at four betas, six at 50 and 150 at beta=1e-07
 # (the float control, the moments design, the control and the tuned control at
-# 50; the moments design and the tuned control, also its control, at 150).
+# 50; the moments design and the tuned control, also its control, at 150), and
+# the tuned control at 16 in float on the full jet's axis.
 # Hand-written: jedi_linear_hgq has no study and starts from float runs, so
 # scripts/experiments/make_train_catalogues.py neither writes nor regenerates this
 # file.
@@ -45,6 +46,9 @@
 # beside its nconstituents column. The probe stays on: a rotation about the beam leaves pt, etarel and
 # phirel unchanged up to the float rounding of the transform, which can move an
 # input word by one LSB.
+# Block 20 evaluates the tuned control on the full jet's axis, row
+# jedi_linear_axis, with the probe off: a transform rebases etarel and phirel
+# on the kept constituents, so its invariance figures would mean nothing.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/experiments/submit_eval.sh, which queues them on a GPU or slurm.
@@ -527,3 +531,33 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/jedi_linear_hgq/nconst150/baseline_tuned_beta1e-07
+
+# ========================================================================
+# jedi_linear  nconst=16  (the tuned control on the full jet's axis)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# jedi_linear nconst=16 baseline on [pt, etarel, phirel] from the full jet's
+# axis: the tuned control in float
+# hand-written: best trial 107 of jedi_linear_nconst16_augmentation_none on
+# [pt, etarel, phirel] with data.full_axis=true
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/jedi_linear_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.aggregation=sum \
+#     algorithm.head_layers='[32,32,16]' \
+#     algorithm.hidden=128 \
+#     algorithm.name=jedi_linear_axis \
+#     algorithm.optimizer.lr=0.003110744733957464 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/pt_etarel_phirel/jedi_linear/nconst16/baseline_axis \
+#     data.features='[pt,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     results_table.subdir=quantised \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/pt_etarel_phirel/jedi_linear/nconst16/baseline_axis
