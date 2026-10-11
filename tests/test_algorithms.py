@@ -7,28 +7,17 @@ import torch.nn.functional as F
 from lightning import Callback, LightningModule, Trainer
 from torch import nn
 
-from src.algorithms.bdt import BoostedTreesClassifier
-from src.algorithms.components.bdt import BoostedTrees
-from src.algorithms.components.deepsets import (
-    AGGREGATIONS,
-    PT_UNIT_GEV,
-    RANK_CUTS,
-    DeepSetsNet,
-    JEDILinearNet,
-    JetMoments,
-    _masked_pool,
-)
+from src.algorithms.bdt import BoostedTrees, BoostedTreesClassifier
+from src.algorithms.components.geometry import _form, _form_matrix, _unit_lift
 from src.algorithms.components.mlp import _dense
-from src.algorithms.components.pelican import LinEq2to2
-from src.algorithms.components.vector_neurons import (
-    TensorInvariants,
-    VectorNeuronsClassifier,
-    _form,
-    _form_matrix,
-    _unit_lift,
-)
+from src.algorithms.components.moments import PT_UNIT_GEV, RANK_CUTS, JetMoments
+from src.algorithms.components.pooling import AGGREGATIONS, _masked_pool
+from src.algorithms.deepsets import DeepSetsNet
+from src.algorithms.jedi_linear import JEDILinearNet
+from src.algorithms.pelican import LinEq2to2
 from src.algorithms.utils.bitops import BitOps, count_ebops
 from src.algorithms.utils.flops import count_flops
+from src.algorithms.vector_neurons import TensorInvariants, VectorNeuronsClassifier
 from src.data.components.augmentation import make_transform
 from src.data.hls4ml_jet_level_datamodule import JetLevelDataModule
 from src.symmetry import CLASS_NAMES_OF, GROUPS

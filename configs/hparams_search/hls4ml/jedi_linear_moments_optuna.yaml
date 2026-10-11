@@ -1,33 +1,16 @@
 # @package _global_
+# The search of JEDI-linear with the jet moments, one TPE study per constituent count.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study per nconstituents for JEDI-linear with the jet moments, three in all, on the main
-# run's val/acc_best, in the baseline regime alone like every embedded row. Paired on the CLI with
-# callbacks=search data.n_folds=1.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/jedi_linear_moments.db?timeout=600
-    # The regime picks the study, jedi_linear_moments_nconst<N>_augmentation_none, never the CLI.
     study_name: jedi_linear_moments_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # The space of jedi_linear_optuna.yaml, so that the two rows differ in the moments alone, and
-    # the moment set: the five moments of every real constituent (uniform) or those and the moments
-    # of the leading 1, 2, 4 and 8 by p_T (rankcut). The corner (hidden 128, head [64, 32, 16],
-    # rankcut) has 62 647 parameters and costs 1.12, 3.39 and 10.0 MFLOP per jet at 16, 50 and 150
-    # constituents, against 19 919 parameters and 0.29, 0.86 and 2.54 MFLOP at the published point
-    # with the uniform moments (measured on 2026-10-05).
+    # jedi_linear_optuna.yaml's space plus the moment set, so that the rows differ in it alone.
     params:
       algorithm.hidden: choice(16, 32, 64, 128)
       algorithm.head_layers: choice([16], [32], [32,16], [32,32,16], [64,32], [64,32,16])

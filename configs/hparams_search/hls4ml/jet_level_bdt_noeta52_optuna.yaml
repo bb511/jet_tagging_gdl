@@ -1,35 +1,20 @@
 # @package _global_
+# The search of the boosted trees on the jet-level observables but j_eta, at N = 150.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study for the gradient-boosted trees on the jet-level observables, labelled nconst150, on
-# the main run's val/acc_best, in the baseline regime alone. Paired on the CLI with callbacks=search
-# data.n_folds=1 trainer=cpu trainer.max_epochs=50, so that a trial grows up to 500 boosting
-# iterations.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/jet_level_bdt_noeta52.db?timeout=600
-    # The regime picks the study, jet_level_bdt_noeta52_nconst150_augmentation_none, never the CLI.
     study_name: jet_level_bdt_noeta52_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # One space for both rows, which tests/test_configs.py keeps equal. trees_per_epoch is not
-    # searched, since the epoch count sets the number of iterations. max_depth 0 is no limit: the
-    # sweeper writes a None choice as the string 'None'.
+    # One space for both BDT rows, which tests/test_configs.py keeps equal.
     params:
       algorithm.learning_rate: tag(log, interval(0.01, 0.3))
       algorithm.max_leaf_nodes: choice(15, 31, 63, 127, 255)
-      algorithm.max_depth: choice(0, 6, 12)
+      algorithm.max_depth: choice(0, 6, 12) # 0 for no limit: the sweeper writes None as 'None'
       algorithm.min_samples_leaf: choice(20, 100, 500)
       algorithm.l2_regularization: choice(0.0, 0.1, 1.0)
       algorithm.max_features: choice(0.5, 1.0)

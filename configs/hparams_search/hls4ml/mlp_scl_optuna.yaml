@@ -1,6 +1,6 @@
 # @package _global_
 
-# The SCL regimes (data.method=symm_loss) add the consistency-loss weight to mlp_optuna.yaml.
+# The SCL regimes add the consistency-loss weight to mlp_optuna.yaml.
 defaults:
   - hls4ml/mlp_optuna
   - _self_
@@ -8,6 +8,5 @@ defaults:
 hydra:
   sweeper:
     params:
-      # Weighs the consistency term against the cross-entropy: log-scaled, from a light regulariser
-      # (1e-3) to dominating the total loss (10).
+      # From a light regulariser (1e-3) to dominating the total loss (10).
       algorithm.symm_loss_weight: tag(log, interval(1e-3, 10))

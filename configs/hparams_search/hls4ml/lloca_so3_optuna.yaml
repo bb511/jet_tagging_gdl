@@ -1,35 +1,16 @@
 # @package _global_
+# The search of LLoCa with the SO(3) frames, one TPE study per constituent count.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study per nconstituents for LLoCa with the SO(3) frames, three in all, on the main
-# run's val/acc_best, in the baseline regime alone like every embedded architecture. The four
-# LLoCa rows share the space, so they are searched at equal effort, and the space is provisional
-# until the campaign discussion. Paired on the CLI with callbacks=search data.n_folds=1. units
-# and mass_reg are numerical settings, not model capacity, and lorentz_eta_max defines the
-# invariance probe, so none of the three is searched.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/lloca_so3.db?timeout=600
-    # The regime picks the study, lloca_so3_nconst<N>_augmentation_none, never the CLI.
     study_name: lloca_so3_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # The references' tagging default (8 blocks, 8 heads, 8x0n+2x1n per head, mlp_factor 2,
-    # frames-net hidden 32) lies inside the space, whose corner (12 blocks at hidden 128, mlp_factor
-    # 4, 2.4 M parameters) fits a 1g MIG slice at N=16 by the V100 pre-flight of 2026-09-28; the
-    # wider heads first proposed (up to 16x0n+4x1n, 9.5 M) did not. lr and weight_decay follow
-    # JetFormer's ranges, the transformer of this study.
+    # lloca_lorentz_optuna.yaml's space, so that the four rows are searched alike.
     params:
       algorithm.num_blocks: choice(2, 4, 6, 8, 12)
       algorithm.num_heads: choice(2, 4, 8)

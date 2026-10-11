@@ -1,40 +1,22 @@
 # @package _global_
+# The LorentzNet search, one TPE study per constituent count.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study per nconstituents for LorentzNet, three in all, on the main run's val/acc_best.
-# LorentzNet embeds the symmetry rather than acquiring it, so it is only ever trained in the
-# baseline regime; the 200 trials match what the other architectures get, so the baselines are
-# searched at equal effort. Paired on the CLI with callbacks=search data.n_folds=1.
-# lorentz_eta_max is never searched: it defines the invariance probe and stays fixed.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/lorentznet.db?timeout=600
-    # The regime alone picks the study, lorentznet_nconst<N>_augmentation_none, never the CLI.
     study_name: lorentznet_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # n_hidden and n_layers bracket the paper's (72, 6) LGEB stack from below, a smaller graph net
-    # possibly saturating already. c_weight scales the Minkowski-coordinate update against the
-    # scalar one in each LGEB, and under the tanh gate it scales it alone: the per-edge step
-    # saturates at |x_diff|, so the useful range runs up to c_weight = 1, where a node moves by a
-    # whole mean edge difference per block. Log-scaled, since the trade-off spans orders of
-    # magnitude. lr and weight_decay follow JetFormer's ranges, weight_decay capped lower for the
-    # smaller net.
+    # n_hidden and n_layers bracket the paper's (72, 6) stack from below.
     params:
       algorithm.n_hidden: choice(16, 24, 32, 48, 72)
       algorithm.n_layers: choice(2, 3, 4, 6)
+      # Up to 1, where the tanh-gated step moves a node by a whole mean edge difference per block.
       algorithm.c_weight: tag(log, interval(1e-4, 1))
       algorithm.dropout: choice(0.0, 0.1, 0.2)
+      # lr and weight_decay take JetFormer's ranges, the decay capped lower for the smaller net.
       algorithm.optimizer.lr: tag(log, interval(1e-4, 5e-3))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5)

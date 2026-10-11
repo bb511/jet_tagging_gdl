@@ -1,18 +1,12 @@
-# The control of the moment rows: DeepSets with no per-constituent network, whose rho reads the jet
-# moments of [pt, etarel, phirel] and the multiplicity over the slot count alone. Pinned to those
-# columns and filed with the embedded rows, so scripted in the baseline regime alone. This file is
-# a copy of deepsets.yaml without phi_layers and aggregation, differing in _target_, name,
-# nbr_feats, moments and moments_only (tests/test_configs.py keeps the rest in step).
+# The moment rows' control: rho reads the jet moments and the multiplicity alone.
 _target_: src.algorithms.deepsets.DeepSetsMoments
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: moments_only
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 3 # not ${len:...}: the net reads pt, etarel and phirel alone, so features must be those
+nbr_feats: 3 # required_features pins [pt, etarel, phirel]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# Scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
@@ -20,9 +14,7 @@ transform_kwargs: ${data.transform_kwargs}
 
 rho_layers: [32, 32, 16]
 dropout: 0.0
-# uniform: the five moments of every real constituent; rankcut: those and the moments of the
-# leading 1, 2, 4 and 8 by p_T, 25 in all.
-moments: uniform
+moments: uniform # five moments; rankcut adds those of the leading 1, 2, 4 and 8, 25 in all
 moments_only: true
 
 optimizer:

@@ -1,42 +1,19 @@
 # @package _global_
+# The JEDI-linear search, one TPE study per regime.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study per (nconstituents, method, augmentation_scheme) regime for JEDI-linear, on the
-# main run's val/acc_best. Every regime shares this space and its 200 trials, so augmentation and
-# SCL are searched at equal effort; the SCL regimes select _scl_optuna instead, which adds the
-# consistency-loss weight. Paired on the CLI with callbacks=search data.n_folds=1; a feature set
-# other than the four-momentum also sets hydra.sweeper.storage, as its catalogue blocks do.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/jedi_linear.db?timeout=600
-    # The regime alone picks the study, e.g. jedi_linear_nconst16_symm_loss_so2; never the CLI.
     study_name: jedi_linear_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # The published point (hidden 64, head [64, 32, 16], ReLU, sum) lies inside the space. The
-    # pooling, lr and weight_decay are searched over the choices of the DeepSets search, whose
-    # optimiser block this is, and the head choices are the DeepSets rho choices plus the published
-    # head. As there, no activation is searched, so every trial takes the network's ReLU, and the
-    # pools are those an FPGA computes without a per-jet division: the sum, the maximum and
-    # sum_over_n, the masked sum divided by the constant N. A first campaign with the pooling fixed
-    # to the sum (2026-09-30, stopped and removed) fell 8 to 14 points behind DeepSets on [px, py,
-    # pz, e] and [pt, eta, phi], where the best DeepSets trials took the maximum. The corner (hidden
-    # 128, head [64, 32, 16]) has 61 125 parameters on four features and costs 1.1, 3.4 and 10.0
-    # MFLOP per jet at 16, 50 and 150 constituents, against 0.29, 0.87 and 2.56 at the published
-    # point.
+    # The published point (hidden 64, head [64, 32, 16], sum) lies inside the space.
     params:
       algorithm.hidden: choice(16, 32, 64, 128)
+      # The DeepSets rho choices plus the published head.
       algorithm.head_layers: choice([16], [32], [32,16], [32,32,16], [64,32], [64,32,16])
       algorithm.aggregation: choice(sum, max, sum_over_n)
       algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-2))

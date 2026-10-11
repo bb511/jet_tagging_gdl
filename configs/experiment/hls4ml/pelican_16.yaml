@@ -1,7 +1,5 @@
 # @package _global_
-# PELICAN at 16 constituents, at the algorithm defaults: a starting point, not tuned values.
-# PELICAN is a symmetry-embedded class, so it runs the baseline regime only; data.method and
-# data.augmentation_scheme still take CLI overrides, but anything else is outside the study design.
+# PELICAN at 16 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: pelican
   - override /trainer: gpu
@@ -10,28 +8,20 @@ tags: ["hls4ml", "pelican", "nconst-16"]
 
 experiment_name: hls4ml_pelican_nconst16
 
-# The pair tensor costs B * N^2 per channel, so memory follows the squared slot count rather than
-# the multiplicity; at 18 slots the usual batch fits anywhere.
 data:
   nconstituents: 16
 
-# fp32, not the trainer's 16-mixed: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6
-# GeV^2, above the fp16 maximum of 65 504, before the input embedding compresses them.
+# fp32: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6 GeV^2, above the fp16 maximum.
 trainer:
   precision: 32
 
-# TF32 matmuls on Ampere and later. The fp32 range that made these experiments force precision 32
-# is kept (the Minkowski products are a bmm on de-normalised momenta anyway); only the linear
-# layers lose mantissa. Set per experiment so searches, trainings and evaluations agree; a no-op
-# on a V100.
+# TF32 on Ampere and later, a no-op on a V100; it keeps the fp32 range that forced precision 32.
 extras:
   matmul_precision: high
 
 algorithm:
-  # Mean real multiplicity of the training jets at this truncation (15.98, measured
-  # 2026-09-13 on the record cache) plus the two beams.
+  # Mean real multiplicity 15.98 of the training jets (record cache, 2026-09-13) plus the two beams.
   nbar: 18.0
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

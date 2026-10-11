@@ -1,18 +1,12 @@
-# L-GATr-slim without the spurions: configs/algorithm/lgatr_slim.yaml with add_beams and add_time
-# false, everything else identical (tests/test_configs.py keeps the two in step). Reading the
-# constituents' four-momenta alone, the network is invariant under the full Lorentz group, where
-# the spurions leave SO(2) about the beam axis, so the two rows differ in the embedded group and in
-# nothing else. Per-nconstituents values in configs/experiment/hls4ml/lgatr_slim_lorentz_<N>.yaml.
+# L-GATr-slim without the spurions, Lorentz-exact; per-N values in the experiment configs.
 _target_: src.algorithms.lgatr_slim.LGATrSlim
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: lgatr_slim_lorentz
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+nbr_feats: 4 # required_features pins [px, py, pz, e]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# Scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
@@ -24,8 +18,7 @@ hidden_s_channels: 96
 num_heads: 8
 mlp_ratio: 4
 dropout: 0.0
-units: 20.0 # GeV per unit, see lgatr_slim.yaml; never searched
-# The two switches: no time vector and no beams, so the full Lorentz group is exact.
+units: 20.0 # GeV per unit, the references' scale; never searched
 add_beams: false
 add_time: false
 
@@ -35,8 +28,7 @@ optimizer:
   lr: 3.0e-4
   weight_decay: 1.0e-2
 
-# One cycle over the whole run, hence stepped per batch. total_steps is injected by
-# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+# Stepped per batch; _set_up_scheduler injects total_steps.
 scheduler:
   scheduler:
     _target_: torch.optim.lr_scheduler.OneCycleLR
@@ -46,6 +38,5 @@ scheduler:
   interval: step
   frequency: 1
 
-# Compiled: 1.7 to 2.1 times faster per training step than eager (olgpu V100, 2026-09-29), with
-# logits within 4e-7 of the eager network's, at a one-off compile of 15 to 55 s per fit.
+# 1.7 to 2.1 times faster per training step than eager (olgpu V100, 2026-09-29).
 compile: true

@@ -7,7 +7,7 @@ from hydra.core.hydra_config import HydraConfig
 from mlflow import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
-from src.algorithms.components.bdt import BoostedTrees
+from src.algorithms.bdt import BoostedTrees
 from src.utils.checkpoints import MANIFEST_FILENAME, merge_manifests, read_manifest
 from tests.conftest import (
     CPU_ROWS,

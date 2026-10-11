@@ -1,7 +1,5 @@
 # @package _global_
-# LLoCa with the SO(2)xSO(1,1) frames (LearnedZFrames) at 50 constituents, at the algorithm
-# defaults: a starting point, not tuned values. Symmetry-embedded, so it runs the baseline regime
-# only; the other three rows are lloca_{lorentz,so2,so3}_50.yaml.
+# LLoCa with the SO(2)xSO(1,1) frames (LearnedZFrames) at 50 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: lloca_z
   - override /trainer: gpu
@@ -14,16 +12,13 @@ data:
   nconstituents: 50
   batch_size: 1024
 
-# fp32, not the trainer's 16-mixed: the wrapper hands the frames-net float64 momenta (in float32 the
-# massless constituents' pair masses fall to zero and the frames-net's sqrt has no finite gradient),
-# the package keeps the orthonormalisation in float64, and the references train LLoCa without amp.
+# fp32, as the references train LLoCa without mixed precision.
 trainer:
   precision: 32
 
-# TF32 matmuls on Ampere and later, as in the other embedded experiments; a no-op on a V100.
+# TF32 on Ampere and later, a no-op on a V100.
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

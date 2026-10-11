@@ -1,9 +1,5 @@
 # @package _global_
-# LorentzNet at 100 constituents of the top-tagging set, on the published recipe (arXiv:2201.08187,
-# sec. 3.3; LorentzNet-release, top_tagging.py): 6 blocks of width 72, c = 5e-3, dropout 0.2,
-# AdamW at 1e-3 with weight decay 0.01, batch 128, 35 epochs, no gradient clipping, the checkpoint
-# of the best validation accuracy. The reference reads every constituent; 100 truncate fewer than
-# 1 % of the jets. Baseline regime only.
+# LorentzNet at N = 100 on the published recipe of arXiv:2201.08187, sec. 3.3.
 defaults:
   - override /data: top_tagging
   - override /algorithm: lorentznet
@@ -18,9 +14,7 @@ data:
   nconstituents: 100
   batch_size: 128
 
-# 4 epochs of linear warm-up, 28 of cosine annealing with warm restarts (T0 4, Tmult 2) and 3 of
-# decay by 0.5. Assigned whole through the interpolation below, since a merge into the algorithm's
-# plateau scheduler would keep its keys, which this schedule does not take.
+# Assigned whole through algorithm.scheduler, since a merge would keep the plateau scheduler's keys.
 scheduler:
   scheduler:
     _target_: src.algorithms.utils.schedules.warmup_restarts_decay
@@ -41,16 +35,13 @@ algorithm:
     weight_decay: 0.01
   scheduler: ${scheduler}
 
-# fp32 and TF32 as configs/experiment/hls4ml/lorentznet_150.yaml: de-normalised edge invariants
-# overflow fp16.
 trainer:
-  precision: 32
+  precision: 32 # de-normalised edge invariants overflow fp16
   max_epochs: 35
-  gradient_clip_val: null
+  gradient_clip_val: null # the reference script clips no gradient
 
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

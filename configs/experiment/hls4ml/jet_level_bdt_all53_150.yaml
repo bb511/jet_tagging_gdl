@@ -1,7 +1,5 @@
 # @package _global_
-# Gradient-boosted trees on the record's 53 jet-level observables, labelled N = 150 since they are
-# computed from the whole jet, at scikit-learn's defaults: a starting point, not tuned values. No
-# group acts on the observables, so it runs the baseline regime only.
+# Boosted trees on the record's 53 jet-level observables (whole jet, hence N = 150), untuned.
 defaults:
   - override /data: jet_level
   - override /algorithm: jet_level_bdt_all53
@@ -11,19 +9,15 @@ tags: ["hls4ml", "jet_level_bdt_all53", "nconst-150"]
 
 experiment_name: hls4ml_jet_level_bdt_all53_nconst150
 
-# The probe would transform nothing and report a perfect invariance that was never tested. Under
-# callbacks=search this leaves a node without _target_, which instantiate_callbacks skips.
+# No group acts on the observables, so a probe would report an invariance never tested.
 callbacks:
   invariance_metric:
     probe: false
 
-# Up to 2000 boosting iterations, ten per epoch. scikit-learn fits and evaluates the trees, so no
-# torch operation has a precision to reduce and no gradient to clip, and Lightning refuses clipping
-# under manual optimisation.
+# scikit-learn grows the trees; Lightning refuses clipping under manual optimisation.
 trainer:
   precision: 32
   gradient_clip_val: null
 
-# Judged against the networks rather than beside them, so its rows skip the <features>/ directory.
 results_table:
   subdir: jet_level

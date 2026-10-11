@@ -1,5 +1,3 @@
-# https://hydra.cc/docs/configure_hydra/intro/
-
 defaults:
   - override hydra_logging: colorlog
   - override job_logging: colorlog

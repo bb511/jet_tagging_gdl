@@ -1,7 +1,5 @@
 # @package _global_
-# L-GATr-slim without the spurion tokens at 50 constituents, at the algorithm defaults: a
-# starting point, not tuned values. Symmetry-embedded, so it runs the baseline regime only;
-# the twin with the spurions is lgatr_slim_50.yaml.
+# L-GATr-slim without spurions at 50 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: lgatr_slim_lorentz
   - override /trainer: gpu
@@ -14,16 +12,13 @@ data:
   nconstituents: 50
   batch_size: 1024
 
-# fp32, not the trainer's 16-mixed: the lgatr documentation advises against mixed precision for
-# the slim network and reports lower accuracy under amp, although the package keeps the Minkowski
-# contractions in fp32 under autocast.
+# fp32: the lgatr documentation advises against mixed precision for the slim network.
 trainer:
   precision: 32
 
-# TF32 matmuls on Ampere and later, as in the other embedded experiments; a no-op on a V100.
+# TF32 on Ampere and later, a no-op on a V100.
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

@@ -1,6 +1,6 @@
 # @package callbacks
 
-# Everything a full training run needs: the Lightning built-ins, and this project's own.
+# Callbacks of a full training or evaluation run.
 defaults:
   - util@model_checkpoint: model_checkpoint
   - util@early_stopping: early_stopping

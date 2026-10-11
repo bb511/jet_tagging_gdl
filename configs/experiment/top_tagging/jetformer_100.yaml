@@ -1,8 +1,5 @@
 # @package _global_
-# JetFormer at 100 constituents of the top-tagging set, on [pt, etarel, phirel], at the optimum of
-# the hls4ml N = 150 baseline study on the same features (trial 134, val/acc_best 0.8319; block of
-# scripts/hls4ml/pt_etarel_phirel/runjetformer_train.sh): the transfer point the top-tagging search
-# starts from. Baseline regime only.
+# JetFormer at N = 100 on [pt, etarel, phirel] of the top-tagging set.
 defaults:
   - override /data: top_tagging
   - override /algorithm: jetformer
@@ -13,13 +10,14 @@ tags: ["top_tagging", "jetformer", "nconst-100"]
 
 experiment_name: top_tagging_jetformer_nconst100
 
-# Batch and loader processes as configs/experiment/hls4ml/jetformer_150.yaml.
+# The batch and loader processes of hls4ml/jetformer_150.yaml.
 data:
   nconstituents: 100
   features: [pt, etarel, phirel]
   batch_size: 2048
   num_workers: 16
 
+# The hls4ml N = 150 baseline optimum on these columns, trial 134 (val/acc_best 0.8319).
 algorithm:
   output_dim: 2
   dropout: 0.0

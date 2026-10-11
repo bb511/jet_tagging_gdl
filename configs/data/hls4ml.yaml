@@ -1,46 +1,26 @@
-# The hls4ml LHC jets. The record ships the split, the pT sorting and the normalisation in a loader
-# package of its own, so only the wrapper is configured here.
+# The hls4ml LHC jets, through the loader package the record ships.
 _target_: src.data.hls4ml_datamodule.HLS4MLDataModule
 
-# The record ships executable code, so a run executes whatever is at this commit (null: the head).
-revision: fc7104f60a45d528ab597b220d5a7cd8e31cfff8
+revision: fc7104f60a45d528ab597b220d5a7cd8e31cfff8 # pinned: the record ships executable code
 
-# Per-nconstituents caches, reused if the directory exists; the snapshot goes to HF_HUB_CACHE.
 cache_dir: ${paths.base_data_dir}/hf
 
-# augmentation: online so2/so3/lorentz on train batches | symm_loss: SCL, no augmentation
 method: augmentation
 
-# none | so2 | so3 | lorentz | lorentz_iso, the last two being the boost along the beam and the
-# boost of isotropic direction. Under symm_loss it names the group the SCL draws from.
 augmentation_scheme: none
 
-# The knobs of make_transform, shared with the SCL and the invariance probe, whose configs
-# interpolate this node. lorentz_eta_max: half-width of the uniform rapidity of the beam boost,
-# JetCLR's shift range (the sample's jets sit within |eta| <~ 1.65); the isotropic probe boost
-# (lorentz_iso) shares it.
 transform_kwargs:
-  lorentz_eta_max: 1.0
+  lorentz_eta_max: 1.0 # rapidity half-width of the beam boost, JetCLR's shift range
 
-# Experiments use 16, 50 and 150; 150 is every constituent the record carries.
 nconstituents: 16
 
-# Any subset of the 16 record columns; LorentzNet needs exactly these four.
 features: [px, py, pz, e]
 
 batch_size: 2048
-# Loader processes, where the online transform runs; they persist across epochs so their copy of
-# the shuffler advances (fresh forks would replay the first permutation every epoch). 0 iterates
-# in the driver instead, 1.8x slower per epoch for DeepSets at N=16 under augmentation.
-num_workers: 4
+num_workers: 4 # persistent; 0 is 1.8x slower per epoch (DeepSets, N=16, augmentation)
 pin_memory: true
 
-# k >= 2: pool train+val and re-split into k folds; 1: the record's split, which the searches and
-# the debug configs pass.
 n_folds: 5
 kfold_seed: 42
 
-# true keeps the record's etarel, phirel, deltaR and ptrel, measured from the untruncated jet's
-# axis, rather than rebasing them on the kept constituents: the test of what that axis is worth,
-# in the baseline regime alone.
 full_axis: false

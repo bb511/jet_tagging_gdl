@@ -1,6 +1,6 @@
 """Copy a trained float JEDI-linear, with or without the jet moments, into its HGQ2 port.
 
-The port (components/jedi_linear_hgq.py) differs from ``JEDILinearNet`` in four places,
+The port (jedi_linear_hgq.py) differs from ``JEDILinearNet`` in four places,
 which the copy absorbs so that in eval mode both give the same logits:
 
 - it reads (p_T / units, etarel, phirel) in GeV and radians, where the float network
@@ -30,12 +30,8 @@ import torch
 from omegaconf import OmegaConf
 from torch import nn
 
-from src.algorithms.components.deepsets import (
-    MOMENT_FEATURES,
-    PT_UNIT_GEV,
-    JEDILinearNet,
-    JetMoments,
-)
+from src.algorithms.components.moments import MOMENT_FEATURES, PT_UNIT_GEV, JetMoments
+from src.algorithms.jedi_linear import JEDILinearNet
 from src.algorithms.utils.vector_neurons_port import (
     _check_architecture,
     _checkpoint_path,

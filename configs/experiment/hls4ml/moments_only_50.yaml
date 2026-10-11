@@ -1,7 +1,5 @@
 # @package _global_
-# The moments-only control on [pt, etarel, phirel] at 50 constituents, at the algorithm
-# defaults: a starting point, not tuned values. Pinned to its columns and filed with the embedded
-# rows, so it runs the baseline regime only.
+# The moments-only control on [pt, etarel, phirel] at 50 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: moments_only
   - override /trainer: gpu
@@ -15,11 +13,7 @@ data:
   # The network's own columns; required_features makes setup() refuse any other list.
   features: [pt, etarel, phirel]
 
-# The trainer's 16-mixed, as for DeepSets and JEDI-linear, and no extras.matmul_precision: the
-# moments are computed in float32 with autocast off, since they are cubic in p_T, and TF32 would
-# round the inputs of their products to about 5e-4 while pair, chain and triangle cancel between
-# large terms. tests/test_configs.py keeps both keys unset.
+# No extras.matmul_precision: the moments' terms cancel, which TF32's rounding would not resolve.
 
-# Filed with the embedded rows, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

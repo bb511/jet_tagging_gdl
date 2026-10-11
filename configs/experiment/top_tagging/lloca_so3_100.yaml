@@ -1,12 +1,5 @@
 # @package _global_
-# LLoCa with the SO(3) frames (LearnedSO3Frames) at 100 constituents of the top-tagging set,
-# on the published recipe of the LLoCa-Transformer, whose frames are Lorentz (arXiv:2508.14898,
-# App. A; lloca-experiments repository, config/model/tag_top_transformer.yaml and
-# config/training/tag_default.yaml): 12 blocks, 8 heads of 12 scalars and one four-vector, MLP
-# expansion 2, a frames-net of two 128-wide hidden layers with dropout 0.1, Lion at 3e-5 with
-# weight decay 2, cosine annealing restarted once halfway, batch 128, 300k steps (32 epochs of the
-# 1 211 000 training jets), gradients clipped at norm 1. The reference reads every constituent.
-# Baseline regime only; the other three rows are lloca_{lorentz,z,so2}_100.yaml.
+# LLoCa with the SO(3) frames at N = 100 on the Lorentz-frames recipe of arXiv:2508.14898.
 defaults:
   - override /data: top_tagging
   - override /algorithm: lloca_so3
@@ -21,14 +14,12 @@ data:
   nconstituents: 100
   batch_size: 128
 
-# Two cosine cycles of 16 epochs, for the reference's two of 150k steps. Assigned whole, since a
-# merge into the algorithm's OneCycleLR would keep max_lr and pct_start, which this schedule does
-# not take.
+# Assigned whole through algorithm.scheduler, since a merge would keep OneCycleLR's keys.
 scheduler:
   scheduler:
     _target_: src.algorithms.utils.schedules.cosine_restarts
     _partial_: true
-    cycles: 2
+    cycles: 2 # the reference's two of 150k steps
   interval: step
   frequency: 1
 
@@ -41,25 +32,20 @@ algorithm:
   mlp_factor: 2
   framesnet_hidden: 128
   framesnet_dropout: 0.1
-  # The algorithm's 0 for the backbone: the paper gives a dropout for the frames-net alone.
-  dropout: 0.0
-  # The paper's betas, not Lion's default (0.9, 0.99) of lgatr_slim_100.yaml.
+  dropout: 0.0 # the paper gives a dropout for the frames-net alone
   optimizer:
     _target_: lion_pytorch.Lion
     lr: 3.0e-5
     weight_decay: 2.0
-    betas: [0.9, 0.999]
+    betas: [0.9, 0.999] # the paper's, not Lion's default
   scheduler: ${scheduler}
 
-# fp32 and TF32 as configs/experiment/hls4ml/lloca_so3_150.yaml. The trainer's clipping at
-# norm 1 is the reference's.
 trainer:
-  precision: 32
-  max_epochs: 32
+  precision: 32 # its references train without amp
+  max_epochs: 32 # the reference's 300k steps at batch 128
 
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

@@ -1,6 +1,6 @@
 """Copy a trained float vector-neuron network into its HGQ2 port.
 
-The port (components/vector_neurons_hgq.py) differs from ``VectorNeuronsClassifier`` in
+The port (vector_neurons_hgq.py) differs from ``VectorNeuronsClassifier`` in
 four places, which the copy absorbs so that in eval mode both give the same logits:
 
 - p_T is counted in 16 GeV rather than in the float network's units, so every
@@ -32,7 +32,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from src.algorithms.components.vector_neurons import (
+from src.algorithms.vector_neurons import (
     FormInvariants,
     Stream,
     TensorInvariants,

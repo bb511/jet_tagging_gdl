@@ -1,8 +1,5 @@
 # @package _global_
-# MLP at 100 constituents of the top-tagging set, on [pt, etarel, phirel], at the optimum of the
-# hls4ml N = 150 baseline study on the same features (trial 55, val/acc_best 0.7732; block of
-# scripts/hls4ml/pt_etarel_phirel/runmlp_train.sh): the transfer point the top-tagging search
-# starts from. Baseline regime only.
+# The MLP at N = 100 on [pt, etarel, phirel] of the top-tagging set.
 defaults:
   - override /data: top_tagging
   - override /algorithm: mlp
@@ -13,13 +10,14 @@ tags: ["top_tagging", "mlp", "nconst-100"]
 
 experiment_name: top_tagging_mlp_nconst100
 
-# Batch and loader processes as configs/experiment/hls4ml/mlp_150.yaml.
+# The batch and loader processes of hls4ml/mlp_150.yaml.
 data:
   nconstituents: 100
   features: [pt, etarel, phirel]
   batch_size: 2048
   num_workers: 16
 
+# The hls4ml N = 150 baseline optimum on these columns, trial 55 (val/acc_best 0.7732).
 algorithm:
   output_dim: 2
   batchnorm: true

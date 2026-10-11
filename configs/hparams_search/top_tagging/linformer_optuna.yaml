@@ -1,33 +1,16 @@
 # @package _global_
-# The top-tagging search at N = 100. One space serves the row's 21 configurations (three feature
-# sets, seven regimes), so each size runs from the hls4ml step below the smallest of their N = 150
-# optima, if any, to one step beyond the hls4ml grid, the lr a factor 3 beyond their extremes, and
-# every other key over its hls4ml choices. The step beyond answers the studies of 2026-10-09,
-# narrowed to the optimum's neighbours, whose best trial sat at the upper edge of a size in five
-# of nine rows.
+# The Linformer search at N = 100, one space for its three feature sets and seven regimes.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study on the main run's val/acc_best, paired on the CLI with callbacks=search
-# data.n_folds=1 trainer.max_epochs=50. A campaign enqueues the hls4ml optimum at N = 150 of the
-# same feature set and regime as trial 0, under these parameter names.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/top_tagging/linformer.db?timeout=600
-    # The regime alone picks the study, never a CLI argument.
     study_name: top_tagging_linformer_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 100
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
+    # Each size from the hls4ml step below the smallest N = 150 optimum to one step past the grid.
     params:
       algorithm.embed_dim: choice(24, 32, 48, 64, 96)
       algorithm.kv_proj_dim: choice(2, 4, 8, 16)
@@ -35,5 +18,6 @@ hydra:
       algorithm.head_layers: choice([16], [32], [32,16], [32,32,16], [64,32], [32,32,32], [64,64,32])
       algorithm.aggregation: choice(sum, max, sum_over_n)
       algorithm.batchnorm: choice(true, false)
+      # A factor 3 beyond the extremes of the hls4ml optima.
       algorithm.optimizer.lr: tag(log, interval(1.10e-4, 1.40e-2))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-7, 1e-6, 1e-5, 1e-4)

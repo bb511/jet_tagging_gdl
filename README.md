@@ -91,7 +91,7 @@ The `data.n_folds` argument enables cross-validation.
 When `n_folds >= 2`, the training and validation data sets are merged and resplit following a conventional k-folding procedure.
 The test split is never touched during this process.
 
-The checkpoints of each run are written under `<hydra run dir>/checkpoints/`, and `scripts/cluster/submit_train.sh --folds` puts fold i of a training in `<hydra run dir>/fold_<i>/`, under its main run.
+The checkpoints of each run are written under `<hydra run dir>/checkpoints/`, and `scripts/experiments/submit_train.sh --folds` puts fold i of a training in `<hydra run dir>/fold_<i>/`, under its main run.
 The training writes no figures: the evaluation writes the ROC curves and the confusion matrix of each tested checkpoint under `<eval run dir>/plots/{main,fold_<i>}/`.
 A checkpoint manifest is also written in the run directory: `checkpoint_manifest.json`.
 This latter `json` files is used at evaluation time to compute the invariance metrics on the checkpointed models.
@@ -156,10 +156,10 @@ The `_scl_optuna` variant of a config adds `algorithm.symm_loss_weight`.
 The other four regimes use the plain `<model>_optuna`.
 The `callbacks=search` is set such that a trial does not run any plotting and does not output anything to `results/`.
 
-The best of the first 200 completed trials of each study is written into its block of `scripts/hls4ml/run<model>_train.sh` by the following script:
+The best of the first 200 completed trials of each study is written into its block of `run<model>_train.sh` under `scripts/experiments/hls4ml/` by the following script:
 
 ```bash
-python scripts/optuna/make_train_catalogues.py
+python scripts/experiments/make_train_catalogues.py
 ```
 
 ## Licence

@@ -128,8 +128,8 @@ def merge_manifests(base_dir: str | Path) -> Manifest:
     """Join the manifest of a main run with those of the folds trained beside it as
     processes.
 
-    The layout is the one ``scripts/cluster/submit_train.sh --folds`` launches: the main
-    run (``fold=null``, ``data.n_folds=1``) in *base_dir*, fold i (``fold=i``) in
+    The layout is the one ``scripts/experiments/submit_train.sh --folds`` launches: the
+    main run (``fold=null``, ``data.n_folds=1``) in *base_dir*, fold i (``fold=i``) in
     ``fold_<i>/`` under it.
 
     :return: the main run first, then the folds by index. ``n_folds`` counts the fold

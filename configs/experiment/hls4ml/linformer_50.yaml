@@ -10,5 +10,4 @@ experiment_name: hls4ml_linformer_nconst50
 
 data:
   nconstituents: 50
-# No algorithm block: its defaults are the point of the reference example in float (width 16, k = 4,
-# head [16]), until the searches replace them.
+# Algorithm defaults: the reference example's point in float (width 16, k = 4, head [16]).

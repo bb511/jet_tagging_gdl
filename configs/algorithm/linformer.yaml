@@ -1,29 +1,24 @@
-# The single-head Linformer of Laatu et al. (arXiv:2510.24784), trained in float. One block with no
-# positional encoding; the keys and values are projected over the constituent slots with one weight
-# per slot, so the network is not permutation-invariant and reads the slots in the record's order,
-# as the MLP does. The optimiser and scheduler blocks are those of deepsets.yaml.
+# Single-head Linformer of Laatu et al., arXiv:2510.24784, in float.
 _target_: src.algorithms.linformer.Linformer
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: linformer
 
 nconstituents: ${data.nconstituents}
 nbr_feats: ${len:${data.features}}
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
-# The float point of the reference example (get_llformer in calad0i/HGQ2-examples, jsc150/model.py),
-# one architecture for every N and feature set.
-embed_dim: 16 # width of the tokens, the queries, the keys and the values
-kv_proj_dim: 4 # k, the number of slots the N constituents are projected onto for keys and values
-ff_dim: 16 # hidden width of the feed-forward sub-layer
-head_layers: [16] # hidden widths of the MLP on the pooled vector
-aggregation: sum_over_n # sum, max, or the sum divided by N, each over the real constituents
-batchnorm: true # a BatchNorm before every ReLU, over the tokens and in the head
+# The float point of get_llformer (calad0i/HGQ2-examples, jsc150/model.py), for every N.
+embed_dim: 16
+kv_proj_dim: 4 # k, the slots onto which the keys and values are projected
+ff_dim: 16
+head_layers: [16]
+aggregation: sum_over_n
+batchnorm: true
 
 optimizer:
   _target_: torch.optim.Adam

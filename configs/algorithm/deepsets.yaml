@@ -1,14 +1,12 @@
-# DeepSets, the permutation-invariant tagger. Defaults here, tuned widths and rates in
-# configs/experiment/hls4ml/deepsets_<N>.yaml.
+# DeepSets; per-N values in the experiment configs.
 _target_: src.algorithms.deepsets.DeepSets
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: deepsets
 
 nconstituents: ${data.nconstituents}
 nbr_feats: ${len:${data.features}}
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1

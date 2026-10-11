@@ -1,36 +1,28 @@
-# Vector neurons on the lifts of (pt, eta, phi), the angles measured from the leading constituent:
-# shifts of eta and phi (SO(2) about the beam and, for massless constituents, boosts along it), both
-# reflections and the rotations of the (eta, phi) plane are exact, SO(3) and the isotropic boost are
-# measured. Per-nconstituents values in configs/experiment/hls4ml/vn_<N>.yaml.
+# Vector neurons on the lifts of (pt, eta, phi); per-N values in the experiment configs.
 _target_: src.algorithms.vector_neurons.VectorNeurons
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: vn
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 3 # not ${len:...}: the net reads pt, eta and phi alone, so features must be pt,eta,phi
+nbr_feats: 3 # required_features pins [pt, eta, phi]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# Scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
 num_blocks: 1
-vector_channels: 16 # lifted vector channels of every block
-scalar_channels: 64 # scalar channels of every block
-invariants: 16 # forms read in every block and in the readout
-tensor_invariants: 2 # three-point correlators of each of three kinds, read by the first block; 0 builds none
-stream_channels: 16 # width of the per-constituent stream; 0 builds none
-mlp_layers: 2 # linear layers of the scalar MLP of every block, ReLU between them
-gate: true # false passes the mixed vectors ungated, so that they need not wait for the scalar MLP
-head_layers: [64, 32] # hidden widths of the readout MLP
+vector_channels: 16
+scalar_channels: 64
+invariants: 16
+tensor_invariants: 2 # three-point correlators of three kinds; 0 builds none
+stream_channels: 16 # per-constituent stream; 0 builds none
+mlp_layers: 2
+gate: true # false: the mixed vectors need not wait for the scalar MLP
+head_layers: [64, 32]
 dropout: 0.0
-units: 20.0 # GeV per unit of p_T, the L-GATr-slim and LLoCa rows' scale; never searched
-# true reads the leader's eta and phi from the full jet's axis as two more scalars of the first
-# block: a test of what that axis is worth, with data.full_axis true, nbr_feats 5 and data.features
-# [pt, eta, phi, etarel, phirel] (hparams_search/hls4ml/vn_cheap_axis_optuna.yaml).
+units: 20.0 # GeV per unit of p_T, the L-GATr-slim and LLoCa scale; never searched
 axis_offset: false
 
 optimizer:
@@ -39,8 +31,7 @@ optimizer:
   lr: 2.0e-3
   weight_decay: 1.0e-2
 
-# One cycle over the whole run, hence stepped per batch. total_steps is injected by
-# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+# Stepped per batch; _set_up_scheduler injects total_steps.
 scheduler:
   scheduler:
     _target_: torch.optim.lr_scheduler.OneCycleLR

@@ -35,6 +35,35 @@ def _check_classes(output_dim: int, datamodule: object) -> None:
         )
 
 
+def _check_full_width_order(indices: list[int], n_columns: int) -> None:
+    """Raise a ValueError if the network reads every column, but in another order."""
+    if len(indices) == n_columns and indices != list(range(len(indices))):
+        raise ValueError(
+            "The algorithm consumes every data column but in a different order, which "
+            "forward() cannot detect: it reduces only on a width mismatch. Reorder "
+            "data.features to match the algorithm's feature order."
+        )
+
+
+def _check_training_columns(
+    model_features: list[str], data_features: list[str]
+) -> None:
+    """Raise a ValueError unless data.features lists the network's columns in order."""
+    train_indices = resolve_feature_indices(model_features, data_features)
+    if train_indices != list(range(len(data_features))):
+        raise ValueError(
+            f"The algorithm reads {model_features}, but data.features is {data_features}, "
+            "which reaches it unreduced during training. Set data.features to exactly "
+            f"{model_features}."
+        )
+
+
+def _symm_loss(
+    method: str, group: str, weight: float
+) -> SymmetryConsistencyLoss | None:
+    return SymmetryConsistencyLoss(group, weight) if method == "symm_loss" else None
+
+
 class JetTaggingModule(LightningModule):
     """Classify jets into the datamodule's classes, under either training method.
 
@@ -90,9 +119,7 @@ class JetTaggingModule(LightningModule):
         self._scheduler = scheduler
         self.net = self.build_net(**net_kwargs)
         # The SCL term, which checks its group at construction; nothing penalises augmentation.
-        self.symm_loss = None
-        if method == "symm_loss":
-            self.symm_loss = SymmetryConsistencyLoss(group, symm_loss_weight)
+        self.symm_loss = _symm_loss(method, group, symm_loss_weight)
         self._build_metrics(output_dim, method)
 
         self.example_input_array = torch.randn(2, nconstituents, nbr_feats)
@@ -198,17 +225,12 @@ class JetTaggingModule(LightningModule):
         out = self.model_step(batch)
         self.train_loss(out["loss"])
         self.train_acc(out["preds"], out["targets"])
-        self.log(
-            "train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True
-        )
-        self.log(
-            "train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True
-        )
+        epoch_mean = dict(on_step=False, on_epoch=True)
+        self.log("train/loss", self.train_loss, **epoch_mean, prog_bar=True)
+        self.log("train/acc", self.train_acc, **epoch_mean, prog_bar=True)
         if self.train_symm_loss is not None:
             self.train_symm_loss(out["symm_loss"])
-            self.log(
-                "train/symm_loss", self.train_symm_loss, on_step=False, on_epoch=True
-            )
+            self.log("train/symm_loss", self.train_symm_loss, **epoch_mean)
         return out["loss"]
 
     def validation_step(
@@ -267,11 +289,14 @@ class JetTaggingModule(LightningModule):
         self._resolve_features(datamodule)
         self.norm_scales = datamodule.norm_scales
         if self.symm_loss is not None:
-            group = self.symm_loss.group
-            self._symm_transform = make_transform(
-                group, self.feature_names, self.norm_scales, **self.transform_kwargs
-            )
+            self._symm_transform = self._build_symm_transform()
         self._on_features_resolved()
+
+    def _build_symm_transform(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        group = self.symm_loss.group
+        return make_transform(
+            group, self.feature_names, self.norm_scales, **self.transform_kwargs
+        )
 
     def _compile_net(self) -> None:
         """Compile the network in place."""
@@ -303,22 +328,9 @@ class JetTaggingModule(LightningModule):
         """Check that the features of the data exist and are in the expected order."""
         self.feature_names = list(datamodule.feature_names)
         indices = resolve_feature_indices(model_features, self.feature_names)
-        if len(indices) == len(self.feature_names) and indices != list(
-            range(len(indices))
-        ):
-            raise ValueError(
-                "The algorithm consumes every data column but in a different order, which "
-                "forward() cannot detect: it reduces only on a width mismatch. Reorder "
-                "data.features to match the algorithm's feature order."
-            )
-        data_features = list(datamodule.features)
-        train_indices = resolve_feature_indices(model_features, data_features)
-        if self.required_features and train_indices != list(range(len(data_features))):
-            raise ValueError(
-                f"The algorithm reads {model_features}, but data.features is {data_features}, "
-                "which reaches it unreduced during training. Set data.features to exactly "
-                f"{model_features}."
-            )
+        _check_full_width_order(indices, len(self.feature_names))
+        if self.required_features:
+            _check_training_columns(model_features, list(datamodule.features))
         self.model_feature_indices = indices
 
     def configure_optimizers(self) -> dict:

@@ -14,6 +14,7 @@ the cache root:
 - ``meta.json``: the provenance, the counts per split and the scales, written last.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -307,6 +308,18 @@ def _build(folder: Path, raw_dir: Path, n: int, chunk: int) -> None:
     _write_meta(folder, n, summaries, scales)
 
 
+def _build_partial(target: Path, raw_dir: Path, n: int, chunk: int) -> Path:
+    """Build the cache in a partial directory beside *target*, removed on failure."""
+    partial = target.with_name(f"{target.name}.{os.getpid()}.partial")
+    partial.mkdir(parents=True)
+    try:
+        _build(partial, raw_dir, n, chunk)
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
+    return partial
+
+
 def convert(
     raw_dir: str | Path, cache_dir: str | Path, n: int, chunk: int = CHUNK
 ) -> Path:
@@ -322,13 +335,7 @@ def convert(
     if not 0 < n <= MAX_CONSTITUENTS:
         raise ValueError(f"nconstituents must lie in 1..{MAX_CONSTITUENTS}, not {n}.")
     target = Path(cache_dir) / f"nconst_{n}"
-    partial = target.with_name(f"{target.name}.{os.getpid()}.partial")
-    partial.mkdir(parents=True)
-    try:
-        _build(partial, Path(raw_dir), n, chunk)
-    except BaseException:
-        shutil.rmtree(partial, ignore_errors=True)
-        raise
+    partial = _build_partial(target, Path(raw_dir), n, chunk)
     _publish(partial, target)
     log.info(f"Converted the top-tagging record into {target}")
     return target
@@ -346,6 +353,21 @@ def read_meta(folder: Path) -> dict:
             f"code reads format {FORMAT_VERSION}: convert into a fresh cache_dir."
         )
     return meta
+
+
+def _prepare(cache_dir: Path, n: int) -> None:
+    """Download and convert the record unless ``nconst_<n>/`` under *cache_dir* has its
+    ``meta.json``, under an exclusive lock on ``<cache_dir>/.lock``."""
+    meta = cache_dir / f"nconst_{n}" / META
+    if meta.is_file():
+        return
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # All the processes of a launch prepare at once: one converts, the others wait.
+    with open(cache_dir / ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not meta.is_file():
+            download(cache_dir / "raw")
+            convert(cache_dir / "raw", cache_dir, n)
 
 
 class TopTaggingDataModule(HLS4MLDataModule):
@@ -377,8 +399,8 @@ class TopTaggingDataModule(HLS4MLDataModule):
         return {name: scale for name, (_, scale) in params.items()}
 
     def prepare_data(self) -> None:
-        """Download the raw files and convert them unless the cache exists, which is
-        then checked and kept.
+        """Download the raw files and convert them, one process at a time, unless the
+        cache exists, which is then checked and kept.
 
         :raises ValueError: under ``full_axis``, or on a cache of another format.
         """
@@ -387,9 +409,7 @@ class TopTaggingDataModule(HLS4MLDataModule):
                 "The top-tagging cache holds no column of the untruncated jet's axis: "
                 "set data.full_axis=false."
             )
-        if not (self.cache_folder / META).is_file():
-            download(Path(self.cache_dir) / "raw")
-            convert(Path(self.cache_dir) / "raw", self.cache_dir, self.nconstituents)
+        _prepare(Path(self.cache_dir), self.nconstituents)
         read_meta(self.cache_folder)
         log.info(f"Top-tagging cache {self.cache_folder}")
 

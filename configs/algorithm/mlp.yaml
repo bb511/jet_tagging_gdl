@@ -1,19 +1,17 @@
-# Flattened-input MLP, the tagger with no symmetry built in at all.
+# Flattened-input MLP, with no symmetry built in.
 _target_: src.algorithms.mlp.MLPClassifier
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: mlp
 
 nconstituents: ${data.nconstituents}
 nbr_feats: ${len:${data.features}}
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
-# The flattened (N x F) input grows with N (64 columns at N=16, 600 at N=150); these widths do not.
 hidden_layers: [128, 64, 32]
 activation: relu
 batchnorm: false

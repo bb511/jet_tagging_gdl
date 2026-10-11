@@ -1,10 +1,5 @@
 # @package _global_
-# L-GATr-slim with the spurion tokens (the time vector and both beams) at 100 constituents of the
-# top-tagging set, on the published recipe (arXiv:2512.17011, App. A; tagger-quantization
-# repository, config): the algorithm's 12 blocks of 32 vector and 96 scalar channels with 8 heads,
-# Lion at 3e-5 with weight decay 2, cosine annealing, batch 128, 200k steps (21 epochs of the
-# 1 211 000 training jets), gradients clipped at norm 1. The reference reads every constituent.
-# Baseline regime only; the twin without the spurions is lgatr_slim_lorentz_100.yaml.
+# L-GATr-slim with the spurion tokens at N = 100 on the recipe of arXiv:2512.17011, App. A.
 defaults:
   - override /data: top_tagging
   - override /algorithm: lgatr_slim
@@ -19,8 +14,7 @@ data:
   nconstituents: 100
   batch_size: 128
 
-# Cosine annealing to zero over the run. Assigned whole, since a merge into the algorithm's
-# OneCycleLR would keep max_lr and pct_start, which this schedule does not take.
+# Assigned whole through algorithm.scheduler, since a merge would keep OneCycleLR's keys.
 scheduler:
   scheduler:
     _target_: src.algorithms.utils.schedules.cosine
@@ -30,23 +24,19 @@ scheduler:
 
 algorithm:
   output_dim: 2
-  # The paper states no betas, so Lion's defaults are written out.
   optimizer:
     _target_: lion_pytorch.Lion
     lr: 3.0e-5
     weight_decay: 2.0
-    betas: [0.9, 0.99]
+    betas: [0.9, 0.99] # Lion's defaults, the paper stating none
   scheduler: ${scheduler}
 
-# fp32 and TF32 as configs/experiment/hls4ml/lgatr_slim_150.yaml. The trainer's clipping at norm 1
-# is the reference's.
 trainer:
-  precision: 32
-  max_epochs: 21
+  precision: 32 # the lgatr documentation advises against amp
+  max_epochs: 21 # the reference's 200k steps at batch 128
 
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

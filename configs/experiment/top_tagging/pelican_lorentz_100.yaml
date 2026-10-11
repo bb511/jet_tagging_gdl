@@ -1,8 +1,5 @@
 # @package _global_
-# PELICAN without the beams at 100 constituents of the top-tagging set, on the recipe of its twin
-# pelican_100.yaml (arXiv:2211.00454, sec. 4; arXiv:2307.16506, Table 2): the 48k widths, dropout
-# 0.01, AdamW at 2.5e-3 with weight decay 0.005, batch 100, 35 epochs. The two rows differ in the
-# beams, and so in the embedded group and in nbar, alone. Baseline regime only.
+# PELICAN without the beams at N = 100 on the recipe of its twin pelican_100.yaml.
 defaults:
   - override /data: top_tagging
   - override /algorithm: pelican_lorentz
@@ -17,9 +14,7 @@ data:
   nconstituents: 100
   batch_size: 100
 
-# The schedule of lorentznet_100.yaml, which the PELICAN recipe repeats at its own rate: 4 epochs
-# of linear warm-up, 28 of cosine annealing with warm restarts (T0 4, Tmult 2) and 3 of decay by
-# 0.5. Assigned whole, since a merge into the algorithm's plateau scheduler would keep its keys.
+# Assigned whole through algorithm.scheduler, since a merge would keep the plateau scheduler's keys.
 scheduler:
   scheduler:
     _target_: src.algorithms.utils.schedules.warmup_restarts_decay
@@ -31,16 +26,11 @@ scheduler:
 algorithm:
   output_dim: 2
   n_blocks: 5
-  # config/48k.yaml: num_channels_m 60, the messaging MLP, and num_channels_2to2 35, the pair
-  # tensor between blocks. The network has 179k parameters here against the reference's 48k, whose
-  # aggregation weights are factorised (configs/algorithm/pelican.yaml).
-  n_message: 60
-  n_hidden: 35
+  n_message: 60 # num_channels_m of config/48k.yaml
+  n_hidden: 35 # num_channels_2to2 of config/48k.yaml
   dropout: 0.01
-  # Mean real multiplicity of the training jets at this truncation (49.01, measured 2026-10-09 on
-  # the cache); no beams to add.
+  # The training jets' mean multiplicity at N = 100, 49.01 (2026-10-09), with no beams.
   nbar: 49.0
-  # A speed knob, as in configs/experiment/hls4ml/pelican_lorentz_150.yaml.
   n_chunks: 2
   optimizer:
     _target_: torch.optim.AdamW
@@ -48,16 +38,12 @@ algorithm:
     weight_decay: 5.0e-3
   scheduler: ${scheduler}
 
-# fp32 and TF32 as configs/experiment/hls4ml/pelican_lorentz_150.yaml: the de-normalised pair
-# invariants overflow fp16. No reference states a gradient clipping, so the trainer's norm of 1
-# stays.
 trainer:
-  precision: 32
+  precision: 32 # de-normalised pair invariants overflow fp16
   max_epochs: 35
 
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

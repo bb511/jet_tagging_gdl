@@ -1,38 +1,25 @@
-# PELICAN, the permutation-invariant Lorentz-aggregator tagger (arXiv:2307.16506). Defaults here,
-# per-nconstituents values in configs/experiment/hls4ml/pelican_<N>.yaml.
+# PELICAN with the beams, arXiv:2307.16506; per-N values in the experiment configs.
 _target_: src.algorithms.pelican.PELICAN
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: pelican
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+nbr_feats: 4 # required_features pins [px, py, pz, e]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# PELICAN is scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
-# The paper's 25/15 widths (its 11k point, which factorises the aggregation weights; unfactorised
-# here they are 32.6k); the searches replace them per nconstituents.
+# The paper's 25/15 point: 11k with its factorised aggregation weights, 32.6k here.
 n_hidden: 25
-n_message: 15 # channels of the messaging MLP inside a block; 0 drops the MLP altogether
+n_message: 15 # 0 drops the messaging MLP
 n_blocks: 5
 dropout: 0.025
-# Normalises the (N/nbar)^alpha aggregator scaling; the mean multiplicity plus the two beams,
-# so it is set per experiment rather than shared.
-nbar: 49.0
-add_beams: true # beams on: the exact symmetry is SO(2) about the beam; off: the full group
-# Speed knob, never searched: the batch is sorted by multiplicity and cut into this many
-# chunks, each trimmed to its own widest jet, which drops the padded pair slots of all but
-# the widest chunk. Exact up to the order of the summations, so the logits, the gradients
-# and the pooled normalisation statistics are those of the whole batch; the dropout masks
-# are drawn at other shapes, so two runs at one seed and different n_chunks are not
-# bit-reproducible against each other. Set per experiment, since the gain follows the
-# padding: at 16 constituents there is none.
-n_chunks: 1
+nbar: 49.0 # mean multiplicity plus the two beams; set per experiment
+add_beams: true # SO(2) about the beam exact; false: the full Lorentz group
+n_chunks: 1 # speed knob, never searched; set per experiment
 
 optimizer:
   _target_: torch.optim.AdamW

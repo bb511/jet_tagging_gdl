@@ -1,18 +1,12 @@
-# PELICAN without the beams: configs/algorithm/pelican.yaml with add_beams false, everything else
-# identical (tests/test_configs.py keeps the two in step). Reading the constituents' Minkowski
-# products alone, the network is invariant under the full Lorentz group, where the beams leave
-# SO(2) about the beam axis, so the two rows differ in the embedded group and in nothing else.
-# Per-nconstituents values in configs/experiment/hls4ml/pelican_lorentz_<N>.yaml.
+# PELICAN without the beams, Lorentz-exact; per-N values in the experiment configs.
 _target_: src.algorithms.pelican.PELICAN
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: pelican_lorentz
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+nbr_feats: 4 # required_features pins [px, py, pz, e]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# Scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
@@ -22,11 +16,9 @@ n_hidden: 25
 n_message: 15
 n_blocks: 5
 dropout: 0.025
-# Normalises the (N/nbar)^alpha aggregator scaling: the mean multiplicity alone, since no beams
-# are counted, so it is set per experiment rather than shared.
-nbar: 47.0
-add_beams: false # the one switch: no beam four-vectors, so the full Lorentz group is exact
-n_chunks: 1 # speed knob, see pelican.yaml; set per experiment
+nbar: 47.0 # mean multiplicity, no beams; set per experiment
+add_beams: false
+n_chunks: 1 # speed knob, never searched; set per experiment
 
 optimizer:
   _target_: torch.optim.AdamW

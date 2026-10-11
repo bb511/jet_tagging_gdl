@@ -1,37 +1,22 @@
-# The top-quark tagging reference data set (Zenodo 2603256): 1.2M training, 403k validation and
-# 404k test jets of QCD and hadronic tops, two classes. The raw files are converted once into
-# per-nconstituents arrays under cache_dir, which scripts/data/prepare_top_tagging.py builds before
-# a launch; the datamodule builds them on first use otherwise.
+# The top-quark tagging reference set (Zenodo 2603256), two classes.
 _target_: src.data.top_tagging_datamodule.TopTaggingDataModule
 
-# Holds raw/, the three Zenodo files, and one nconst_<N>/ per constituent count.
 cache_dir: ${paths.base_data_dir}/top_tagging
 
-# augmentation: online so2/so3/lorentz on train batches | symm_loss: SCL, no augmentation. The
-# top-tagging experiments run the baseline alone.
 method: augmentation
 
-# none | so2 | so3 | lorentz | lorentz_iso, as in configs/data/hls4ml.yaml.
 augmentation_scheme: none
 
-# The knobs of make_transform, shared with the SCL and the invariance probe, whose configs
-# interpolate this node; the probe of configs/data/hls4ml.yaml, so that the two data sets are
-# probed alike.
 transform_kwargs:
-  lorentz_eta_max: 1.0
+  lorentz_eta_max: 1.0 # as on hls4ml, so that both data sets are probed alike
 
-# The leading constituents by pT kept per jet; the record stores up to 200, and the experiments use
-# 100.
 nconstituents: 100
 
-# Any subset of px, py, pz, e, pt, eta, phi, etarel and phirel; LorentzNet needs exactly these four.
 features: [px, py, pz, e]
 
 batch_size: 256
 num_workers: 4
 pin_memory: true
 
-# k >= 2: pool train+val and re-split into k folds; 1: the record's split, which the searches and
-# the debug configs pass. The seed is that of configs/data/hls4ml.yaml.
 n_folds: 5
 kfold_seed: 42

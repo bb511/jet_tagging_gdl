@@ -78,6 +78,20 @@ def _callbacks(cfg: DictConfig, label: str) -> list[Callback]:
     return callbacks
 
 
+def _trainer(cfg: DictConfig, run: ManifestRun, algorithm: LightningModule) -> Trainer:
+    """Build the trainer that tests *run* and log the hyperparameters."""
+    callbacks = _callbacks(cfg, run.fold_label)
+    logger = instantiate_loggers(cfg.get("logger"))
+    nest_under(logger, run.mlflow_run_id)
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=logger
+    )
+    if logger:
+        objects = {"cfg": cfg, "algorithm": algorithm, "trainer": trainer}
+        log_hyperparameters({**objects, "fold_idx": run.fold_label})
+    return trainer
+
+
 def _test_checkpoint(
     cfg: DictConfig, run: ManifestRun, datamodule: LightningDataModule
 ) -> tuple[dict[str, Any], LightningModule]:
@@ -90,25 +104,22 @@ def _test_checkpoint(
     if cfg.get("seed") is not None:
         L.seed_everything(cfg.seed, workers=True)
     algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)
-    callbacks = _callbacks(cfg, run.fold_label)
-    logger = instantiate_loggers(cfg.get("logger"))
-    nest_under(logger, run.mlflow_run_id)
-    trainer: Trainer = hydra.utils.instantiate(
-        cfg.trainer, callbacks=callbacks, logger=logger
-    )
-    if logger:
-        objects = {"cfg": cfg, "algorithm": algorithm, "trainer": trainer}
-        log_hyperparameters({**objects, "fold_idx": run.fold_label})
+    trainer = _trainer(cfg, run, algorithm)
 
-    log.info(f"[{run.fold_label}] Testing {run.checkpoint_path}")
+    ckpt_path = run.checkpoint_path
+    log.info(f"[{run.fold_label}] Testing {ckpt_path}")
     # weights_only=False: the hyperparameters are plain containers, torch.load 2.6 rejects.
     trainer.test(
-        model=algorithm,
-        datamodule=datamodule,
-        ckpt_path=run.checkpoint_path,
-        weights_only=False,
+        model=algorithm, datamodule=datamodule, ckpt_path=ckpt_path, weights_only=False
     )
     return dict(trainer.callback_metrics), algorithm
+
+
+def _with_costs(metrics: dict[str, Any], algorithm: LightningModule) -> dict[str, Any]:
+    # The costs are attributes of the module rather than logged metrics; the row
+    # reads every number of a fold from one dict.
+    flops, ebops = algorithm.flops_total, algorithm.ebops_total
+    return dict(metrics, flops_total=flops, ebops_total=ebops)
 
 
 @task_wrapper
@@ -133,14 +144,9 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     folds: list[dict[str, Any]] = []
     for run in runs:
         metrics, algorithm = _test_checkpoint(cfg, run, datamodule)
-        metric_dict.update(
-            {f"{run.fold_label}/{key}": value for key, value in metrics.items()}
-        )
+        metric_dict.update({f"{run.fold_label}/{k}": v for k, v in metrics.items()})
         if run.fold_label in aggregated:
-            # The costs are attributes of the module rather than logged metrics; the row
-            # reads every number of a fold from one dict.
-            flops, ebops = algorithm.flops_total, algorithm.ebops_total
-            folds.append(dict(metrics, flops_total=flops, ebops_total=ebops))
+            folds.append(_with_costs(metrics, algorithm))
 
     write_results_row(cfg, folds)
     return metric_dict, {"cfg": cfg, "datamodule": datamodule}

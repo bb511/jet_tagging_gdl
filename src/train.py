@@ -55,27 +55,36 @@ def _fold_kwargs(cfg: DictConfig) -> dict[str, int]:
     return {"n_folds": n_folds, "fold_idx": int(fold) - 1}
 
 
+def _checkpoint_path(trainer: Trainer) -> str | None:
+    """The checkpoint to evaluate, or ``None`` with a warning when there is none."""
+    try:
+        return best_or_last_checkpoint(trainer)
+    except RuntimeError as error:
+        log.warning(str(error))
+        return None
+
+
+def _mlflow_run_id(trainer: Trainer) -> str | None:
+    return next(
+        (lg.run_id for lg in trainer.loggers if isinstance(lg, MLFlowLogger)), None
+    )
+
+
 def _manifest_run(cfg: DictConfig, trainer: Trainer) -> ManifestRun | None:
     """This run's manifest entry, or ``None`` when it saved no checkpoint.
 
     ``src/eval.py`` depends on loading checkpoints, so if no checkpoints are produced
     then no evaluation can be made.
     """
-    try:
-        checkpoint_path = best_or_last_checkpoint(trainer)
-    except RuntimeError as error:
-        log.warning(str(error))
+    if (checkpoint_path := _checkpoint_path(trainer)) is None:
         return None
     fold, best = cfg.get("fold"), trainer.callback_metrics.get("val/acc_best")
-    mlflow_run_id = next(
-        (lg.run_id for lg in trainer.loggers if isinstance(lg, MLFlowLogger)), None
-    )
     return ManifestRun(
         fold_label=cfg.run_label,
         fold_idx=None if fold is None else int(fold),
         checkpoint_path=checkpoint_path,
         val_acc_best=None if best is None else float(best),
-        mlflow_run_id=mlflow_run_id,
+        mlflow_run_id=_mlflow_run_id(trainer),
     )
 
 
@@ -89,6 +98,15 @@ def _write_manifest(cfg: DictConfig, trainer: Trainer) -> None:
         runs=[] if run is None else [run],
     )
     write_manifest(manifest, cfg.paths.output_dir)
+
+
+def _runnable_callbacks(
+    callbacks: list[Callback], logger: list[Logger]
+) -> list[Callback]:
+    if logger:
+        return callbacks
+    # LearningRateMonitor raises, rather than warns, with nothing to log to (the searches).
+    return [cb for cb in callbacks if not isinstance(cb, LearningRateMonitor)]
 
 
 @task_wrapper
@@ -114,21 +132,16 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     log.info("Instantiating loggers...")
     logger: list[Logger] = instantiate_loggers(cfg.get("logger"))
     nest_under(logger, cfg.get("parent_run_id"))
-    if not logger:
-        # LearningRateMonitor raises, rather than warns, with nothing to log to (the searches).
-        callbacks = [cb for cb in callbacks if not isinstance(cb, LearningRateMonitor)]
+    callbacks = _runnable_callbacks(callbacks, logger)
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(
         cfg.trainer, callbacks=callbacks, logger=logger
     )
 
-    object_dict = {
-        "cfg": cfg,
-        "datamodule": datamodule,
-        "algorithm": algorithm,
-        "trainer": trainer,
-    }
+    object_dict = dict(
+        cfg=cfg, datamodule=datamodule, algorithm=algorithm, trainer=trainer
+    )
 
     if logger:
         log.info("Logging hyperparameters!")

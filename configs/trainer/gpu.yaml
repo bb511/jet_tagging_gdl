@@ -4,5 +4,4 @@ defaults:
 accelerator: gpu
 devices: [0]
 
-# The LorentzNet experiments override this to 32: de-normalised Minkowski norms overflow fp16.
 precision: 16-mixed

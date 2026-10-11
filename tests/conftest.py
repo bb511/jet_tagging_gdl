@@ -228,7 +228,7 @@ def with_random_gates(module: torch.nn.Module) -> torch.nn.Module:
     # Every vector-neuron gate starts at exactly 1/2, a constant under which a test
     # would pass without exercising it; N(0, 1) weights make it a function of the
     # scalars.
-    from src.algorithms.components.vector_neurons import ChannelGate
+    from src.algorithms.vector_neurons import ChannelGate
 
     with torch.no_grad():
         for gate in module.modules():

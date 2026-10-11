@@ -1,19 +1,12 @@
-# The MLP of mlp.yaml on the record's 53 jet-level observables, computed upstream from the whole
-# jet: a ceiling for the networks. A copy of mlp.yaml that differs in name, nconstituents and
-# nbr_feats (tests/test_configs.py keeps the rest in step), so that the search space and the
-# training recipe are those of the constituent MLP.
+# The MLP of mlp.yaml on the record's 53 jet-level observables, a ceiling.
 _target_: src.algorithms.mlp.MLPClassifier
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: jet_level_all53
 
-# One slot per jet, holding its observables; data.nconstituents (150) only labels the row.
-nconstituents: 1
-# A number: the datamodule takes the observables from the shards at run time, so no list exists in
-# the config to take the length of.
-nbr_feats: 53
+nconstituents: 1 # one slot of observables per jet
+nbr_feats: 53 # a number: the observables are read off the shards at run time
 output_dim: 5
 
-# Interpolated from the data config, which refuses every regime but the baseline.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1

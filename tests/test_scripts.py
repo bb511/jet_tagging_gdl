@@ -30,8 +30,13 @@ from tests.conftest import (
     load_script,
 )
 
-generator = load_script("scripts/optuna/make_train_catalogues.py")
-LIB = ROOT / "scripts" / "cluster" / "lib.sh"
+generator = load_script("scripts/experiments/make_train_catalogues.py")
+status = load_script("scripts/experiments/sweep_status.py")
+LIB = ROOT / "scripts" / "experiments" / "lib.sh"
+# Relative to the repository root, as the submitters take them: the hls4ml grid rows'
+# catalogues on the default feature set, and the replica's root.
+HLS4ML_GRID = "scripts/experiments/hls4ml/px_py_pz_e"
+TOP_TAGGING_ROOT = "scripts/experiments/top_tagging"
 STUDY = "mlp_nconst16_augmentation_none"
 # Each completed trial carries its own value as its one parameter, so that a test sees
 # whose parameters came back.
@@ -77,6 +82,8 @@ def test_the_generator_names_the_rows_the_tests_do() -> None:
     assert tuple(generator.TOP_TAGGING) == TOP_TAGGING
     assert tuple(generator.TOP_TAGGING_RECIPES) == TOP_TAGGING_RECIPES
     assert tuple(generator.TOP_TAGGING_NCONSTITUENTS) == TOP_TAGGING_NCONSTITUENTS
+    assert generator.DEFAULT_LABEL["hls4ml"] == "_".join(FOUR_MOMENTUM)
+    assert status.DEFAULT_LABEL == generator.DEFAULT_LABEL
 
 
 @pytest.mark.parametrize("features", [None, ("pt", "eta", "phi")])
@@ -90,14 +97,22 @@ def test_every_generated_block_parses_back_through_lib_sh(
     dbs.mkdir()
     generator._generate(dbs, out, ROOT, generator.Layout(features=features), False)
     label = f"{'_'.join(features)}/" if features else ""
-    rows = set(MODELS) - set(EMBEDDED) if features else {*MODELS, *JET_LEVEL}
+    grid_rows = set(MODELS) - set(EMBEDDED)
+    rows = grid_rows if features else {*MODELS, *JET_LEVEL}
+    # The grid rows' catalogues go under their feature set's directory, the default
+    # set's included, and those of the rows that pin their columns at the root, while
+    # the run directories keep the default set at the root of logs/.
+    labelled = out / "_".join(features or FOUR_MOMENTUM)
+    home = {row: labelled if row in grid_rows else out for row in rows}
 
-    assert {p.name for p in out.iterdir()} == {
-        f"run{r}_{t}.sh" for r in rows for t in ("train", "eval")
-    }
+    assert sorted(out.rglob("*.sh")) == sorted(
+        home[row] / f"run{row}_{task}.sh" for row in rows for task in ("train", "eval")
+    )
+    assert (labelled / "runmlp_train.sh").is_file()
+    assert (out / "runlorentznet_train.sh").is_file() == (features is None)
     for row in rows:
         train, evaluate = (
-            _blocks(out / f"run{row}_{task}.sh") for task in ("train", "eval")
+            _blocks(home[row] / f"run{row}_{task}.sh") for task in ("train", "eval")
         )
         grid = generator.NCONSTITUENTS_OF[row]
         assert (
@@ -172,12 +187,16 @@ def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
     layout = generator.Layout(dataset="top_tagging")
     generator._generate(dbs, out, ROOT, layout, False)
     tasks = ("train", "eval")
+    # The experiments of the grid rows pin [pt, etarel, phirel], the directory of their
+    # catalogues; the other rows' catalogues sit at the root.
+    labelled = out / "pt_etarel_phirel"
+    home = {row: labelled if row in TOP_TAGGING_GRID else out for row in TOP_TAGGING}
 
-    assert {p.name for p in out.iterdir()} == {
-        f"run{row}_{task}.sh" for row in TOP_TAGGING for task in tasks
-    }
+    assert sorted(out.rglob("*.sh")) == sorted(
+        home[row] / f"run{row}_{task}.sh" for row in TOP_TAGGING for task in tasks
+    )
     for row in TOP_TAGGING:
-        paths = [out / f"run{row}_{task}.sh" for task in tasks]
+        paths = [home[row] / f"run{row}_{task}.sh" for task in tasks]
         (trained,), (evaluated,) = (_blocks(path) for path in paths)
         cell = f"top_tagging/{row}/nconst100/baseline"
         experiment = f"top_tagging/{row}_100"
@@ -188,7 +207,7 @@ def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
         assert not any("hls4ml" in path.read_text() for path in paths)
         recipe = "# published top-tagging recipe" in paths[0].read_text()
         assert recipe == (row in TOP_TAGGING_RECIPES)
-    mlp = out / "runmlp_train.sh"
+    mlp = labelled / "runmlp_train.sh"
     assert f"# best trial 30 of {study}, val/acc_best=0.800000" in mlp.read_text()
     assert _blocks(mlp)[0]["x"] == "0.8"
 
@@ -196,7 +215,7 @@ def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
 def _submit(script: str, *args: str) -> subprocess.CompletedProcess:
     # From the repository root, which the submitters require; --dry-run needs neither
     # the env nor the data.
-    command = ["bash", f"scripts/cluster/{script}", "--dry-run", *args]
+    command = ["bash", f"scripts/experiments/{script}", "--dry-run", *args]
     return subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
 
 
@@ -213,7 +232,7 @@ def test_the_submitters_select_blocks_by_index_and_label(
 ) -> None:
     # An all-digit selector is an index alone: '1' must not match nconst16 as well.
     selection = ("--only", "1,nconst150_symm_so2", "--gpu", "2")
-    found = _submit(script, *selection, f"scripts/hls4ml/{catalogue}", "seed=7")
+    found = _submit(script, *selection, f"{HLS4ML_GRID}/{catalogue}", "seed=7")
 
     commands = [line for line in found.stdout.splitlines() if line.startswith("[")]
     assert found.returncode == 0, found.stderr
@@ -229,7 +248,8 @@ def test_submit_search_refuses_a_feature_block_without_its_own_storage(
 ) -> None:
     # The study name ignores the feature set, so its trials would join the default
     # set's study of the same name.
-    text = (ROOT / f"scripts/{dataset}/pt_eta_phi/runmlp_search.sh").read_text()
+    source = ROOT / f"scripts/experiments/{dataset}/pt_eta_phi/runmlp_search.sh"
+    text = source.read_text()
     catalogue = tmp_path / "runmlp_search.sh"
     lines = [line for line in text.splitlines() if "hydra.sweeper.storage" not in line]
     catalogue.write_text("\n".join(lines))
@@ -242,7 +262,7 @@ def test_submit_search_refuses_a_feature_block_without_its_own_storage(
 
 def test_submit_train_lays_the_folds_out_under_the_main_run() -> None:
     folds = ("--only", "1", "--folds", "2", "--gpus", "0,MIG-x")
-    found = _submit("submit_train.sh", *folds, "scripts/hls4ml/runmlp_train.sh")
+    found = _submit("submit_train.sh", *folds, f"{HLS4ML_GRID}/runmlp_train.sh")
 
     processes = [
         line.split(": ", 1)
@@ -270,14 +290,14 @@ def test_submit_train_lays_the_folds_out_under_the_main_run() -> None:
 
 
 def test_the_submitters_read_the_top_tagging_catalogues() -> None:
-    # The nine search catalogues are hand-written, every regime of the grid rows and the
-    # baseline alone of the others, and must keep to the replica's budget; the train and
-    # eval ones are generated.
+    # The nine search catalogues sweep_status reports are hand-written, every regime of
+    # the grid rows and the baseline alone of the others, and must keep to the replica's
+    # budget; the train and eval ones are generated.
     searches = {
         path.name.removeprefix("run").removesuffix("_search.sh"): path
-        for path in (ROOT / "scripts" / "top_tagging").glob("run*_search.sh")
+        for path in status.catalogues_of(ROOT, None, "top_tagging")
     }
-    search = "scripts/top_tagging/rundeepsets_search.sh"
+    search = f"{TOP_TAGGING_ROOT}/pt_etarel_phirel/rundeepsets_search.sh"
     listed = _submit("submit_search.sh", "--list", search)
     folds = ("--folds", "2", "--gpus", "0,1")
     # Each dry run with the label and the count of the commands it prints: the train one
@@ -286,13 +306,13 @@ def test_the_submitters_read_the_top_tagging_catalogues() -> None:
         (_submit("submit_search.sh", "--only", "symm_lorentz", search), "[7/7]", 1),
         (
             _submit(
-                "submit_train.sh", *folds, "scripts/top_tagging/runlorentznet_train.sh"
+                "submit_train.sh", *folds, f"{TOP_TAGGING_ROOT}/runlorentznet_train.sh"
             ),
             "[1/1]",
             3,
         ),
         (
-            _submit("submit_eval.sh", "scripts/top_tagging/runlorentznet_eval.sh"),
+            _submit("submit_eval.sh", f"{TOP_TAGGING_ROOT}/runlorentznet_eval.sh"),
             "[1/1]",
             1,
         ),
@@ -334,7 +354,7 @@ def test_a_top_tagging_feature_set_adds_its_columns_and_its_database(
 ) -> None:
     # Block for block the default set's catalogue, with the two overrides that send the
     # trials to a database of the feature set's own.
-    directory = ROOT / "scripts" / "top_tagging" / label
+    directory = ROOT / TOP_TAGGING_ROOT / label
 
     assert {path.name for path in directory.iterdir()} == {
         f"run{row}_search.sh" for row in TOP_TAGGING_GRID
@@ -345,33 +365,46 @@ def test_a_top_tagging_feature_set_adds_its_columns_and_its_database(
             "data.features": TOP_TAGGING_FEATURES[label],
             "hydra.sweeper.storage": storage,
         }
-        default = _blocks(directory.parent / f"run{row}_search.sh")
+        default = _blocks(directory.parent / "pt_etarel_phirel" / f"run{row}_search.sh")
         catalogue = directory / f"run{row}_search.sh"
         assert _blocks(catalogue) == [block | added for block in default]
         found = _submit("submit_search.sh", "--only", "symm_lorentz", str(catalogue))
-        (line,) = [line for line in found.stdout.splitlines() if line.startswith("[")]
+        (line,) = (line for line in found.stdout.splitlines() if line.startswith("["))
         assert found.returncode == 0, found.stderr
         assert line.startswith("[7/7]") and f"/top_tagging/{label}/{row}.db" in line
 
 
 def test_a_top_tagging_feature_set_logs_apart_from_hls4ml() -> None:
-    # scripts/hls4ml/<label>/ and scripts/top_tagging/<label>/ hold catalogues of one
-    # name, whose drivers would otherwise share a log directory.
+    # scripts/experiments/hls4ml/<label>/ and scripts/experiments/top_tagging/<label>/
+    # hold catalogues of one name, whose drivers would otherwise share a log directory.
+    # sweep_status.py looks for the logs where lib.sh names them.
     script = f'. "{LIB}"; for f in "$@"; do catalogue_stem "$f"; echo; done'
     paths = [
-        f"scripts/{dataset}/{label}rundeepsets_search.sh"
-        for dataset in ("hls4ml", "top_tagging")
-        for label in ("", "pt_eta_phi/")
+        f"scripts/experiments/{dataset}/{label}run{row}_search.sh"
+        for dataset, label, row in [
+            ("hls4ml", "", "vn"),
+            ("hls4ml", "px_py_pz_e/", "deepsets"),
+            ("hls4ml", "pt_etarel_phirel/", "deepsets"),
+            ("top_tagging", "", "vn"),
+            ("top_tagging", "pt_etarel_phirel/", "deepsets"),
+            ("top_tagging", "pt_eta_phi/", "deepsets"),
+        ]
     ]
     found = subprocess.run(
         ["bash", "-c", script, "_", *paths], capture_output=True, text=True, check=True
     )
-
-    assert found.stdout.split() == [
-        "hls4ml_rundeepsets_search",
-        "pt_eta_phi_rundeepsets_search",
-        "top_tagging_rundeepsets_search",
+    stems = [
+        "hls4ml_runvn_search",
+        "px_py_pz_e_rundeepsets_search",
+        "pt_etarel_phirel_rundeepsets_search",
+        "top_tagging_runvn_search",
+        "top_tagging_pt_etarel_phirel_rundeepsets_search",
         "top_tagging_pt_eta_phi_rundeepsets_search",
+    ]
+
+    assert found.stdout.split() == stems
+    assert [status.driver_log_dir(Path(path)) for path in paths] == [
+        f"logs/searches/{stem}" for stem in stems
     ]
 
 

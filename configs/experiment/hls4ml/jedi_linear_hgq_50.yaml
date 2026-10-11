@@ -1,9 +1,5 @@
 # @package _global_
-# JEDI-linear with the jet moments trained quantisation-aware with HGQ2 at 50 constituents, in the
-# architecture of the float jedi_linear_moments finals, whose main run algorithm.init_from names;
-# algorithm.moments=none builds the control from a float jedi_linear of the same widths. One
-# constant beta per run, and the last epoch is the model. Pinned to its columns, so it runs the
-# baseline regime only.
+# JEDI-linear with the moments quantised with HGQ2 at 50 constituents, fine-tuned from init_from.
 defaults:
   - override /algorithm: jedi_linear_hgq
   - override /callbacks: quantised
@@ -28,14 +24,11 @@ algorithm:
   aggregation: max
   moments: rankcut
 
-# fp32: 16-mixed would pass the mock optimiser's step through a gradient scaler, which finds no
-# gradient to check. No clipping, which Lightning refuses under manual optimisation; the Keras
-# optimiser clips instead (algorithm.optimizer.global_clipnorm).
+# fp32: 16-mixed would put a gradient scaler on the mock step; Keras clips (global_clipnorm).
 trainer:
   max_epochs: 100
   precision: 32
   gradient_clip_val: null
 
-# Judged as a quantised network, apart from the float rows of embedded/.
 results_table:
   subdir: quantised

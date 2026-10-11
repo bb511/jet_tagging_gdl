@@ -1,14 +1,12 @@
-# JetFormer, the attention tagger: a replica of arXiv:2601.17215 down to its missing padding mask,
-# minus the score-norm layer the reference defines but never applies.
+# JetFormer as in arXiv:2601.17215 (no padding mask), without its unused score-norm layer.
 _target_: src.algorithms.jetformer.JetFormer
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: jetformer
 
 nconstituents: ${data.nconstituents}
 nbr_feats: ${len:${data.features}}
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
@@ -17,7 +15,7 @@ transform_kwargs: ${data.transform_kwargs}
 embed_dim: 64
 num_heads: 2
 num_transformers: 3
-normalization: layer # rather than the reference's batch norm, as every run of this study used
+normalization: layer # as in every run of this study; the reference uses batch norm
 activation: relu
 dropout: 0.0
 
@@ -27,8 +25,7 @@ optimizer:
   lr: 1.0e-3
   weight_decay: 1.0e-2
 
-# One cycle over the whole run, hence stepped per batch. total_steps is injected by
-# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+# Stepped per batch; _set_up_scheduler injects total_steps.
 scheduler:
   scheduler:
     _target_: torch.optim.lr_scheduler.OneCycleLR

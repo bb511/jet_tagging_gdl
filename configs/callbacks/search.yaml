@@ -1,6 +1,6 @@
 # @package callbacks
 
-# The built-ins only: a trial draws no plots and writes no results row, leaving only its study.
+# Lightning's built-ins alone: a trial draws no plots and writes no results row.
 defaults:
   - util@model_checkpoint: model_checkpoint
   - util@early_stopping: early_stopping
@@ -10,4 +10,4 @@ defaults:
   - _self_
 
 model_checkpoint:
-  save_last: false # the best epoch is all a trial keeps: the tuned model is refit from the catalogue
+  save_last: false # the tuned model is refit from the catalogue

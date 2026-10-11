@@ -1,6 +1,5 @@
 # @package _global_
-# Vector neurons on the lifts of (pt, eta, phi) at 50 constituents, at the algorithm defaults: a
-# starting point, not tuned values. Symmetry-embedded, so it runs the baseline regime only.
+# Vector neurons on the lifts of (pt, eta, phi) at 50 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: vn
   - override /trainer: gpu
@@ -14,16 +13,11 @@ data:
   # The network's own columns; required_features makes setup() refuse any other list.
   features: [pt, eta, phi]
 
-# fp32, not the trainer's 16-mixed: the forms of the learned channels cancel to a small fraction of
-# their terms, which fp16 cannot resolve, and the tensor invariants, cubic in p_T, widen the range.
+# fp32: the forms of the learned channels cancel to a small fraction of their terms.
 trainer:
   precision: 32
 
-# No extras.matmul_precision, unlike the other embedded experiments: TF32 rounds the inputs of every
-# float32 matmul to about 5e-4, and the linear layers of this network act on the vector components
-# themselves, so a transformed jet would be rounded differently and the embedded group would hold
-# to that precision only. tests/test_configs.py keeps the key unset.
+# No extras.matmul_precision: under TF32 the group would hold only to about 5e-4.
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

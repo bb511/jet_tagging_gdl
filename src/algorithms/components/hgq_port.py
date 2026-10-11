@@ -1,13 +1,8 @@
-"""Shared pieces of the HGQ2 ports on Keras and JAX.
+"""Components of porting a network to HGQ.
 
-Every quantised row builds its port from these: the quantisers, the trigger words, the
-keep flag and the lifts of the constituents, the builder helpers, the Keras network
-behind a torch interface, and the steps that seed, trace, price and export a port.
-Importing this module selects Keras's JAX backend, so it is imported before Keras.
-
-The input rows are [p_T GeV, eta, phi] sorted by decreasing p_T, the angles measured
-outside the port. p_T is counted in units of a power of two of GeV so that it is a shift
-of the p_T word.
+Every quantised model uses these: the quantisers, the Keras network behind a torch
+interface, and the steps that seed, trace, price and export a port. Importing this
+module selects Keras's JAX backend, so it is imported before Keras.
 """
 
 import os
@@ -15,8 +10,6 @@ import os
 os.environ.setdefault("KERAS_BACKEND", "jax")
 # JAX reserves most of a GPU's memory at its first allocation otherwise, beside torch.
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-
-# isort: split
 
 import json
 from collections.abc import Sequence
@@ -30,15 +23,7 @@ import numpy as np
 import torch
 from hgq.config import HardSigmoidConfig, QuantizerConfig
 from hgq.constraints import Min
-from hgq.layers import (
-    QBatchNormalization,
-    QDense,
-    QEinsum,
-    QEinsumDense,
-    QMultiply,
-    QSum,
-    Quantizer,
-)
+from hgq.layers import QBatchNormalization, QDense, QEinsumDense, Quantizer
 from hgq.layers.core import QLayerBase
 from hgq.quantizer.internal import (
     FixedPointQuantizerKBI,
@@ -78,11 +63,7 @@ for _name in ("floor", "ceil"):
 
 # The keep flag and the count: 0 or 1, one unsigned integer bit.
 KEEP_KIF = (0, 1, 0)
-# The least integer bits of a weight or bias. A copied weight near zero would otherwise
-# be seeded at i = -23, so f = b - i = 31 fraction bits, which alkaid 0.8.1 emulates
-# wrongly (20 458 of 20 480 logits of a one-epoch JEDI-linear export, 2026-10-10); at
-# i >= -16 the same export was exact. At the seeded 8 bits a weight under 2^-21 then
-# quantises to zero.
+# The least integer bits of a weight or bias.
 WEIGHT_I_MIN = -12
 # Fraction bits of the gate in float_mode, where its quantiser only implements the clamp.
 FLOAT_GATE_F = 24
@@ -92,8 +73,7 @@ _PLATFORMS = {"gpu": "cuda,cpu", "cuda": "cuda,cpu", "cpu": "cpu"}
 
 
 def word_range(kif: Sequence[int]) -> tuple[float, float]:
-    """The least and the greatest value of a fixed-point word of (keep_negative, integer
-    bits, fraction bits)."""
+    """The least and the greatest value of a fixed-point object."""
     k, i, f = kif
     return -k * 2.0**i, 2.0**i - 2.0**-f
 
@@ -158,18 +138,6 @@ class Quantisation:
         return HardSigmoidConfig(f0=f, trainable=False)
 
 
-@dataclass(frozen=True)
-class PortBase:
-    """The quantisers and the shape that every stage of a port's builder reads.
-
-    :param units: GeV per unit of p_T, a power of two so that p is a shift of the word.
-    """
-
-    q: Quantisation
-    nconstituents: int
-    units: float
-
-
 def _take(x, axis: int, start: int, stop: int):
     """The slice [start, stop) of *x* along *axis*, a GetItem node."""
     index = [slice(None)] * len(x.shape)
@@ -184,90 +152,6 @@ def _metric(x, axis: int):
     """
     parts = [_take(x, axis, 3, 4), _take(x, axis, 1, 3) * -2.0, _take(x, axis, 0, 1)]
     return ops.concatenate(parts, axis=axis)
-
-
-def _dense(q: Quantisation, units: int, name: str, activation=None, **kwargs):
-    """A dense layer on the last axis, its input, kernel and bias each quantised."""
-    return QDense(
-        units,
-        activation=activation,
-        iq_conf=q.datalane(),
-        kq_conf=q.weight(),
-        bq_conf=q.bias(),
-        name=name,
-        **kwargs,
-    )
-
-
-def _einsum_dense(port: PortBase, equation: str, shape: tuple[int, ...], name: str):
-    """A bias-free linear map of *equation*, its input and kernel quantised."""
-    q = port.q
-    return QEinsumDense(
-        equation, shape, iq_conf=q.datalane(), kq_conf=q.weight(), name=name
-    )
-
-
-def _einsum(port: PortBase, equation: str, name: str, *inputs):
-    """The einsum of two tensors, each read through a datalane quantiser."""
-    return QEinsum(equation, iq_confs=port.q.datalane(), name=name)(list(inputs))
-
-
-def _sum(port: PortBase, name: str, x, keepdims: bool = False, iq_conf=None):
-    """The sum over the slots, axis 1, of *x* read through *iq_conf* (a datalane)."""
-    iq_conf = iq_conf or port.q.datalane()
-    return QSum(iq_conf=iq_conf, axes=1, keepdims=keepdims, name=name)(x)
-
-
-def _keep_multiply(port: PortBase, name: str, x, keep):
-    """Zero the padded slots of *x*, the 0/1 flag *keep* read through one fixed bit."""
-    confs = [port.q.datalane(), port.q.fixed(KEEP_KIF)]
-    return QMultiply(iq_confs=confs, name=name)([x, keep])
-
-
-def _words(port: PortBase, x):
-    """Quantise the first three columns of rows (jets, N, F) to p_T words (jets, N) and
-    angle words (jets, N, 2).
-
-    The words wrap: alkaid traces nothing but WRAP on a model input, so the caller
-    clamps the rows to the words' ranges.
-    """
-    q = port.q
-    pt = Quantizer(q.fixed(q.pt_kif, "WRAP"), name="pt_word")(x[:, :, 0])
-    angles = Quantizer(q.fixed(q.angle_kif, "WRAP"), name="angle_word")(x[:, :, 1:3])
-    return pt, angles
-
-
-def _word_rows(port: PortBase, pt, angles, offset):
-    """The words the port reads, (jets, N, 3) [p_T, eta, phi]; under the axis offset
-    (jets, N, 5), the two offset words in row 0 and zeros, which nothing reads, below
-    them."""
-    columns = [ops.expand_dims(pt, -1), angles]
-    if offset is not None:
-        below = [[0, 0], [0, port.nconstituents - 1], [0, 0]]
-        columns.append(ops.pad(ops.expand_dims(offset, 1), below))
-    return ops.concatenate(columns, axis=-1)
-
-
-def _p_keep(port: PortBase, pt):
-    """Return p, the p_T words (jets, N) in ``units``, and the keep flag (jets, N, 1),
-    one on a real constituent and zero on a padded one."""
-    # A division rather than the product by 1 / units: Keras marks the product of a
-    # tensor and a Python scalar sparse, which the float32 build fails to trace. alkaid
-    # replays both as the same shift.
-    p = pt / port.units
-    # Exact: a real p_T is a multiple of the word's LSB, and a cast of a bool has no
-    # alkaid handler.
-    keep = ops.expand_dims(ops.minimum(pt * 2.0 ** port.q.pt_kif[2], 1.0), -1)
-    return p, keep
-
-
-def _lifts(port: PortBase, p, angles):
-    """Return the unit lift's tail (eta, phi, eta^2 + phi^2) (jets, N, 3) and the lifts
-    u = p (1, tail) (jets, N, 4)."""
-    r2 = _einsum(port, "bnk,bnk->bn", "lift_r2", angles, angles)
-    tail = ops.concatenate([angles, ops.expand_dims(r2, -1)], axis=-1)
-    u_tail = _einsum(port, "bn,bnk->bnk", "lift_u", p, tail)
-    return tail, ops.concatenate([ops.expand_dims(p, -1), u_tail], axis=-1)
 
 
 class KerasNetwork(nn.Module):
@@ -318,8 +202,7 @@ class KerasNetwork(nn.Module):
 
 
 def configure_jax(platform: str, devices: int | Sequence[int], floatx: str) -> None:
-    """Set JAX's precision and Keras's float type, and, if no backend has started yet,
-    the platform and the devices.
+    """Set JAX's precision and Keras's float type, the platform, and the devices.
 
     :param platform: Lightning's accelerator, ``gpu`` (or ``cuda``) or ``cpu``.
     :param devices: Lightning's devices, a count or a list of CUDA indices.
@@ -364,9 +247,11 @@ def _weight_values(layer: keras.Layer) -> list[tuple[Quantizer, Any]]:
 
 
 def seed_weight_bits(model: keras.Model, bits: int) -> None:
-    """Give every trainable weight and bias quantiser *bits* bits and the integer bits
-    its present value needs, at least ``WEIGHT_I_MIN``, so that no copied weight
-    saturates or wraps."""
+    """Give every trainable weight and bias quantiser *bits* bits.
+
+    The integer bits receive its present value needs, at least ``WEIGHT_I_MIN``, such
+    that no copied weight saturates or wraps.
+    """
     for layer in model.layers:
         for quantiser, value in _weight_values(layer):
             inner = quantiser.quantizer
@@ -388,8 +273,10 @@ def _wrap_lanes(model: keras.Model) -> list[FixedPointQuantizerKIF]:
 
 
 def calibrate(model: keras.Model, inputs: np.ndarray, batch_size: int = 16384) -> int:
-    """Trace the integer bits of every WRAP quantiser on rows *inputs* afresh and return
-    the EBOPs of the traced model."""
+    """Trace the integer bits of every WRAP quantiser on rows *inputs* afresh.
+
+    Return the EBOPs of the traced model.
+    """
     return int(trace_minmax(model, inputs, batch_size=batch_size))
 
 

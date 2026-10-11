@@ -1,12 +1,6 @@
-# https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
-
 _target_: lightning.pytorch.callbacks.EarlyStopping
 monitor: val/acc
-min_delta: 1.0e-4 # matches the scheduler threshold, so sub-threshold noise counts for neither
-# Longer than the scheduler patience (80), so the rate drops before the run ends, and above the
-# 50-epoch trial length, so no trial stops early: a trial is judged on its best epoch, and a
-# one-cycle schedule (JetFormer) earns its accuracy in the anneal. check_finite still ends a
-# trial whose val/acc turns NaN.
-patience: 100
+min_delta: 1.0e-4 # the scheduler's threshold
+patience: 100 # above the scheduler's 80 and the 50-epoch trials
 verbose: true
 mode: "max"

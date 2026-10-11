@@ -1,38 +1,29 @@
-# LLoCa, a transformer made equivariant by learned local frames (arXiv:2505.20280; the tagger of
-# arXiv:2508.14898), its frames-net, frames and tensorial attention supplied by the lloca package.
-# The polar-decomposition frames of this row make the full Lorentz group exact. lloca_z.yaml,
-# lloca_so2.yaml and lloca_so3.yaml are copies differing in name and frames alone, so the four
-# rows differ in the embedded group and in nothing else (tests/test_configs.py keeps them in step).
-# Defaults here, per-nconstituents values in configs/experiment/hls4ml/lloca_lorentz_<N>.yaml.
+# LLoCa (arXiv:2505.20280, 2508.14898) with Lorentz frames; per-N values in the experiment configs.
 _target_: src.algorithms.lloca.LLoCa
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: lloca_lorentz
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+nbr_feats: 4 # required_features pins [px, py, pz, e]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# Scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
-# The frames class, which sets the exact group: lorentz (the full Lorentz group), z (SO(2) about
-# the beam times boosts along it), so2 (SO(2) about the beam) or so3 (SO(3)).
 frames: lorentz
-# The tagging-guide's size-0 LLoCa-Transformer: 8x0n+2x1n per head, so 128 channels.
+# The tagging guide's size-0 LLoCa-Transformer: 8x0n+2x1n per head, so 128 channels.
 num_blocks: 8
 num_heads: 8
-attn_scalars: 8 # scalar channels of each attention head
-attn_vectors: 2 # four-vector channels of each attention head
+attn_scalars: 8
+attn_vectors: 2
 mlp_factor: 2
 dropout: 0.0
-framesnet_hidden: 32 # width of the two hidden layers of the frames-net's edge MLP
-framesnet_dropout: 0.0 # in the frames-net's edge MLP; 0 adds no layer, which the checkpoints expect
-mass_reg: 2.5e-4 # in units: the references' 5 MeV, the frames-net's mass floor; never searched
-units: 20.0 # GeV per unit, the L-GATr-slim row's scale; never searched
+framesnet_hidden: 32
+framesnet_dropout: 0.0 # 0 adds no layer, as the checkpoints expect
+mass_reg: 2.5e-4 # the references' 5 MeV in units; never searched
+units: 20.0 # GeV per unit, the L-GATr-slim scale; never searched
 
 optimizer:
   _target_: torch.optim.AdamW
@@ -40,8 +31,7 @@ optimizer:
   lr: 3.0e-4
   weight_decay: 1.0e-2
 
-# One cycle over the whole run, hence stepped per batch. total_steps is injected by
-# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+# Stepped per batch; _set_up_scheduler injects total_steps.
 scheduler:
   scheduler:
     _target_: torch.optim.lr_scheduler.OneCycleLR
@@ -51,7 +41,5 @@ scheduler:
   interval: step
   frequency: 1
 
-# Compiled, as in the searches at 50 and 150 constituents (those at 16 ran eager): 25 to 35 % less
-# time per step and about 10 % less peak memory than eager (olgpu V100, 2026-09-30), with logits
-# within about 1e-6 of the eager network's, at a one-off compile of 1 to 1.5 min per fit.
+# 25 to 35 % less time per step than eager (olgpu V100, 2026-09-30); eager in the N = 16 searches.
 compile: true

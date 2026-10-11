@@ -2,8 +2,7 @@ _target_: lightning.pytorch.trainer.Trainer
 
 default_root_dir: ${paths.output_dir}
 
-# A floor of one epoch, so early stopping cannot end a run before any validation.
-min_epochs: 1
+min_epochs: 1 # early stopping cannot end a run before its first validation
 max_epochs: 200
 
 accelerator: cpu
@@ -11,6 +10,4 @@ devices: 1
 
 gradient_clip_val: 1.0
 
-# LorentzNet aggregates edges with index_add_, non-deterministic on CUDA, so run-to-run
-# reproducibility rests on seed_everything.
-deterministic: False
+deterministic: False # LorentzNet's index_add_ is non-deterministic on CUDA

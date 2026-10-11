@@ -1,10 +1,5 @@
-# Invariance probe, run over the test set once training has finished. Under src/eval.py it also
-# writes each checkpoint's per-jet logits, labels and draws to outputs/<label>.npz.
+# Invariance probe of the test set; under src/eval.py it also writes outputs/<label>.npz.
 
 _target_: src.callbacks.invariance.InvarianceMetricCallback
-# The transform knobs of the data pipeline, so the probe measures the trained regime. They define
-# the probe and are therefore never tuned.
 transform_kwargs: ${data.transform_kwargs}
-# false: no transform, the clean metrics and outputs alone; the jet-level experiments set it, since
-# no group acts on their inputs.
 probe: true

@@ -1,9 +1,6 @@
-# One CSV row per evaluated training, written by src/eval.py once every fold has been tested.
-# Read by src/eval.py alone; train.yaml composes it too so that one experiment config, which both
-# entry points share, can set the subdirectory below.
+# One CSV row per evaluated training, written by src/eval.py.
 
-# Anchored to the repository: a run launched from a queue or a batch job must still find the table.
 output_path: ${paths.results_dir}/results_table.csv
 
-subdir: null # replaces the <features>/ directory; the embedded class sets embedded
-invariance_metric: tv # the family filling the selected and per-group columns
+subdir: null # replaces the <features>/ directory
+invariance_metric: tv # the family of the selected and per-group columns

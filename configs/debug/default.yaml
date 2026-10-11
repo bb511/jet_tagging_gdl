@@ -1,19 +1,16 @@
 # @package _global_
 
-# One full epoch on the CPU, callbacks and loggers off. The other debug configs inherit from this.
+# One full epoch on the CPU, with callbacks, logger and results table off.
 
 task_name: "debug" # keeps these logs out of logs/train/
 
-# Without the callbacks nothing is checkpointed, so the manifest train.py writes is empty.
-callbacks: null
+callbacks: null # nothing is checkpointed, so the manifest train.py writes is empty
 logger: null
-# A throwaway evaluation must not append to the real results tables.
 results_table: null
 
 extras:
   enforce_tags: False
 
-# https://hydra.cc/docs/tutorials/basic/running_your_app/logging/
 hydra:
   job_logging:
     root:
@@ -23,9 +20,9 @@ trainer:
   max_epochs: 1
   accelerator: cpu # a debugger cannot step through a GPU kernel
   devices: 1 # one process, which is as far as a debugger follows
-  detect_anomaly: true # raise on a NaN or an infinity in any tensor
+  detect_anomaly: true
 
 data:
-  num_workers: 0 # load in the main process, for the same reason
+  num_workers: 0 # the main process alone, for the debugger
   pin_memory: False
-  n_folds: 1 # one split, so a debug run fits one model rather than the experiment's six
+  n_folds: 1

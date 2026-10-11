@@ -1,6 +1,5 @@
 # @package _global_
 
-# The order of the defaults decides which config overrides which: later entries win.
 defaults:
   - _self_
   - data: hls4ml
@@ -13,47 +12,32 @@ defaults:
   - hydra: default
   - logger: mlflow
 
-  # Pins one (architecture, nconstituents) pair; data.method and data.augmentation_scheme stay
-  # command-line overrides, e.g. experiment=hls4ml/deepsets_16 data.method=symm_loss.
   - experiment: null
 
   - hparams_search: null
 
-  # Machine-specific settings, excluded from version control, hence optional.
   - optional local: default
 
   - debug: null
 
 task_name: "train"
 
-# Overwrite with `tags="[first_tag, second_tag]"`.
 tags: ["dev"]
 
 experiment_name: jet_tagging_gdl_dev
 
-# The MLflow run name: the hash of the output directory, unique per run, for the main run, and
-# fold_<i> for a fold, which sits under the main run in the UI.
 run_name: ${fold_label:${fold},${short_hash:${hydra:runtime.output_dir},12}}
 
-# Resume training from this checkpoint.
 ckpt_path: null
 
-# What an Optuna study maximises: the main run's value, not a fold average.
 optimized_metric: val/acc_best
 
-# One run per process. null: the main run, on the record's own split whatever data.n_folds says.
-# An integer in 1..data.n_folds: that fold of the pooled train and validation jets, cut
-# data.n_folds ways. scripts/cluster/submit_train.sh --folds launches the main run, then the folds.
 fold: null
 
-# The MLflow run a fold nests under, the main run's, which submit_train.sh --folds reads off the
-# main run's manifest. null leaves the run where it is.
 parent_run_id: null
 
-# "main" or "fold_<i>", derived from fold: the run's label in the manifest and in MLflow.
 run_label: ${fold_label:${fold},main}
 
-# Logged so a training and its later evaluation are distinguishable in MLflow.
 run_stage: "train"
 
 seed: 12345

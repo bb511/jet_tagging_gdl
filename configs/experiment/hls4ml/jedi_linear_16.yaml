@@ -1,6 +1,5 @@
 # @package _global_
-# JEDI-linear at 16 constituents at the algorithm defaults, which are the published point: a
-# starting point, not tuned values. data.method and data.augmentation_scheme stay CLI overrides.
+# JEDI-linear at 16 constituents; data.method and data.augmentation_scheme stay CLI overrides.
 defaults:
   - override /algorithm: jedi_linear
   - override /trainer: gpu
@@ -11,3 +10,4 @@ experiment_name: hls4ml_jedi_linear_nconst16
 
 data:
   nconstituents: 16
+# Algorithm defaults: the published point.

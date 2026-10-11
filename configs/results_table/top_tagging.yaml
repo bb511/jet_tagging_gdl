@@ -1,5 +1,4 @@
-# The top-tagging rows, in tables of their own beside the hls4ml ones: results/top_tagging/ holds
-# the same <features>/ and embedded/ directories.
+# The top-tagging tables, laid out under results/top_tagging/ as the hls4ml ones.
 defaults:
   - default
   - _self_

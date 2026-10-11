@@ -11,6 +11,6 @@ experiment_name: hls4ml_mlp_nconst50
 data:
   nconstituents: 50
 
-# The published widths, spelled out here because the searches replace them per constituent count.
+# The published widths.
 algorithm:
   hidden_layers: [128, 64, 32]

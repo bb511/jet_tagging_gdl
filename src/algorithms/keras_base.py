@@ -1,15 +1,11 @@
-"""The base of the rows trained quantisation-aware with HGQ2: a Keras port inside the
-shared training loop, as `src.algorithms` is the base of the torch rows.
+"""The base of the models trained quantisation-aware with HGQ2.
 
-Lightning keeps the loop, the data, validation, testing and the invariance probe; Keras
-on JAX owns the network, its optimiser and its training step. A row builds its port in
-``build_net`` through ``_keras_net`` and supplies its float twin, the copy of a trained
-float network and the preparation of its rows; everything else is shared.
+We use lightning for the training loop, the data, validation, testing and the invariance
+probe; Keras on JAX implements the network, its optimiser and its step.
 """
 
 import math
 import time
-from collections.abc import Callable
 from dataclasses import asdict
 from importlib.metadata import version
 from pathlib import Path
@@ -21,6 +17,7 @@ from torch import nn
 
 from src.algorithms import DenormalisedModule
 from src.algorithms.components.hgq_port import (
+    KEEP_KIF,
     KerasNetwork,
     Quantisation,
     calibrate,
@@ -38,14 +35,16 @@ from src.algorithms.utils.flops import count_flops_per_jet
 from src.callbacks.invariance import InvarianceMetricCallback
 from src.utils.pylogger import RankedLogger
 
+# isort: split
 # After the component, which selects Keras's JAX backend before the first import.
 import keras
+from hgq.layers import QDense, QEinsum, QEinsumDense, QMultiply, QSum, Quantizer
 from hgq.utils.sugar import PieceWiseSchedule
+from keras import ops
 
 log = RankedLogger(__name__)
 
-# Jets per Keras call on a whole split, so that the torch intermediates of one chunk
-# alone are held at a time.
+# Jets per Keras call on a whole split.
 CHUNK = 65536
 # Jets per batch of HGQ2's trace, unless a row bounds it.
 CALIBRATION_BATCH = 16384
@@ -55,41 +54,27 @@ VERSIONED = ("keras", "hgq2", "jax")
 class KerasQuantisedModule(DenormalisedModule):
     """A row trained quantisation-aware with HGQ2, for synthesis by alkaid.
 
-    ``net`` is a ``KerasNetwork`` without torch parameters, so the base class's forward
-    pass, validation, test and probe run unchanged on it. Training is manual: each batch
-    is one Keras ``train_on_batch`` and one step of the mock optimiser that Lightning
-    puts in place of a torch one. That step advances ``global_step``, without which
-    ``ModelCheckpoint`` never saves. The Keras weights travel inside the Lightning
-    checkpoint and the Keras optimiser state does not, so a run cannot resume mid-way.
+    ``net`` is a ``KerasNetwork`` without torch parameters.
+    Training is manual: each batch is one Keras ``train_on_batch`` and one step of the
+    mock optimiser that Lightning puts in place of a torch one.
+    That step advances ``global_step``, without which ``ModelCheckpoint`` never saves.
+    The Keras weights then go inside the Lightning checkpoint.
+    The optimiser always stays separate.
 
     At test time the integer bits of every wrapping quantiser are traced on the record's
     whole training split; the test, the probe and the export all read the traced port,
-    and ``ebops_total`` holds its EBOPs, NaN until then. Testing runs with JAX on the
-    CPU alone, where the float64 port computes the fixed-point values of the hardware
-    exactly; on a GPU, XLA's float64 2**f is off by an ulp for some f, so the stored
-    logits would not be bit-exact against alkaid.
-
-    A row's ``build_net`` calls ``_keras_net``; the row also implements ``_float_twin``,
-    ``_copy_float_network`` and ``_prepare_inputs``, which clamps through
-    ``_clamp_words``. This class defines no ``__init__``, since
-    ``JetTaggingModule.__init__`` collects the network's arguments from the caller's
-    frame, and no ``required_features``, which each row sets.
+    and ``ebops_total`` holds its EBOPs=NaN until then. Testing runs with JAX on CPU.
     """
 
     def _keras_net(
         self,
-        build_port: Callable[..., tuple[keras.Model, keras.Model]],
         quantisation: dict[str, Any] | None,
         floatx: str,
         jax_platform: str,
         jax_devices: int | list[int],
-        **port_kwargs: Any,
     ) -> KerasNetwork:
         """Configure JAX, register the de-normalisation and build the port.
 
-        :param build_port: the row's builder, called with N, then ``n_class``,
-            ``quantisation`` and *port_kwargs* by keyword, returning the network and the
-            model of its words.
         :param quantisation: the fields of ``Quantisation`` that the config sets.
         """
         configure_jax(jax_platform, jax_devices, floatx)
@@ -97,21 +82,115 @@ class KerasQuantisedModule(DenormalisedModule):
         keras.utils.set_random_seed(torch.initial_seed() % 2**32)
         self._register_denorm_scales()
         self.automatic_optimization = False
-        self.quantisation = q = Quantisation(**(quantisation or {}))
-        n, n_class = self.hparams.nconstituents, self.hparams.output_dim
-        model, words = build_port(n, n_class=n_class, quantisation=q, **port_kwargs)
+        self.quantisation = Quantisation(**(quantisation or {}))
+        model, words = self._build_port()
         return KerasNetwork(model, words)
 
+    def _build_port(self) -> tuple[keras.Model, keras.Model]:
+        """The port and the model of its input words."""
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _build_port()."
+        )
+
+    @property
+    def q(self) -> Quantisation:
+        return self.quantisation
+
+    @property
+    def nconstituents(self) -> int:
+        return self.hparams.nconstituents
+
+    @property
+    def units(self) -> float:
+        return self.hparams.units
+
+    def _dense(self, units: int, name: str, activation=None, **kwargs):
+        """A dense layer on the last axis, its input, kernel and bias each quantised."""
+        return QDense(
+            units,
+            activation=activation,
+            iq_conf=self.q.datalane(),
+            kq_conf=self.q.weight(),
+            bq_conf=self.q.bias(),
+            name=name,
+            **kwargs,
+        )
+
+    def _einsum_dense(self, equation: str, shape: tuple[int, ...], name: str):
+        """A bias-free linear map of *equation*, its input and kernel quantised."""
+        q = self.q
+        return QEinsumDense(
+            equation, shape, iq_conf=q.datalane(), kq_conf=q.weight(), name=name
+        )
+
+    def _einsum(self, equation: str, name: str, *inputs):
+        """The einsum of two tensors, each read through a datalane quantiser."""
+        return QEinsum(equation, iq_confs=self.q.datalane(), name=name)(list(inputs))
+
+    def _sum(self, name: str, x, keepdims: bool = False, iq_conf=None):
+        """The sum over the slots, axis 1, of *x* read through *iq_conf* (a
+        datalane)."""
+        iq_conf = iq_conf or self.q.datalane()
+        return QSum(iq_conf=iq_conf, axes=1, keepdims=keepdims, name=name)(x)
+
+    def _keep_multiply(self, name: str, x, keep):
+        """Zero the padded slots of *x*, the 0/1 flag *keep* read through one fixed
+        bit."""
+        confs = [self.q.datalane(), self.q.fixed(KEEP_KIF)]
+        return QMultiply(iq_confs=confs, name=name)([x, keep])
+
+    def _words(self, x):
+        """Quantise the first three columns of rows (jets, N, F) to p_T words (jets, N)
+        and angle words (jets, N, 2).
+
+        The words wrap: alkaid traces nothing but WRAP on a model input, so the caller
+        clamps the rows to the words' ranges.
+        """
+        q = self.q
+        pt = Quantizer(q.fixed(q.pt_kif, "WRAP"), name="pt_word")(x[:, :, 0])
+        angles = Quantizer(q.fixed(q.angle_kif, "WRAP"), name="angle_word")(
+            x[:, :, 1:3]
+        )
+        return pt, angles
+
+    def _word_rows(self, pt, angles, offset):
+        """The words the port reads, (jets, N, 3) [p_T, eta, phi]; under the axis offset
+        (jets, N, 5), the two offset words in row 0 and zeros, which nothing reads,
+        below them."""
+        columns = [ops.expand_dims(pt, -1), angles]
+        if offset is not None:
+            below = [[0, 0], [0, self.nconstituents - 1], [0, 0]]
+            columns.append(ops.pad(ops.expand_dims(offset, 1), below))
+        return ops.concatenate(columns, axis=-1)
+
+    def _p_keep(self, pt):
+        """Return p, the p_T words (jets, N) in ``units``, and the keep flag (jets, N,
+        1), one on a real constituent and zero on a padded one."""
+        # A division rather than the product by 1 / units: Keras marks the product of a
+        # tensor and a Python scalar sparse, which the float32 build fails to trace.
+        # alkaid replays both as the same shift.
+        p = pt / self.units
+        # Exact: a real p_T is a multiple of the word's LSB, and a cast of a bool has no
+        # alkaid handler.
+        keep = ops.expand_dims(ops.minimum(pt * 2.0 ** self.q.pt_kif[2], 1.0), -1)
+        return p, keep
+
+    def _lifts(self, p, angles):
+        """Return the unit lift's tail (eta, phi, eta^2 + phi^2) (jets, N, 3) and the lifts
+        u = p (1, tail) (jets, N, 4)."""
+        r2 = self._einsum("bnk,bnk->bn", "lift_r2", angles, angles)
+        tail = ops.concatenate([angles, ops.expand_dims(r2, -1)], axis=-1)
+        u_tail = self._einsum("bn,bnk->bnk", "lift_u", p, tail)
+        return tail, ops.concatenate([ops.expand_dims(p, -1), u_tail], axis=-1)
+
     def _float_twin(self) -> nn.Module:
-        """The float network of this port's architecture, on which the FLOPs are
-        counted."""
+        """The float network of the HGQ architecture, on which the FLOPs are counted."""
         raise NotImplementedError(
             f"{type(self).__name__} must implement _float_twin()."
         )
 
     def _copy_float_network(self, model: keras.Model) -> None:
-        """Copy the trained float network that ``init_from`` names into the port
-        *model*."""
+        """Copy the trained float network that ``init_from`` names into the port."""
         raise NotImplementedError(
             f"{type(self).__name__} must implement _copy_float_network()."
         )
@@ -121,16 +200,17 @@ class KerasQuantisedModule(DenormalisedModule):
         return CALIBRATION_BATCH
 
     def _record_costs(self, nconstituents: int, nbr_feats: int) -> None:
-        """Price the FLOPs on the float network of this architecture, as its float row
-        is priced; the EBOPs are NaN until the trace at test time."""
+        """Price the FLOPs on the float network of this architecture."""
         twin = self._float_twin()
         self.flops_total = count_flops_per_jet(twin, nconstituents, nbr_feats)
         self.ebops_total = self.ebops_unpriced = math.nan
 
     def _clamp_words(self, pt: torch.Tensor, angles: torch.Tensor) -> torch.Tensor:
-        """Concatenate the (jets, N, 1) p_T and the (jets, N, A) angles, each clamped to
-        the range of its word: the words wrap, since alkaid traces no other input
-        quantiser."""
+        """Concatenate the (jets, N, 1) p_T and the (jets, N, A) angles.
+
+        Each of these is clamped to the range of the input quantisation: the inputs that
+        go beyond the range are wrapped around, supported in alkaid.
+        """
         q = self.quantisation
         pt = pt.clamp(*word_range(q.pt_kif))
         return torch.cat([pt, angles.clamp(*word_range(q.angle_kif))], dim=-1)

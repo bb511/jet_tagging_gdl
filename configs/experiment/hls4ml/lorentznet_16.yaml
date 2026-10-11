@@ -1,7 +1,5 @@
 # @package _global_
-# LorentzNet at 16 constituents, at the algorithm defaults: a starting point, not tuned values.
-# LorentzNet is the symmetry-embedded class, so it runs the baseline regime only; data.method and
-# data.augmentation_scheme still take CLI overrides, but anything else is outside the study design.
+# LorentzNet at 16 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: lorentznet
   - override /trainer: gpu
@@ -13,17 +11,13 @@ experiment_name: hls4ml_lorentznet_nconst16
 data:
   nconstituents: 16
 
-# fp32, not the trainer's 16-mixed: de-normalised edge invariants reach 1e4 to 1e5 GeV^2, above the
-# fp16 maximum of 65 504, before the signed log compresses them.
+# fp32: the de-normalised edge invariants reach 1e4 to 1e5 GeV^2, above the fp16 maximum.
 trainer:
   precision: 32
 
-# TF32 matmuls on Ampere and later. The fp32 range that made these experiments force precision 32
-# is kept (the de-normalised Minkowski invariants are elementwise anyway); only the linear layers
-# lose mantissa. Set per experiment so searches, trainings and evaluations agree; a no-op on a V100.
+# TF32 on Ampere and later, a no-op on a V100; it keeps the fp32 range that forced precision 32.
 extras:
   matmul_precision: high
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

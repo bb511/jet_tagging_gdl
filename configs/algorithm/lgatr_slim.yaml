@@ -1,31 +1,26 @@
-# L-GATr-slim, the scalars-and-vectors Lorentz-equivariant transformer (arXiv:2512.17011), its
-# network supplied by the lgatr package. Defaults here, per-nconstituents values in
-# configs/experiment/hls4ml/lgatr_slim_<N>.yaml.
+# L-GATr-slim with the spurions, arXiv:2512.17011; per-N values in the experiment configs.
 _target_: src.algorithms.lgatr_slim.LGATrSlim
-_convert_: all # _set_up_scheduler pops from the scheduler dict, so it must not be a DictConfig
+_convert_: all # plain dicts, since _set_up_scheduler pops from the scheduler
 name: lgatr_slim
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 4 # not ${len:...}: the net reads the four-momentum alone, so features must be px,py,pz,e
+nbr_feats: 4 # required_features pins [px, py, pz, e]
 output_dim: 5
 
-# Interpolated, so one CLI override (data.method=symm_loss) configures data and algorithm together.
-# L-GATr-slim is scripted in the baseline regime alone, so both resolve to augmentation/none.
 method: ${data.method}
 group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
-# The size of the published slim tagger, about 2.0M parameters.
+# The published slim tagger's size, about 2.0M parameters.
 num_blocks: 12
-hidden_v_channels: 32 # four-vector channels of every token
-hidden_s_channels: 96 # scalar channels of every token
+hidden_v_channels: 32
+hidden_s_channels: 96
 num_heads: 8
 mlp_ratio: 4
 dropout: 0.0
 units: 20.0 # GeV per unit, the references' scale; never searched
-# The spurion switches: the time vector and the two lightlike beams as extra tokens, the
-# published tagging setting, which leaves SO(2) about the beam exact.
+# The time vector and the beams of the published tagging setting: SO(2) about the beam is exact.
 add_beams: true
 add_time: true
 
@@ -35,8 +30,7 @@ optimizer:
   lr: 3.0e-4
   weight_decay: 1.0e-2
 
-# One cycle over the whole run, hence stepped per batch. total_steps is injected by
-# JetTaggingModule._set_up_scheduler, the run length being known only once the trainer is attached.
+# Stepped per batch; _set_up_scheduler injects total_steps.
 scheduler:
   scheduler:
     _target_: torch.optim.lr_scheduler.OneCycleLR
@@ -46,6 +40,5 @@ scheduler:
   interval: step
   frequency: 1
 
-# Compiled: 1.7 to 2.1 times faster per training step than eager (olgpu V100, 2026-09-29), with
-# logits within 4e-7 of the eager network's, at a one-off compile of 15 to 55 s per fit.
+# 1.7 to 2.1 times faster per training step than eager (olgpu V100, 2026-09-29).
 compile: true

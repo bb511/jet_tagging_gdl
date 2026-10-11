@@ -1,9 +1,5 @@
 # @package _global_
-# PELICAN without the beams at 50 constituents, at the algorithm defaults: a starting point, not
-# tuned values. The beams-on twin is pelican_50.yaml, whose measured memory and step times carry
-# over (the pair tensor is 50 x 50 here rather than 52 x 52). Symmetry-embedded, so it runs the
-# baseline regime only; data.method and data.augmentation_scheme still take CLI overrides, but
-# anything else is outside the study design.
+# PELICAN without the beams at 50 constituents, at the untuned defaults.
 defaults:
   - override /algorithm: pelican_lorentz
   - override /trainer: gpu
@@ -12,25 +8,22 @@ tags: ["hls4ml", "pelican_lorentz", "nconst-50"]
 
 experiment_name: hls4ml_pelican_lorentz_nconst50
 
-# A quarter of the usual batch: the pair tensor costs B * N^2 per channel, see pelican_50.yaml.
+# A quarter of the usual batch: memory follows the squared slot count, 50 here.
 data:
   nconstituents: 50
   batch_size: 512
 
-# fp32, not the trainer's 16-mixed: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6
-# GeV^2, above the fp16 maximum of 65 504, before the input embedding compresses them.
+# fp32: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6 GeV^2, above the fp16 maximum.
 trainer:
   precision: 32
 
-# TF32 matmuls on Ampere and later, as in pelican_50.yaml; a no-op on a V100.
+# TF32 on Ampere and later, a no-op on a V100; it keeps the fp32 range that forced precision 32.
 extras:
   matmul_precision: high
 
 algorithm:
-  # Mean real multiplicity of the training jets at this truncation (41.43, measured
-  # 2026-09-13 on the record cache); no beams to add.
+  # Mean real multiplicity 41.43 of the training jets (record cache, 2026-09-13); no beams to add.
   nbar: 41.4
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

@@ -55,12 +55,13 @@ construction, the feature resolution in `setup()` and the FLOP and eBOP counts. 
 supplies `build_net(**net_kwargs) -> nn.Module` and, where the architecture is picky about its
 inputs, two hooks. The steps:
 
-- Write the network as an `nn.Module` under `src/algorithms/components/<name>.py`. It takes
+- Write the network as an `nn.Module` in `src/algorithms/<name>.py`. It takes
   `(B, N, F)` float32, with padded constituents as all-zero rows, and returns `(B, n_class)`
   logits, `n_class` being the algorithm's `output_dim` (5 on hls4ml, 2 on top tagging), which
   `setup()` checks against the datamodule's `class_names`. The masking convention the kept
-  components use is `x.abs().sum(-1) > 0`.
-- Write `src/algorithms/<name>.py`, a `JetTaggingModule` subclass whose only required member
+  networks use is `x.abs().sum(-1) > 0`. Only a block that several networks share goes in
+  `src/algorithms/components/`.
+- In the same file, write a `JetTaggingModule` subclass whose only required member
   is `build_net`. Do not give it an `__init__`: `save_hyperparameters` walks the caller frame
   to collect `**net_kwargs`, and an intervening constructor that does not forward every
   argument loses them.
@@ -78,15 +79,18 @@ inputs, two hooks. The steps:
   `method`/`group` interpolations from the data config, the architecture arguments, and an
   optimiser and scheduler as Hydra partials.
 - Add `configs/experiment/hls4ml/<name>_{16,50,150}.yaml`, the search configs
-  `configs/hparams_search/hls4ml/<name>_optuna.yaml` and `<name>_scl_optuna.yaml`, and the
-  three catalogues `scripts/hls4ml/run<name>_{search,train,eval}.sh`. An architecture with an
-  embedded symmetry follows LorentzNet and PELICAN instead: the baseline regime alone, so no
-  `_scl_optuna` config and three blocks per catalogue rather than 21. A third case, a row that
+  `configs/hparams_search/hls4ml/<name>_optuna.yaml`, which composes the shared sweeper
+  `configs/hparams_search/optuna.yaml`, and `<name>_scl_optuna.yaml`, which composes the first,
+  and the three catalogues `run<name>_{search,train,eval}.sh`, under
+  `scripts/experiments/hls4ml/px_py_pz_e/` for a grid row and at the root of
+  `scripts/experiments/hls4ml/` for any other. An architecture
+  with an embedded symmetry follows LorentzNet and PELICAN instead: the baseline regime alone, so
+  no `_scl_optuna` config and three blocks per catalogue rather than 21. A third case, a row that
   runs the baseline regime alone but reads `data.features` (JEDI-linear until 2026-10-02), goes in
-  `BASELINE_ONLY`, not `EMBEDDED`, in both `scripts/optuna/make_train_catalogues.py` and
+  `BASELINE_ONLY`, not `EMBEDDED`, in both `scripts/experiments/make_train_catalogues.py` and
   `tests/conftest.py`, has the `_optuna` config alone, and needs a search catalogue under every
-  feature-set directory, `scripts/hls4ml/pt_eta_phi/` and `scripts/hls4ml/pt_etarel_phirel/` as
-  well as `scripts/hls4ml/`.
+  feature-set directory, `px_py_pz_e/`, `pt_eta_phi/` and `pt_etarel_phirel/` of
+  `scripts/experiments/hls4ml/`.
   A row of the grid that reads `data.features`, as the Linformer does, needs both search configs
   and a 21-block search catalogue under every feature-set directory. A variant of a grid row pinned
   to columns of its own, as the moment rows are, gets a subclass of its own that sets
@@ -99,10 +103,12 @@ inputs, two hooks. The steps:
 - To join the top-tagging replica, a row needs `configs/experiment/top_tagging/<name>_100.yaml` on
   the pattern of the 18 there (`output_dim: 2`, the `top_tagging` data and results-table
   overrides, the trainer precision and TF32 setting of its hls4ml experiment at N = 150) and its
-  name in `TOP_TAGGING` in both `scripts/optuna/make_train_catalogues.py` and `tests/conftest.py`.
+  name in `TOP_TAGGING` in both `scripts/experiments/make_train_catalogues.py` and
+  `tests/conftest.py`.
   A row on a published recipe also goes in `TOP_TAGGING_RECIPES` and carries the recipe in its
   experiment; a searched row gets `configs/hparams_search/top_tagging/<name>_optuna.yaml` and the
-  hand-written `scripts/top_tagging/run<name>_search.sh`. The generator then writes its train and
+  hand-written `run<name>_search.sh` in `scripts/experiments/top_tagging/`, under the directory of
+  each feature set for a grid row. The generator then writes its train and
   eval catalogues under `--dataset top_tagging`.
 
 Every one of the removed modules will need two things on the way in. They import
@@ -117,12 +123,16 @@ Kept at the refactor, so it needs no porting notes; this section holds the measu
 batch sizes. Its edges join real constituents alone, so memory follows the squared multiplicity,
 whose mean is 1 800 at N = 50 and 2 800 at N = 150. On a 32 GB V100, 1024 jets take 22 GiB at
 N = 50 and 1536 do not fit, and 512 jets take 17 GiB at N = 150, so the experiments set half the
-usual batch of 2048 at N = 50 and a quarter at N = 150. A larger card would take more.
+usual batch of 2048 at N = 50 and a quarter at N = 150. A larger card would take more. In the
+search, `n_hidden` and `n_layers` bracket the paper's (72, 6) LGEB stack from below, and
+`c_weight`, which scales the Minkowski-coordinate update against the scalar one in each LGEB,
+runs log-scaled up to 1: under the tanh gate the per-edge step saturates at |x_diff|, so at 1 a
+node moves by a whole mean edge difference per block.
 
 ## PELICAN
 
 **Back since 2026-09-13, as a clean rewrite**, not as the vendored copy below:
-`src/algorithms/components/pelican.py` and `src/algorithms/pelican.py`, with
+`src/algorithms/pelican.py`, with
 `configs/algorithm/pelican.yaml`, `configs/experiment/hls4ml/pelican_{16,50,150}.yaml` and
 `configs/hparams_search/hls4ml/pelican_optuna.yaml`. The rewrite carries the general classifier
 of arXiv:2307.16506 alone: the 15 aggregators of the rank-2 equivariant layer built from compact
@@ -134,8 +144,9 @@ beside LorentzNet, run in the baseline regime alone. Since 2026-09-27 it is run 
 beams as `pelican` and without them as `pelican_lorentz`: the same module and network, switched by
 `configs/algorithm/pelican_lorentz.yaml` (a standalone copy of `pelican.yaml` with `add_beams:
 false`, kept in step by `tests/test_configs.py`), with its own experiment configs, search config
-and catalogues; the 150-constituent row is not searched and its experiment config carries the
-beams-on optimum.
+and catalogues; the 150-constituent row is not searched (to spare the H100 week) and its
+experiment config carries the beams-on optimum, at the corner of the space where that study's top
+eight trials all sit, so a search of the beams-off twin would land there too.
 
 The pair tensor costs B N² per channel, and every slot is built whether or not it holds a
 constituent, so memory follows the squared slot count (N + 2 with the beams) rather than the
@@ -146,9 +157,15 @@ N = 50, which fits an 11 GB slice, and at 15.2 GB, 0.42 s and 27 min per epoch a
 (2026-09-13). N = 150 needs a full card or a third of an H100, never an 11 GB slice, and its study
 was the costliest of the three.
 
-`n_chunks` (`configs/algorithm/pelican.yaml`) is two at N = 150, where the pair tensor is dense
-over the 152 slots while the mean real multiplicity is 49.4, so that 89 % of it is padding. On one
-V100 at a batch of 128 (2026-09-15), a step took, in ms:
+`nbar` (`configs/algorithm/pelican.yaml`) normalises the aggregators' (N/nbar)^α scaling: the
+training jets' mean real multiplicity at the truncation, 15.98, 41.43 and 49.44 at N = 16, 50 and
+150 (record cache, 2026-09-13), plus the two beams when they are on. `n_chunks` sorts the batch
+by multiplicity and cuts it into that many chunks, each trimmed to its own widest jet, which drops
+the padded pair slots of all but the widest chunk; the logits, the gradients and the pooled
+normalisation statistics are those of the whole batch, exact up to the order of the summations,
+and the gain follows the padding, none at N = 16. It is two at N = 150, where the pair tensor is
+dense over the 152 slots while the mean real multiplicity is 49.4, so that 89 % of it is padding.
+On one V100 at a batch of 128 (2026-09-15), a step took, in ms:
 
 | chunks                                 | default point, 5 × 25/15 | largest search point, 5 × 35/35 |
 | -------------------------------------- | ------------------------ | ------------------------------- |
@@ -211,18 +228,21 @@ the symmetry-handling method throughout.
 Added on 2026-09-28 as the third symmetry-embedded architecture, and the first whose network is
 not written here: L-GATr-slim (arXiv:2512.17011), the scalars-and-vectors variant of L-GATr
 (arXiv:2405.14806), comes as `lgatr.LGATrSlim` from the pip package `lgatr` 2.0.0. Our own code
-is the wrapper `src/algorithms/components/lgatr_slim.py` and the `JetTaggingModule` subclass
+is the wrapper `LGATrSlimClassifier` and the `JetTaggingModule` subclass `LGATrSlim` in
 `src/algorithms/lgatr_slim.py`, which reads `[px, py, pz, e]` and hands the network
 (E, px, py, pz) in GeV. Around them sit `configs/algorithm/lgatr_slim.yaml` and
 `lgatr_slim_lorentz.yaml`, the six experiment configs
 `configs/experiment/hls4ml/lgatr_slim{,_lorentz}_{16,50,150}.yaml`, the two search configs
 `configs/hparams_search/hls4ml/lgatr_slim{,_lorentz}_optuna.yaml` and the six catalogues
-`scripts/hls4ml/runlgatr_slim{,_lorentz}_{search,train,eval}.sh`. The wrapper divides the
+`scripts/experiments/hls4ml/runlgatr_slim{,_lorentz}_{search,train,eval}.sh`. The wrapper
+divides the
 constituents by `units` (20 GeV), prepends a fixed global token (a zero four-vector carrying a
 single scalar flag) and the spurion tokens, passes a dense boolean key-padding mask, and reads
 the logits from the global token's scalar outputs. The constituents enter as the null vectors
 they are, with no mass regulator, and the experiments run in fp32, since the package's
-documentation advises against mixed precision for the slim network.
+documentation advises against mixed precision for the slim network. Compiled, a training step
+runs 1.7 to 2.1 times faster than eager on a V100 (2026-09-29), with logits within 4e-7 of the
+eager network's, after a one-off compile of 15 to 55 s per fit.
 
 The spurion tokens set the exact group, and the switches `add_beams` and `add_time` set the
 spurions. With neither, the logits are invariant under the full Lorentz group: this is the
@@ -248,15 +268,20 @@ Added on 2026-09-28 as the fourth symmetry-embedded architecture, and the second
 not written here: LLoCa, Lorentz local canonicalisation (arXiv:2505.20280 for the method,
 arXiv:2508.14898 for its use in particle physics), comes from the pip package `lloca` 2.0.0, which
 supplies the frames-net, the frames and the LLoCa-Transformer. Our own code is the wrapper
-`src/algorithms/components/lloca.py` and the `JetTaggingModule` subclass
+`LLoCaClassifier` and the `JetTaggingModule` subclass `LLoCa` in
 `src/algorithms/lloca.py`, which reads `[px, py, pz, e]` and hands the network (E, px, py, pz) in
 GeV. The four rows are named `lloca_<row>`, with `<row>` one of `lorentz`, `z`, `so2` and `so3`.
 Around the code sit the four algorithm configs `configs/algorithm/lloca_<row>.yaml`, the twelve
 experiment configs `configs/experiment/hls4ml/lloca_<row>_{16,50,150}.yaml`, the four search
 configs `configs/hparams_search/hls4ml/lloca_<row>_optuna.yaml` and the twelve catalogues
-`scripts/hls4ml/runlloca_<row>_{search,train,eval}.sh`. The wrapper divides the constituents by
-`units` (20 GeV) and runs the frames-net over the real constituents alone, in the package's packed
-layout, because its edge convolution takes no padding mask. Each constituent's four-momentum is
+`scripts/experiments/hls4ml/runlloca_<row>_{search,train,eval}.sh`. The rows train compiled
+(`compile: true`),
+as their searches at 50 and 150 constituents ran (those at 16 ran eager): a step takes 25 to 35 %
+less time and about 10 % less peak memory than eager on a V100 (2026-09-30), with logits within
+about 1e-6 of the eager network's, after a one-off compile of 1 to 1.5 min per fit. The wrapper
+divides the constituents by `units` (20 GeV) and runs the frames-net over the real constituents
+alone, in the package's packed layout, because its edge convolution takes no padding mask. Each
+constituent's four-momentum is
 then canonicalised into its local frame and handed to the LLoCa-Transformer with a dense boolean
 key-padding mask and the jet momentum as the reference of `preserve_variance`; the logits are the
 mean of its outputs over the real constituents. A mass regulator lifts every constituent lighter
@@ -307,14 +332,15 @@ LLoCa, its network is written here, so it adds no dependency. Vector neurons (De
 arXiv:2104.12229) carry lists of vectors as hidden features and mix them with a bias-free linear
 layer that acts on the channel index alone, so that the layer commutes with the group; here the
 vectors are lifts of the constituents' (p_T, η, φ), and the group is the Euclidean group of the
-(η, φ) plane. Our code is the network `VectorNeuronsClassifier` in
-`src/algorithms/components/vector_neurons.py` and the `DenormalisedModule` subclass `VectorNeurons`
+(η, φ) plane. Our code is the network `VectorNeuronsClassifier` and the `DenormalisedModule`
+subclass `VectorNeurons`
 in `src/algorithms/vector_neurons.py`, which pins `required_features` to `[pt, eta, phi]` and whose
 inherited `_prepare_inputs` returns the batch to GeV and radians. Around them sit
 `configs/algorithm/vn.yaml`, the three experiment configs
 `configs/experiment/hls4ml/vn_{16,50,150}.yaml`, the search config
 `configs/hparams_search/hls4ml/vn_optuna.yaml` and the catalogues
-`scripts/hls4ml/runvn_{search,train,eval}.sh`. It is the one embedded row that does not read the
+`scripts/experiments/hls4ml/runvn_{search,train,eval}.sh`. It is the one embedded row that does not
+read the
 four-momentum: `setup()` refuses any list but `required_features`, so its experiment configs set
 `data.features: [pt, eta, phi]`. Its catalogues and run directories sit in the default layout all
 the same, and its results land in `results/embedded/`.
@@ -513,22 +539,24 @@ designs. The two alternatives, read on 2026-10-05, do not fit the port. hls4ml 1
 for HGQ2's `QSum`, confines the two-input Einsum to the Latency strategy and maps a hard sigmoid to
 a slope of 0.2, where Keras 3 and torch use 1/6 (read in its source, not tried). TriggerFlow 0.3.11
 supports the uGT alone and pins Keras 3.11, below the 3.15 that hgq2 0.2.0 needs. Our code is the
-port `src/algorithms/components/vector_neurons_hgq.py`, built on the shared helpers of
+port and `VectorNeuronsHGQ` in `src/algorithms/vector_neurons_hgq.py` and the weight copy
+`src/algorithms/utils/vector_neurons_port.py`. The port is built on the shared helpers of
 `components/hgq_port.py`, which sets Keras's backend to JAX before it imports Keras and which every
-module of a port therefore imports first, the weight copy
-`src/algorithms/utils/vector_neurons_port.py` and `VectorNeuronsHGQ` in
-`src/algorithms/vector_neurons_hgq.py`, a subclass of `KerasQuantisedModule`
+module of a port therefore imports first, and `VectorNeuronsHGQ` is a subclass of
+`KerasQuantisedModule`
 (`src/algorithms/keras_base.py`, the Keras machinery shared with `jedi_linear_hgq`, whose
 section below describes the split) and of `VectorNeurons`. Around them sit
 `configs/algorithm/vn_hgq.yaml`, a standalone copy of `vn.yaml` that `tests/test_configs.py` keeps
 equal to it up to `units`, the optimiser, the scheduler and the keys of the port and its training,
 `configs/callbacks/quantised.yaml`, the experiment configs
 `configs/experiment/hls4ml/vn_hgq_{16,50,150}.yaml`, the hand-written catalogues
-`scripts/hls4ml/runvn_hgq_{train,eval}.sh`, `scripts/synthesis/synthesise_vn.py` with its
+`scripts/experiments/hls4ml/runvn_hgq_{train,eval}.sh`, `scripts/synthesis/synthesise_vn.py`
+with its
 `requirements.txt`, and `scripts/analysis/compare_outputs.py`. The dependencies form the optional
 Poetry group `hgq`, installed with `poetry install --no-root --with hgq` and absent from the NGT
 image: Keras 3.15, hgq2 0.2.0, alkaid 0.8.1, JAX 0.10.2 with its CUDA 12 plugin, and nvcc 12.6.85,
-pinned so that ptxas matches torch's CUDA runtime. In `scripts/optuna/make_train_catalogues.py` and
+pinned so that ptxas matches torch's CUDA runtime. In `scripts/experiments/make_train_catalogues.py`
+and
 `tests/conftest.py` the row forms `QUANTISED`, outside `MODELS`: it has no study, and no catalogue
 of it is generated.
 
@@ -824,31 +852,32 @@ accuracy, LUTs and latency is the measured cost of the moments. Beside them stan
 JEDI-linear (arXiv:2508.15468) at N = 16, 73.6 % at 75 ns and 136 k LUTs (its Table I) and 71.9 %
 at 54 ns and 44 k LUTs (Table II), both on the untruncated jet's axis, and the folded vn design D2
 of block 19 of `runvn_hgq_train.sh`, implemented at 85 ns. Our code is the port
-`src/algorithms/components/jedi_linear_hgq.py`, the weight copy
-`src/algorithms/utils/jedi_linear_port.py` and the module `JEDILinearHGQ` in
-`src/algorithms/jedi_linear_hgq.py`. Around them sit `configs/algorithm/jedi_linear_hgq.yaml`,
+and the module `JEDILinearHGQ` in `src/algorithms/jedi_linear_hgq.py` and the weight copy
+`src/algorithms/utils/jedi_linear_port.py`. Around them sit
+`configs/algorithm/jedi_linear_hgq.yaml`,
 which `tests/test_configs.py` keeps equal to `jedi_linear_moments.yaml` and to `vn_hgq.yaml` up to
 their own keys, the experiment configs `configs/experiment/hls4ml/jedi_linear_hgq_{16,50,150}.yaml`
-and the hand-written catalogues `scripts/hls4ml/runjedi_linear_hgq_{train,eval}.sh`. The row joins
+and the hand-written catalogues `scripts/experiments/hls4ml/runjedi_linear_hgq_{train,eval}.sh`.
+The row joins
 `vn_hgq` in `QUANTISED`, so it has no study and no generated catalogue.
 
 The two rows share the Keras machinery of `vn_hgq`, which was moved without a change of behaviour
 into two modules. `src/algorithms/components/hgq_port.py` holds what does not depend on the
 network: the selection of the JAX backend and the float64 floor and ceil patch, `Quantisation`,
-`KerasNetwork`, `PortBase` (the quantisation, N and the units of p), the builders of the quantised
-layers, the word quantisers, `_p_keep` and `_lifts` (split out of the vn's lift, whose layers keep
-their names), the bit seeding, the calibration, β, the EBOPs and the export.
+`KerasNetwork`, the bit seeding, the calibration, β, the EBOPs and the export.
 `src/algorithms/keras_base.py::KerasQuantisedModule`, a `DenormalisedModule`, holds the module:
 the refusal of the SCL, the copy and the seeding in `setup("fit")`, the Keras step and the mock
 optimiser, β per epoch, the checkpoint hooks, the trace at test time and the export, whose
-`export.json` now names its port (`port`, the Keras model's name). A row supplies the port's
-builder to `_keras_net`, the float network on which its FLOPs are priced (`_float_twin`), the copy
+`export.json` now names its port (`port`, the Keras model's name), and the stages every port
+builds from: the builders of the quantised layers, the word quantisers, `_p_keep` and `_lifts`
+(split out of the vn's lift, whose layers keep their names). A row supplies `_build_port`, which
+`_keras_net` calls, the float network on which its FLOPs are priced (`_float_twin`), the copy
 of a float run (`_copy_float_network`), its `_prepare_inputs` and the size of a batch of HGQ2's
 trace (`_calibration_batch`). The base class defines no `__init__`, since `save_hyperparameters` reads
 the row's own frame, and no `required_features`. `VectorNeuronsHGQ` subclasses
 `KerasQuantisedModule` and `VectorNeurons`, in that order, and keeps its `build_net`, `_float_twin`,
-`_copy_float_network` and `_prepare_inputs`; `components/vector_neurons_hgq.py` keeps the vn's
-stages and `build_port`, its lift rebuilt from `_p_keep`, the count and `_lifts` in the original
+`_copy_float_network` and `_prepare_inputs`; `src/algorithms/vector_neurons_hgq.py` keeps the vn's
+stages and `_build_port`, its lift rebuilt from `_p_keep`, the count and `_lifts` in the original
 order of operations, because the order and names of the layers fix the order of the Keras weights
 in the checkpoints. Three checks guard the move: the `vn_hgq` layout digests of
 `tests/test_configs.py`, unchanged; the vn tests of `tests/test_quantised.py`, unedited but for
@@ -857,7 +886,7 @@ the export's `port`; and a rebuild of an existing `vn_hgq` export on olgpu, whic
 unfolded normalisations, D2 and A2: 260 000 test jets each, no differing entry, the weights in the
 same order).
 
-`src/algorithms/components/jedi_linear_hgq.py::build_port` builds the network of
+`src/algorithms/jedi_linear_hgq.py::_build_port` builds the network of
 `JEDILinearNet.forward` and the moments of `JetMoments` as a Keras model named `jedi_linear_hgq`,
 inside `LayerConfigScope(beta0=0.0, enable_ebops=True)`. It takes the float network's N, `hidden`,
 `head_layers`, `aggregation` and `moments`, the units of p (a power of two), the classes and the
@@ -963,7 +992,7 @@ constant t there. The port has no batch normalisation, so `build_net` refuses
 `JEDILinearHGQ(KerasQuantisedModule)` pins `[pt, etarel, phirel]` through `required_features`.
 `build_net` takes the float network's architecture keys, `units` (16), the quantisation and the
 training keys of `vn_hgq` (β and its schedule, `init_from`, `calibration_jets`, `floatx`, the JAX
-platform and devices, `warmup_fraction`) and hands `build_port` to `_keras_net`. The FLOPs are
+platform and devices, `warmup_fraction`) and calls `_keras_net`. The FLOPs are
 priced on `JEDILinearNet` of the same architecture (`_float_twin`), so `flops_mean` equals the float
 row's, while `ebops_mean` holds HGQ2's EBOPs of the traced port. `_prepare_inputs` de-normalises,
 sorts and clamps the words. A batch of HGQ2's trace holds max(1024, 16 384 · 16 // N) jets, where
@@ -1076,15 +1105,14 @@ jet tagger built for FPGAs; it is judged on accuracy and cost, against the vecto
 particular. Its published accuracy, 73.6 % at 16 constituents on three features, is measured on the
 record's `etarel` and `phirel`, which are taken from the axis of the untruncated jet. This
 repository rebases them on the kept constituents, which is worth about 2 points, so a comparison
-needs the network trained on this preparation. Our code is a second class in each DeepSets file: the
-network `JEDILinearNet` beside `DeepSetsNet` in `src/algorithms/components/deepsets.py` and the
-`JetTaggingModule` subclass `JEDILinear` beside `DeepSets` in `src/algorithms/deepsets.py`, the two
-older classes untouched. Around them sit `configs/algorithm/jedi_linear.yaml`, the three experiment
+needs the network trained on this preparation. Our code is the network `JEDILinearNet` and the
+`JetTaggingModule` subclass `JEDILinear` in `src/algorithms/jedi_linear.py`. Around them sit
+`configs/algorithm/jedi_linear.yaml`, the three experiment
 configs `configs/experiment/hls4ml/jedi_linear_{16,50,150}.yaml`, the search config
 `configs/hparams_search/hls4ml/jedi_linear_optuna.yaml` with its companion
 `jedi_linear_scl_optuna.yaml`, the three search catalogues
-`scripts/hls4ml{,/pt_eta_phi,/pt_etarel_phirel}/runjedi_linear_search.sh` and the generated
-`scripts/hls4ml/runjedi_linear_{train,eval}.sh`.
+`scripts/experiments/hls4ml/{px_py_pz_e,pt_eta_phi,pt_etarel_phirel}/runjedi_linear_search.sh` and
+the generated `scripts/experiments/hls4ml/px_py_pz_e/runjedi_linear_{train,eval}.sh`.
 
 The reference is the paper and `src/model.py::get_gnn` of its code, github.com/calad0i/JEDI-linear,
 both read on 2026-09-30. In float it is one network for every number of constituents and every
@@ -1144,7 +1172,7 @@ that differs in `_target_`, `name` and the architecture keys, and `tests/test_co
 rest in step. The experiments keep the `16-mixed` precision of `trainer/gpu.yaml`, as DeepSets, MLP
 and JetFormer do. As a row of the grid that reads `data.features`
 (`nbr_feats: ${len:${data.features}}`), `jedi_linear` is in `MODELS` of
-`scripts/optuna/make_train_catalogues.py` and `tests/conftest.py` but in neither `EMBEDDED` nor
+`scripts/experiments/make_train_catalogues.py` and `tests/conftest.py` but in neither `EMBEDDED` nor
 `BASELINE_ONLY`, so its results land in `results/<label>/results_table_<regime>.csv` and
 `results_table.subdir` stays null. Until 2026-10-02 it ran the baseline alone and was the one row
 of `BASELINE_ONLY` outside `EMBEDDED`; the set now equals the embedded class.
@@ -1209,8 +1237,8 @@ row, `linformer`, is the single-head Linformer transformer of Laatu et al. (arXi
 trained in float on this repository's preparation. Unlike `jedi_linear`, it runs all seven regimes
 on the three feature sets, 21 studies per set and 63 in all, none of them launched yet
 (2026-10-01); Patrick took the decisions recorded below that day. The network, `LinformerNet`, and
-its attention, `LinformerAttention`, are in `src/algorithms/components/linformer.py`, and the
-subclass `Linformer`, which supplies `build_net` alone, is in `src/algorithms/linformer.py`. The
+its attention, `LinformerAttention`, are in `src/algorithms/linformer.py`, as is the subclass
+`Linformer`, which supplies `build_net` alone. The
 configs (`linformer.yaml`, `linformer_{16,50,150}.yaml`, `linformer_optuna.yaml` and
 `linformer_scl_optuna.yaml`) and the catalogues `runlinformer_{search,train,eval}.sh` sit where
 those of the other grid rows do, with a search catalogue under every feature-set directory. Each
@@ -1280,8 +1308,8 @@ embedding is a function of the first bias, so the mask, and not the zero input, 
 queries of padded slots are computed all the same; with BatchNorm on, they enter the batch
 statistics of the feed-forward sub-layer and nothing else. The readout pool is searched among
 `sum`, `max` and `sum_over_n`, the masked sum divided by the constant N, which is the reference's
-average pool restricted to the real constituents; all three come from `_masked_pool` of the
-DeepSets component. The sum and `sum_over_n` express the same functions, since the head's
+average pool restricted to the real constituents; all three come from `_masked_pool` of
+`components/pooling.py`. The sum and `sum_over_n` express the same functions, since the head's
 first dense layer absorbs 1/N, and differ only in their conditioning at initialisation; both stay
 in the search at Patrick's request. All three are cheap on an FPGA: an adder tree, a comparator
 tree and a constant scale. Last, BatchNorm is a switch, `batchnorm`, searched on or off as the
@@ -1303,7 +1331,7 @@ decay 1e-7 and ReduceLROnPlateau on `val/acc`. The experiments keep the `16-mixe
 `trainer/gpu.yaml` and leave `extras.matmul_precision` unset, as the DeepSets, MLP, JetFormer and
 `jedi_linear` experiments do. They train for 200 epochs on batches of 2048, with 5 folds, and the
 150 file sets `data.num_workers: 16` for the online transform. As a row of the grid that reads
-`data.features`, `linformer` is in `MODELS` of `scripts/optuna/make_train_catalogues.py` and
+`data.features`, `linformer` is in `MODELS` of `scripts/experiments/make_train_catalogues.py` and
 `tests/conftest.py` but in neither `EMBEDDED` nor `BASELINE_ONLY`, so its results land in
 `results/<label>/results_table_<regime>.csv` and `results_table.subdir` stays null.
 
@@ -1376,14 +1404,15 @@ jet-level inputs beside the pooled vector, and the control, `moments_only`, read
 the multiplicity alone, with no per-constituent network. All three read `[pt, etarel, phirel]`,
 the feature set of the scratch test, and are filed with the embedded rows: the baseline regime
 alone, results in `results/embedded/` and catalogues in the default layout alone. Our code is
-`JetMoments` beside the two networks in `src/algorithms/components/deepsets.py`, which reuses
-`_form_matrix`, `_sort_by_pt` and `_unit_lift` of the vector neurons, and the subclasses
-`DeepSetsMoments` and `JEDILinearMoments` of `_MomentsRow` in `src/algorithms/deepsets.py`. Around
-them sit
+`JetMoments` in `src/algorithms/components/moments.py`, which reuses
+`_form_matrix`, `_sort_by_pt` and `_unit_lift` of `components/geometry.py`, and the subclasses
+`DeepSetsMoments` and `JEDILinearMoments` of `_MomentsRow`, in `src/algorithms/deepsets.py` and
+`jedi_linear.py`. Around them sit
 `configs/algorithm/{deepsets_moments,jedi_linear_moments,moments_only}.yaml`, the nine experiment
 configs `configs/experiment/hls4ml/<row>_{16,50,150}.yaml`, the three search configs
 `configs/hparams_search/hls4ml/<row>_optuna.yaml`, the hand-written search catalogues
-`scripts/hls4ml/run<row>_search.sh` and the generated `scripts/hls4ml/run<row>_{train,eval}.sh`.
+`scripts/experiments/hls4ml/run<row>_search.sh` and the generated
+`scripts/experiments/hls4ml/run<row>_{train,eval}.sh`.
 
 The scratch test ran on olgpu on 2026-10-05, with the moments behind environment switches in a
 copy of the repository; its records are in
@@ -1546,8 +1575,8 @@ module of their own. Around it sit `src/data/hls4ml_jet_level_datamodule.py`,
 `configs/algorithm/jet_level_{all53,noeta52}.yaml`, the experiment configs
 `configs/experiment/hls4ml/jet_level_{all53,noeta52}_150.yaml`, the search configs
 `configs/hparams_search/hls4ml/jet_level_{all53,noeta52}_optuna.yaml`, the hand-written search
-catalogues `scripts/hls4ml/runjet_level_{all53,noeta52}_search.sh` and the generated
-`scripts/hls4ml/runjet_level_{all53,noeta52}_{train,eval}.sh`.
+catalogues `scripts/experiments/hls4ml/runjet_level_{all53,noeta52}_search.sh` and the generated
+`scripts/experiments/hls4ml/runjet_level_{all53,noeta52}_{train,eval}.sh`.
 
 The scratch run fitted an MLP and gradient-boosted trees on the record's own split, over a grid of
 eight MLP points (widths [64, 32, 32] or [256, 128, 64], dropout 0 or 0.1, learning rate 1e-3 or
@@ -1603,7 +1632,8 @@ trials of 50 epochs and its sampler (TPE, seed 1234, 20 start-up trials), which
 `tests/test_configs.py` keeps equal, with the study `<row>_nconst150_augmentation_none` in
 `logs/optuna/hls4ml/<row>.db`: two studies, none launched yet (2026-10-06). The space's widest
 point, [256, 128, 64], is the one the scratch run selected. In
-`scripts/optuna/make_train_catalogues.py` and `tests/conftest.py` the rows form `JET_LEVEL`, inside
+`scripts/experiments/make_train_catalogues.py` and `tests/conftest.py` the rows form `JET_LEVEL`,
+inside
 `BASELINE_ONLY` and outside `MODELS`, which `tests/test_algorithms.py` builds on constituent
 batches; the generator gives them the constituent count 150 alone, a header note of their own and
 catalogues in the default layout alone, one block each, "transferred from experiment config (no
@@ -1655,12 +1685,12 @@ ceiling once both are searched alike. The rows run scikit-learn's `HistGradientB
 through the networks' pipeline: `src/train.py` with the default callbacks, the Optuna sweeper,
 `submit_train.sh --folds 5`, `src/eval.py`, the generated catalogues and the results tables. The
 module is `src/algorithms/bdt.py::BoostedTreesClassifier` and the wrapper
-`src/algorithms/components/bdt.py::BoostedTrees`; around them sit
+`src/algorithms/bdt.py::BoostedTrees`; around them sit
 `configs/algorithm/jet_level_bdt_{all53,noeta52}.yaml`, the experiment configs
 `configs/experiment/hls4ml/jet_level_bdt_{all53,noeta52}_150.yaml`, the search configs
 `configs/hparams_search/hls4ml/jet_level_bdt_{all53,noeta52}_optuna.yaml`, the hand-written
-`scripts/hls4ml/runjet_level_bdt_{all53,noeta52}_search.sh` and the generated
-`scripts/hls4ml/runjet_level_bdt_{all53,noeta52}_{train,eval}.sh`.
+`scripts/experiments/hls4ml/runjet_level_bdt_{all53,noeta52}_search.sh` and the generated
+`scripts/experiments/hls4ml/runjet_level_bdt_{all53,noeta52}_{train,eval}.sh`.
 
 Boosting is mapped onto epochs. One estimator is kept for the whole run, with `warm_start=True` and
 `early_stopping=False`; before each fit its `max_iter` is raised by `trees_per_epoch`, 10 and never
@@ -1741,10 +1771,11 @@ literature verification behind the recipes and the figures (2026-10-08), with ve
 `~/Research/local/claude/scratchpad/jet_tagging_gdl/toptagging_2026-10-08/literature_toptagging.md`
 on the Mac. Around the existing modules sit `src/data/top_tagging_datamodule.py`, which holds
 the conversion and the datamodule, `src/algorithms/utils/schedules.py`,
-`scripts/data/prepare_top_tagging.py`, `configs/data/top_tagging.yaml`,
+`configs/data/top_tagging.yaml`,
 `configs/results_table/top_tagging.yaml`, the 18 experiment configs
-`configs/experiment/top_tagging/<row>_100.yaml`, the nine search configs
-`configs/hparams_search/top_tagging/<row>_optuna.yaml`, the catalogues under `scripts/top_tagging/`,
+`configs/experiment/top_tagging/<row>_100.yaml`, the 14 search configs
+`configs/hparams_search/top_tagging/<row>_optuna.yaml` and `<row>_scl_optuna.yaml`, the catalogues
+under `scripts/experiments/top_tagging/`,
 `scripts/analysis/top_tagging_summary.py` and `tests/test_top_tagging.py`.
 
 The training jets hold 49.05 constituents on average and 160 at most, so N = 100 truncates 6006 of
@@ -1823,7 +1854,7 @@ LorentzNet reference appends the two beams as particles and gives every node a o
 times |m| as its scalars (arXiv:2201.08187 §3.1 and §4.1; `top/collate.py` of its repository). The
 port reads the constituents alone, with ψ(m²) as the one scalar and a tanh gate in place of the
 reference's per-component clamp of the coordinate update at ±100 GeV (see
-`src/algorithms/components/lorentznet.py`), so it embeds the whole Lorentz group, which the
+`src/algorithms/lorentznet.py`), so it embeds the whole Lorentz group, which the
 reference's beam particles reduce to rotations about the beam. The
 L-GATr-slim and LLoCa references boost every jet to its rest frame and give each constituent seven
 ParT-style scalar features (`boost_jet` and `tagging_features` in their configs); the ports read the
@@ -1930,7 +1961,7 @@ at the three counts. At the defaults `vn_z` had 48 805, 60 773 and 95 973 parame
 Porting notes. The partition was set by the switch `symmetry`, not `group`, which
 `JetTaggingModule.__init__` owns for the SCL. A port restores `required_features` to the
 four-momentum, `vn_z` and `vn_so2` to `MODELS` and `EMBEDDED` in both
-`scripts/optuna/make_train_catalogues.py` and `tests/conftest.py`, and their display names to
+`scripts/experiments/make_train_catalogues.py` and `tests/conftest.py`, and their display names to
 `scripts/analysis/common.py`; the TF32 exclusion holds for them as for `vn`.
 
 ## nano-PELICAN

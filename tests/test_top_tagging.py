@@ -1,6 +1,8 @@
+import fcntl
 import json
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -174,6 +176,29 @@ def test_the_cache_is_built_once_and_refused_when_it_cannot_be_trusted(
     (folder / "meta.json").write_text(json.dumps(meta))
     with pytest.raises(ValueError, match="format"):
         _datamodule(top_tagging_cache).prepare_data()
+
+
+def test_a_preparation_waits_for_the_process_that_holds_the_lock(
+    top_tagging_cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The synthetic raw files pass the md5 check, so nothing is downloaded, and the
+    # cache at N = 4 is missing.
+    raw = top_tagging_cache / "raw"
+    md5s = {name: top_tagging._md5(raw / name) for name in SPLITS.values()}
+    monkeypatch.setattr(top_tagging, "RAW_FILES", md5s)
+    datamodule = _datamodule(top_tagging_cache, nconstituents=4)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with open(top_tagging_cache / ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            preparation = pool.submit(datamodule.prepare_data)
+            with pytest.raises(TimeoutError):
+                preparation.result(timeout=1.0)
+            assert not any(top_tagging_cache.glob("nconst_4*"))
+        preparation.result(timeout=60.0)
+
+    assert [path.name for path in top_tagging_cache.glob("nconst_4*")] == ["nconst_4"]
+    assert (top_tagging_cache / "nconst_4" / "meta.json").is_file()
 
 
 def test_the_lorentznet_schedule_warms_up_restarts_and_decays() -> None:

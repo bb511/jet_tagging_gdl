@@ -1,38 +1,24 @@
 # @package _global_
+# The L-GATr-slim search with the spurion tokens, one TPE study per constituent count.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study per nconstituents for L-GATr-slim with the spurion tokens, three in all, on the
-# main run's val/acc_best, in the baseline regime alone like every embedded architecture. The
-# space is shared with lgatr_slim_lorentz_optuna, so the two rows are searched at equal effort.
-# Paired on the CLI with callbacks=search data.n_folds=1. units and lorentz_eta_max are never
-# searched: the first is the references' momentum scale, the second defines the invariance probe.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/lgatr_slim.db?timeout=600
-    # The regime picks the study, lgatr_slim_nconst<N>_augmentation_none, never the CLI.
     study_name: lgatr_slim_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # The published slim tagger (12 blocks, 32/96 channels, 8 heads, mlp_ratio 4) is the upper
-    # corner. The package floors the per-head widths, so every combination builds. lr and
-    # weight_decay follow JetFormer's ranges, the transformer of this study.
+    # The published tagger (12 blocks, 32/96 channels, 8 heads, mlp_ratio 4) is the upper corner.
     params:
       algorithm.num_blocks: choice(2, 4, 6, 8, 12)
       algorithm.hidden_v_channels: choice(8, 16, 32)
       algorithm.hidden_s_channels: choice(32, 64, 96)
+      # The package floors the per-head widths, so every combination builds.
       algorithm.num_heads: choice(2, 4, 8)
       algorithm.mlp_ratio: choice(2, 4)
       algorithm.dropout: choice(0.0, 0.1, 0.2)
+      # lr and weight_decay take JetFormer's ranges.
       algorithm.optimizer.lr: tag(log, interval(1e-4, 5e-3))
       algorithm.optimizer.weight_decay: choice(0.0, 1e-4, 1e-3, 1e-2, 5e-2)

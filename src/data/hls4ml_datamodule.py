@@ -257,21 +257,22 @@ class HLS4MLDataModule(LightningDataModule):
     def _setup_fit(self, indices: list[int] | None) -> None:
         """Build the training and validation datasets for the current fold."""
         x_train, y_train, x_val, y_val = self._fit_arrays()
-        transform = self._train_transform(indices)
-        shuffler = torch.Generator()
-        shuffler.manual_seed(torch.initial_seed())
-
-        # Keep either the transformed set of features or the whole set of features.
-        x_train = _reduce(
-            x_train, indices, self._keeps_full_width or transform is not None
-        )
         x_val = _reduce(x_val, indices, self._keeps_full_width)
-
-        self.data_train = self._dataset(
-            x_train, y_train, shuffler=shuffler, transform=transform
-        )
         self.data_val = self._dataset(x_val, y_val)
-        log.info(f"Fit: x_train {tuple(x_train.shape)}, x_val {tuple(x_val.shape)}")
+        self.data_train = self._train_dataset(x_train, y_train, indices)
+        log.info(
+            f"Fit: x_train {tuple(self.data_train.X.shape)}, x_val {tuple(x_val.shape)}"
+        )
+
+    def _train_dataset(
+        self, x: torch.Tensor, y: torch.Tensor, indices: list[int] | None
+    ) -> HLS4MLDataset:
+        """The shuffled training dataset, transformed online if the run augments."""
+        transform = self._train_transform(indices)
+        shuffler = torch.Generator().manual_seed(torch.initial_seed())
+        # Keep either the transformed set of features or the whole set of features.
+        x = _reduce(x, indices, self._keeps_full_width or transform is not None)
+        return self._dataset(x, y, shuffler=shuffler, transform=transform)
 
     def _setup_test(self) -> None:
         """Build the test dataset at the record's full width, as
@@ -356,12 +357,11 @@ class HLS4MLDataModule(LightningDataModule):
 # --------------
 def compose_record_config(root: str, overrides: list) -> DictConfig:
     """Compose the configuration tree that is shipped with the record."""
+    config_dir = str(Path(root) / "configs")
     outer = GlobalHydra.instance().hydra
     GlobalHydra.instance().clear()
     try:
-        with initialize_config_dir(
-            config_dir=str(Path(root) / "configs"), version_base=None
-        ):
+        with initialize_config_dir(config_dir=config_dir, version_base=None):
             return compose("config", overrides=overrides)
     finally:
         GlobalHydra.instance().clear()

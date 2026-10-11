@@ -1,10 +1,5 @@
 # @package _global_
-# PELICAN without the beams at 150 constituents. Unlike every other experiment config, this one
-# carries tuned values: the row is not searched (decided 2026-09-27, to spare the H100 week) and
-# runs at the beams-on optimum instead, so its catalogue block carries no overrides and says
-# "transferred from experiment config". The beams-on twin is pelican_150.yaml, whose measured
-# memory and step times carry over (the pair tensor is 150 x 150 here rather than 152 x 152).
-# Symmetry-embedded, so it runs the baseline regime only.
+# PELICAN without the beams at 150 constituents, unsearched: it runs at the beams-on optimum.
 defaults:
   - override /algorithm: pelican_lorentz
   - override /trainer: gpu
@@ -13,29 +8,25 @@ tags: ["hls4ml", "pelican_lorentz", "nconst-150"]
 
 experiment_name: hls4ml_pelican_lorentz_nconst150
 
-# A sixteenth of the usual batch: the pair tensor costs B * N^2 per channel, see pelican_150.yaml.
+# A sixteenth of the usual batch: memory follows the squared slot count, 150 here.
 data:
   nconstituents: 150
   batch_size: 128
 
-# fp32, not the trainer's 16-mixed: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6
-# GeV^2, above the fp16 maximum of 65 504, before the input embedding compresses them.
+# fp32: the de-normalised pair invariants p_i.p_j reach 1e5 to 1e6 GeV^2, above the fp16 maximum.
 trainer:
   precision: 32
 
-# TF32 matmuls on Ampere and later, as in pelican_150.yaml; a no-op on a V100.
+# TF32 on Ampere and later, a no-op on a V100; it keeps the fp32 range that forced precision 32.
 extras:
   matmul_precision: high
 
 algorithm:
-  # Mean real multiplicity of the training jets at this truncation (49.44, measured
-  # 2026-09-13 on the record cache); no beams to add.
+  # Mean real multiplicity 49.44 of the training jets (record cache, 2026-09-13); no beams to add.
   nbar: 49.4
   # Speed knob, measured in ARCHITECTURES.md ("PELICAN"): two chunks on a dedicated card.
   n_chunks: 2
-  # Transferred from the best trial of pelican_nconst150_augmentation_none (trial 131 of 340,
-  # val/acc_best 0.8447, logs/optuna/hls4ml/pelican.db): the study's top eight trials all sit at
-  # this corner of the space, so a search of the beams-off twin would land here too.
+  # Best trial of pelican_nconst150_augmentation_none: 131 of 340, val/acc_best 0.8447.
   n_blocks: 5
   n_hidden: 35
   n_message: 35
@@ -44,6 +35,5 @@ algorithm:
     lr: 4.672189427263489e-4
     weight_decay: 1.0e-5
 
-# Judged on its architecture rather than its inputs, so its rows skip the <features>/ directory.
 results_table:
   subdir: embedded

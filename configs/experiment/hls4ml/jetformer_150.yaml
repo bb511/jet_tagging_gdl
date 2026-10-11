@@ -10,7 +10,6 @@ experiment_name: hls4ml_jetformer_nconst150
 
 data:
   nconstituents: 150
-  # The online transform of a 2048 x 150 batch takes 16 single-threaded workers to keep up with
-  # the step (4 leave the GPU waiting 20 ms a batch); a job pinned with taskset needs as many CPUs.
+  # The online transform of 2048 x 150 jets needs 16 workers; 4 leave the GPU idle 20 ms a batch.
   num_workers: 16
-# No algorithm block: its defaults are the published configuration, until the searches replace them.
+# Algorithm defaults: the published configuration.

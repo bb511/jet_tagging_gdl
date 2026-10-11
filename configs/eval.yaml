@@ -23,15 +23,10 @@ experiment_name: jet_tagging_gdl_dev
 
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
-# Single-checkpoint mode, ignored once checkpoint_manifest_path is set.
-ckpt_path: null
+ckpt_path: null # ignored once checkpoint_manifest_path is set
 
-# Manifest mode: the checkpoint_manifest.json train.py left in its run directory, every run of it
-# tested in turn. A directory instead merges the main run's manifest there with the fold_<i>/ ones
-# of folds trained as separate processes (fold=<i>).
 checkpoint_manifest_path: null
 
 seed: 12345
 
-# Logged so a training and its later evaluation are distinguishable in MLflow.
 run_stage: "eval"

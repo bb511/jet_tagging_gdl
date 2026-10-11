@@ -1,5 +1,4 @@
-# https://mlflow.org
-# Run `mlflow ui` inside logs/mlflow/ to browse the runs.
+# File store under logs/mlflow/, browsed by running `mlflow ui` there.
 
 mlflow:
   _target_: lightning.pytorch.loggers.mlflow.MLFlowLogger

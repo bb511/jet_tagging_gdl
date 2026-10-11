@@ -1,7 +1,5 @@
 # @package _global_
-# The vector neurons trained quantisation-aware with HGQ2 at 16 constituents, in the architecture of
-# the float vn whose main run algorithm.init_from names; one constant beta per run, and the last
-# epoch is the model. Symmetry-embedded, so it runs the baseline regime only.
+# Vector neurons quantised with HGQ2 at 16 constituents, fine-tuned from algorithm.init_from.
 defaults:
   - override /algorithm: vn_hgq
   - override /callbacks: quantised
@@ -19,8 +17,7 @@ data:
   num_workers: 0
   pin_memory: false
 
-# The study's best at N = 16 with one block in place of two, which comes within 0.1 points of the
-# two-block best at about half the depth and cost; the paper shows the one-block scan alone.
+# The N = 16 study's best with one block in place of two: within 0.1 points at about half the cost.
 algorithm:
   num_blocks: 1
   vector_channels: 16
@@ -31,14 +28,11 @@ algorithm:
   head_layers: [64, 32]
   dropout: 0.0
 
-# fp32: 16-mixed would pass the mock optimiser's step through a gradient scaler, which finds no
-# gradient to check. No clipping, which Lightning refuses under manual optimisation; the Keras
-# optimiser clips instead (algorithm.optimizer.global_clipnorm).
+# fp32: 16-mixed would put a gradient scaler on the mock step; Keras clips (global_clipnorm).
 trainer:
   max_epochs: 100
   precision: 32
   gradient_clip_val: null
 
-# Judged as a quantised network, apart from the float rows of embedded/.
 results_table:
   subdir: quantised

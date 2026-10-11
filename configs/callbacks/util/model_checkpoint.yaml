@@ -1,5 +1,3 @@
-# https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html
-
 _target_: lightning.pytorch.callbacks.ModelCheckpoint
 dirpath: ${paths.output_dir}/checkpoints
 filename: "epoch_{epoch:03d}"

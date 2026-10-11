@@ -1,32 +1,16 @@
 # @package _global_
+# The DeepSets search, one TPE study per regime.
 
 defaults:
-  - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: tpe
-  - override /logger: none # a trial leaves only its study; MLflow is for the trainings
+  - /hparams_search/optuna
 
-# One TPE study per (nconstituents, method, augmentation_scheme) regime for DeepSets, on the main
-# run's val/acc_best. Every regime shares this space and its 200 trials, so augmentation and SCL are
-# searched at equal effort. Paired on the CLI with callbacks=search data.n_folds=1.
 hydra:
-  mode: MULTIRUN
   sweeper:
-    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     storage: sqlite:///logs/optuna/hls4ml/deepsets.db?timeout=600
-    # The regime alone picks the study, e.g. deepsets_nconst16_symm_loss_so2; never a CLI argument.
     study_name: deepsets_nconst${data.nconstituents}_${data.method}_${data.augmentation_scheme}
-    n_jobs: 1
-    direction: maximize
     n_trials: 200
-    sampler:
-      seed: 1234
-      n_startup_trials: 20
 
-    # phi (per-constituent) and rho (set-level) widths span the compact nconst=8 pair to beyond the
-    # tuned nconst=16 one. The activation is the network's ReLU and the pooling one of the three an
-    # FPGA computes without a lookup table or a per-jet division: sum keeps a multiplicity signal,
-    # max pools the hardest constituent, and sum_over_n is the sum divided by the constant N. Which
-    # survives a rotation best is not known in advance.
+    # phi and rho widths span the compact nconst=8 pair to beyond the tuned nconst=16 one.
     params:
       algorithm.phi_layers: choice([16,16], [32,32], [32,32,32], [64,32,32], [64,64,32], [64,64,64], [128,64,32])
       algorithm.rho_layers: choice([16], [32], [32,16], [32,32,16], [64,32])

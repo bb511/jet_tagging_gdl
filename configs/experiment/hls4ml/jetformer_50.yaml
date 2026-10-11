@@ -10,4 +10,4 @@ experiment_name: hls4ml_jetformer_nconst50
 
 data:
   nconstituents: 50
-# No algorithm block: its defaults are the published configuration, until the searches replace them.
+# Algorithm defaults: the published configuration.
