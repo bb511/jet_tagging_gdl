@@ -2,9 +2,12 @@
 # ========================================================================
 # JEDI_LINEAR_HGQ TRAINING COMMANDS
 # ========================================================================
-# Four train runs at 16 constituents of JEDI-linear as published (Table II of
-# arXiv:2508.15468), its network, quantisers and recipe ported to HGQ2 and
-# trained from scratch, one variant per block and one block per GPU of olgpu.
+# Eight train runs of JEDI-linear as published (Table II of arXiv:2508.15468),
+# its network, quantisers and recipe ported to HGQ2 and trained from scratch:
+# the four variants below at 16 constituents (blocks 1 to 4), then the first
+# two, the rows of the comparison with the vector neurons, at 50 (blocks 5 and
+# 6) and at 150 (blocks 7 and 8), where the kept constituents are the whole jet
+# and the two axes coincide.
 # Hand-written: jedi_linear_hgq has no study, so
 # scripts/experiments/make_train_catalogues.py neither writes nor regenerates
 # this file.
@@ -26,8 +29,9 @@
 # 4. kept_trained: the kept axis with standardised rows and trained words.
 #    Variant 1 minus 4 is the cost of the kept axis, 4 minus 2 that of the
 #    fixed words.
-# The four share the label jedi_linear_hgq_nconst16_baseline: select them with
-# --only <index>, not by name.
+# The blocks of one constituent count share the label
+# jedi_linear_hgq_nconst<N>_baseline: select them with --only <index>, not by
+# name.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/experiments/submit_train.sh, which queues them on a GPU or slurm.
@@ -113,3 +117,89 @@
 #     trainer=gpu \
 #     trainer.devices=[3] \
 #     hydra.run.dir=logs/train/hls4ml/jedi_linear_hgq/nconst16/baseline_kept_trained_allepochs
+
+# ========================================================================
+# jedi_linear_hgq  nconst=50  (the two variants of the comparison with the vector neurons)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# jedi_linear_hgq  nconst=50  baseline  (method=augmentation, group=none)  axis_trained
+# the reproduction: etarel and phirel from the full jet's axis, standardised,
+# the words trained by HGQ2, as published
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_hgq_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.inputs=standardised \
+#     data.features='[pt,etarel,phirel]' \
+#     data.full_axis=true \
+#     +callbacks.model_checkpoint.every_n_epochs=1 \
+#     callbacks.model_checkpoint.save_top_k=-1 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear_hgq/nconst50/baseline_axis_trained_allepochs
+
+# ------------------------------------------------------------------------
+# jedi_linear_hgq  nconst=50  baseline  (method=augmentation, group=none)  kept_words
+# etarel and phirel from the kept constituents' axis, the trigger's fixed
+# words: the like-for-like row against the vector-neuron designs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_hgq_50 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.inputs=words \
+#     data.features='[pt,etarel,phirel]' \
+#     +callbacks.model_checkpoint.every_n_epochs=1 \
+#     callbacks.model_checkpoint.save_top_k=-1 \
+#     trainer=gpu \
+#     trainer.devices=[1] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear_hgq/nconst50/baseline_kept_words_allepochs
+
+# ========================================================================
+# jedi_linear_hgq  nconst=150  (the two variants of the comparison with the vector neurons)
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# jedi_linear_hgq  nconst=150  baseline  (method=augmentation, group=none)  axis_trained
+# the reproduction: etarel and phirel from the full jet's axis, standardised,
+# the words trained by HGQ2, as published
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_hgq_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.inputs=standardised \
+#     data.features='[pt,etarel,phirel]' \
+#     data.full_axis=true \
+#     +callbacks.model_checkpoint.every_n_epochs=1 \
+#     callbacks.model_checkpoint.save_top_k=-1 \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear_hgq/nconst150/baseline_axis_trained_allepochs
+
+# ------------------------------------------------------------------------
+# jedi_linear_hgq  nconst=150  baseline  (method=augmentation, group=none)  kept_words
+# etarel and phirel from the kept constituents' axis, the trigger's fixed
+# words: the like-for-like row against the vector-neuron designs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/train.py \
+#     experiment=hls4ml/jedi_linear_hgq_150 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     fold=null \
+#     algorithm.inputs=words \
+#     data.features='[pt,etarel,phirel]' \
+#     +callbacks.model_checkpoint.every_n_epochs=1 \
+#     callbacks.model_checkpoint.save_top_k=-1 \
+#     trainer=gpu \
+#     trainer.devices=[1] \
+#     hydra.run.dir=logs/train/hls4ml/jedi_linear_hgq/nconst150/baseline_kept_words_allepochs
