@@ -466,8 +466,8 @@ TOP_TAGGING_RECIPES = tuple(
     "lorentznet pelican pelican_lorentz lgatr_slim lgatr_slim_lorentz lloca_lorentz "
     "lloca_z lloca_so2 lloca_so3".split()
 )
-# Every row of the replica, at N = 100 in the baseline regime alone: the embedded rows,
-# the five grid rows on [pt, etarel, phirel] and the moment rows.
+# Every row of the replica, at N = 100: the embedded rows, the five grid rows, which
+# alone run the seven regimes and the three feature sets, and the moment rows.
 TOP_TAGGING = (
     *TOP_TAGGING_RECIPES,
     "vn",

@@ -656,9 +656,9 @@ saturates, but never fewer than `WEIGHT_I_MIN` (-12), which also bounds them in 
 with i traced by HGQ2's `trace_minmax` on the first `calibration_jets` (100 000) training jets.
 The floor was added on 2026-10-10: a copied weight near zero was seeded at i = -23, hence 31
 fraction bits, and alkaid 0.8.1 emulated such a layer wrongly (20 458 of the 20 480 logits of a
-one-epoch `jedi_linear_hgq` export differed); with i floored at -16, -12 or -8 the same layer was
-exact. Every export before the floor whose emulation was checked was exact, since training prunes
-those weights. It traces twice: the
+one-epoch export of the first `jedi_linear_hgq` port differed); with i floored at -16, -12 or -8
+the same layer was exact. Every export before the floor whose emulation was checked was exact,
+since training prunes those weights. It traces twice: the
 first trace reads each lane through upstream lanes still at HGQ2's default of six fraction bits,
 and a lane whose range the second trace widens would otherwise wrap. The defaults, 14 data and 8
 weight bits, come from a table of seeded widths on the two-block finals at N = 16 (dry run,
@@ -666,6 +666,21 @@ weight bits, come from a table of seeded widths on the two-block finals at N = 1
 bits, the plan's first choice, 0.87 points at 2.99 M, and 8 data bits collapsed the network. The
 largest traced integer width was 10 bits. The float logits reached 15.1 in magnitude, so the output
 word, kif (1, 6, 8) with saturation, keeps two integer bits spare.
+
+Under `quantisation.trained_words` (false by default, the port of every earlier checkpoint) HGQ2
+trains the p_T, angle and offset words from the trigger's widths. Each is a WRAP kif quantiser
+(`Quantisation.word`) with one width per slot, the two angles of a slot sharing theirs and the two
+offset words one, so that a rotation of the (η, φ) plane acts on words of equal precision; a
+standardisation per feature, as in the published JEDI-linear, would shear the plane, so the words
+stay in GeV and radians. Their fraction bits, under the published L1 weight of 1e-8, lie in
+[0, 12] (`WORD_F_RANGE`), so that a real p_T is at least 2⁻¹² and the keep flag, then
+min(p_T · 2¹², 1), stays exact; their integer bits are traced as a datalane's.
+`seed_datalane_bits` gives the words the datalanes' width, so `seed_word_bits` then resets their
+fraction bits to the trigger's and traces afresh. In the trained-word D2 of block 42, near epoch
+300, HGQ2 had made the angle words finer, 10 to 12 fraction bits where the trigger has 8, and left
+the leader's slot, whose relative angles are zero, at 0. `tests/test_quantised.py` checks the
+seeded widths and their shapes, and that a trained-word export emulates bit for bit and
+co-simulates.
 
 At test time `on_test_start` traces the integer bits of every WRAP quantiser afresh on the record's
 whole training split, the range the hardware is built for, and stores the EBOPs of the traced port
@@ -735,6 +750,24 @@ nanoseconds: two adders weigh about 2.7 there, at a clock of 2 ns with no uncert
 script is alkaid's but for the `-directive AreaOptimized_High` of `synth_design`, which those
 projects drop.
 
+Blocks 40 to 43 repeat blocks 37 and 38 with a checkpoint every epoch and the selection of the
+JEDI-linear reproduction, the front of validation accuracy against EBOPs (next section): with the
+fixed words in blocks 40 and 41 (`baseline_<tag>_foldtrn_jedirecipe_everyepoch`) and with trained
+words in blocks 42 and 43 (`baseline_<tag>_foldtrn_trainedwords_jedirecipe_everyepoch`). All four
+collapsed between about epoch 300 and epoch 1930, their training accuracy falling to 0.20, and
+were stopped. The training accuracy first fell below 0.5 at epoch 1101 for D2, at 1136 for A2,
+which recovered and kept front points to epoch 1928 at about 101 k EBOPs, at 304 for D2 with
+trained words and at 1303 for A2 with trained words. The sudden collapses came four or five
+epochs after a restart of the learning rate at 3e-3 (both trained-word runs, at 305 and 1304) or
+30 to 36 epochs into a cycle, at a high rate (A2 at 1136 and 1930); D2 with fixed words declined
+gradually. The trained-word D2 failed downstream of intact inputs: across its collapse its p_T
+words and widths did not change, nearly every real constituent was kept, and class 0 won every jet
+on near-constant logits. Whether trained words make a collapse likelier cannot be told from one
+run each. The picks of A2 with fixed words (epoch 1900, 100 k EBOPs, 71.96 %; 73.8 ns and 53.0 k
+LUTs at 5 ns, 79.7 ns and 73.4 k at 2 ns) and of D2 with trained words (epoch 293, 249 k, 71.43 %;
+89.4 ns and 100.6 k, 85.5 ns and 118.4 k) stand outside the head-to-head with JEDI-linear, whose
+table in the next section holds the other two.
+
 `scripts/synthesis/synthesise_vn.py` takes the `outputs/<label>_hgq/` directory and the probe's
 `.npz` of one evaluation. It imports nothing from `src` and runs wherever
 `scripts/synthesis/requirements.txt` is installed (alkaid 0.8.1, hgq2 0.2.0, Keras 3.15.1 and JAX
@@ -743,7 +776,11 @@ the export's float type, refusing any other backend and applying the same floor 
 Keras's prediction of the stored words against `logits_clean`. alkaid then traces the model into
 combinational logic, as `alkaid convert` does, and emulates it bit for bit; both predictions are
 written to `keras_outputs.npz` and `alkaid_outputs.npz` in the probe's layout, and the emulation
-must match `logits_clean` exactly (`--max-mismatch` 0). alkaid's `RTLModel` writes the Verilog
+must match `logits_clean` exactly (`--max-mismatch` 0). The trace skips alkaid's pass
+`canonicalize_msb_wraps` (`_disable_msb_wrap_pass`), which in alkaid 0.8.1 zeroes the shift of a
+one-bit wrap whose output step equals its source's MSB weight, comparing a step measured after the
+shift with an MSB measured before it, so that the op reads another bit; the emulation and the RTL
+share the error, which only the check against Keras sees. alkaid's `RTLModel` writes the Verilog
 project `prj/` for the VU13P at 5 ns, with a latency cutoff of 5 ns per stage. Verilator
 co-simulates 1000 jets, which must match the emulation exactly, and Vivado implements the project
 out of context through alkaid's `build_vivado_prj.tcl`, with its reports under
@@ -840,261 +877,187 @@ and needs `CXX=x86_64-conda-linux-gnu-c++` there.
 
 ## JEDI-linear trained quantisation-aware (`jedi_linear_hgq`)
 
-Added on 2026-10-09 in one row, `jedi_linear_hgq`, on a plan agreed with Patrick that evening
-(`~/.claude/plans/in-this-chat-let-s-refactored-mccarthy.md` on the Mac). The five jet moments of
-"Jet moments" reproduce the vector neurons' gain over DeepSets and JEDI-linear: in the finals,
-`jedi_linear_moments` reached 72.04, 81.88 and 82.42 % test accuracy at N = 16, 50 and 150 (over
-the folds), against 71.99, 81.97 and 82.40 % for `vn`. The row measures what the moments cost on
-the FPGA. It quantises `jedi_linear_moments` with HGQ2 and compiles it with alkaid through the flow
-of `vn_hgq` (the section above), and under `moments: none` it quantises the same network without
-the moments, the control, through the same flow. The difference between the two designs in
-accuracy, LUTs and latency is the measured cost of the moments. Beside them stand the published
-JEDI-linear (arXiv:2508.15468) at N = 16, 73.6 % at 75 ns and 136 k LUTs (its Table I) and 71.9 %
-at 54 ns and 44 k LUTs (Table II), both on the untruncated jet's axis, and the folded vn design D2
-of block 19 of `runvn_hgq_train.sh`, implemented at 85 ns. Our code is the port
-and the module `JEDILinearHGQ` in `src/algorithms/jedi_linear_hgq.py` and the weight copy
-`src/algorithms/utils/jedi_linear_port.py`. Around them sit
-`configs/algorithm/jedi_linear_hgq.yaml`,
-which `tests/test_configs.py` keeps equal to `jedi_linear_moments.yaml` and to `vn_hgq.yaml` up to
-their own keys, the experiment configs `configs/experiment/hls4ml/jedi_linear_hgq_{16,50,150}.yaml`
-and the hand-written catalogues `scripts/experiments/hls4ml/runjedi_linear_hgq_{train,eval}.sh`.
-The row joins
-`vn_hgq` in `QUANTISED`, so it has no study and no generated catalogue.
+Rebuilt on 2026-10-11 and 2026-10-12 on a plan agreed with Patrick on 2026-10-11
+(`~/.claude/plans/jedi-linear-table2-reproduction.md` on the Mac). The row reproduces the
+published JEDI-linear (arXiv:2508.15468) as the FPGA comparator of the quantised vector neurons;
+the float `jedi_linear` stays a row of the grid. The target is its Table II design at N = 16 on
+three features, sorted by p_T with widths per slot: 71.95 % at 57 237 EBOPs, 19 stages, 53.6 ns and
+43.8 k LUTs, the latency being the stage count times the achieved period, 2.82 ns, since the 2 ns
+constraint was missed. Network, quantisers and recipe are ported to HGQ2 and trained from scratch;
+the published code is never run, so every figure below comes from this port, alkaid 0.8.1 and
+Vivado 2025.2. The row's first design, a port of `jedi_linear_moments` fine-tuned from float runs in
+twenty catalogue blocks, is in git at 3813d4cd and its rows in `results/quantised/`. The code is
+`JEDILinearHGQ` in `src/algorithms/jedi_linear_hgq.py`, with
+`configs/algorithm/jedi_linear_hgq.yaml` (equal to `jedi_linear.yaml` up to the keys of the port
+and its training, which `tests/test_configs.py` checks), the experiments
+`configs/experiment/hls4ml/jedi_linear_hgq_{16,50,150}.yaml` and the hand-written catalogues
+`scripts/experiments/hls4ml/runjedi_linear_hgq_{train,eval}.sh`; the row is in `QUANTISED`, beside
+`vn_hgq`.
 
-The two rows share the Keras machinery of `vn_hgq`, which was moved without a change of behaviour
-into two modules. `src/algorithms/components/hgq_port.py` holds what does not depend on the
-network: the selection of the JAX backend and the float64 floor and ceil patch, `Quantisation`,
+The two rows share the Keras machinery, moved out of `vn_hgq` on 2026-10-10 without a change of
+behaviour (the `vn_hgq` layout digests were unchanged, and three rebuilt exports, D2 and A2 among
+them, predicted their `logits_clean` bit for bit). `components/hgq_port.py` holds what does not
+depend on the network: the JAX backend and the float64 floor and ceil patch, `Quantisation`,
 `KerasNetwork`, the bit seeding, the calibration, β, the EBOPs and the export.
-`src/algorithms/keras_base.py::KerasQuantisedModule`, a `DenormalisedModule`, holds the module:
-the refusal of the SCL, the copy and the seeding in `setup("fit")`, the Keras step and the mock
-optimiser, β per epoch, the checkpoint hooks, the trace at test time and the export, whose
-`export.json` now names its port (`port`, the Keras model's name), and the stages every port
-builds from: the builders of the quantised layers, the word quantisers, `_p_keep` and `_lifts`
-(split out of the vn's lift, whose layers keep their names). A row supplies `_build_port`, which
-`_keras_net` calls, the float network on which its FLOPs are priced (`_float_twin`), the copy
-of a float run (`_copy_float_network`), its `_prepare_inputs` and the size of a batch of HGQ2's
-trace (`_calibration_batch`). The base class defines no `__init__`, since `save_hyperparameters` reads
-the row's own frame, and no `required_features`. `VectorNeuronsHGQ` subclasses
-`KerasQuantisedModule` and `VectorNeurons`, in that order, and keeps its `build_net`, `_float_twin`,
-`_copy_float_network` and `_prepare_inputs`; `src/algorithms/vector_neurons_hgq.py` keeps the vn's
-stages and `_build_port`, its lift rebuilt from `_p_keep`, the count and `_lifts` in the original
-order of operations, because the order and names of the layers fix the order of the Keras weights
-in the checkpoints. Three checks guard the move: the `vn_hgq` layout digests of
-`tests/test_configs.py`, unchanged; the vn tests of `tests/test_quantised.py`, unedited but for
-the export's `port`; and a rebuild of an existing `vn_hgq` export on olgpu, which must predict its
-`logits_clean` bit for bit (done on 2026-10-10 for three exports, a gated and streamed design with
-unfolded normalisations, D2 and A2: 260 000 test jets each, no differing entry, the weights in the
-same order).
+`keras_base.py::KerasQuantisedModule`, a `DenormalisedModule`, holds the module: the refusal of the
+SCL, `_initialise` in `setup("fit")` (by default the copy of `init_from` and the seeding), the
+Keras step and the mock optimiser, β and the log line of each epoch, the checkpoint hooks, the
+trace at test time and the export, whose `export.json` names its port (`port`); and the stages that
+ports share, the builders of the quantised layers, the word quantisers and their clamp, `_p_keep`
+and `_lifts`. A row supplies `_build_port`, `_float_twin` (the float network that prices its
+FLOPs), `_prepare_inputs` and, to start from a float run, `_copy_float_network`, and may bound the
+batch of HGQ2's trace (`_calibration_batch`). The base class defines no `__init__`, since
+`save_hyperparameters` reads the row's own frame, and no `required_features`. The vn port rebuilds
+its lift from `_p_keep`, the count and `_lifts` in the original order of operations, because the
+order and names of the layers fix the order of the Keras weights in its checkpoints.
 
-`src/algorithms/jedi_linear_hgq.py::_build_port` builds the network of
-`JEDILinearNet.forward` and the moments of `JetMoments` as a Keras model named `jedi_linear_hgq`,
-inside `LayerConfigScope(beta0=0.0, enable_ebops=True)`. It takes the float network's N, `hidden`,
-`head_layers`, `aggregation` and `moments`, the units of p (a power of two), the classes and the
-quantisation. The rows enter as [p_T in GeV, Δη, Δφ], sorted by decreasing p_T and zero on a padded
-row. In order, with H = `hidden`:
+`_build_port` wires `get_gnn` of the published code (github.com/calad0i/JEDI-linear at 48032802,
+`configs/sweep-n16-f3.yaml`) layer for layer, each layer a `QEinsumDenseBatchnorm`, a dense layer
+with its batch normalisation folded in: `embed`, `local` and `shared` of width 64 on each slot;
+`context` on `pool0`, a `QSum` scaled by 2^−round(log₂ N), added to `local` by `context_add`;
+`pool1`, a `QSum` scaled by 1/16; and the head 64-32-16 with ReLU and `head_last`, which has no
+activation, no output quantiser and no softmax. Nothing masks a padded row. The quantiser scopes
+are those of their `get_model` and `get_gnn`: kbi weights and biases from 7 bits and no integer
+bit, SAT_SYM; kif datalanes from 7 fraction bits, WRAP, their integer bits traced within [0, 12];
+an L1 weight of 1e-8 on every bit count, β₀ = 0 and HGQ2's rounding to nearest. Datalane widths are
+per slot and feature (`per_slot: true`, Table II) or shared by the slots (`false`, their `uq1`).
+The one deviation is the floor `WEIGHT_I_MIN` (−12) on the integer bits of the weights and biases
+(see `vn_hgq`): their untrained `get_gnn`, built with their `src/model.py`, differed from the port
+in those 16 constraints alone and, under `words`, in the word layers. `_initialise` copies and
+seeds nothing, so HGQ2 traces the integer bits in training. The FLOPs are priced on `JEDILinearNet`
+with sum pooling and no moments, and a trace batch holds max(1024, 16 384 · 16 // N) jets, since the
+trace keeps (jets, N, 64) intermediates in float64.
 
-| stage          | layers                                                                         | shape                |
-| -------------- | ------------------------------------------------------------------------------ | -------------------- |
-| words          | `pt_word`, `angle_word`: fixed kif (0, 12, 2) and (1, 1, 8), WRAP              | (B, N), (B, N, 2)    |
-| p, keep        | p = p_T / 16, a shift; keep = min(4 p_T, 1)                                    | (B, N), (B, N, 1)    |
-| embedding      | `embed`: `QDense(H)` and ReLU on (p, Δη, Δφ); `keep0`: `QMultiply` by keep     | (B, N, H)            |
-| first pool     | `pool0`: `QGlobalMaxPooling1D(keepdims=True)` or `QSum(axes=1, keepdims=True)` | (B, 1, H)            |
-| context        | `context` on the pool, `local` on the masked h, each `QDense(H)` and ReLU      | (B, 1, H), (B, N, H) |
-| sum            | `context_add`: `QAdd`, broadcast over the slots                                | (B, N, H)            |
-| shared         | `shared`: `QDense(H)` and ReLU; `keep1`: `QMultiply` by keep                   | (B, N, H)            |
-| second pool    | `pool1`: `QGlobalMaxPooling1D()` or `QSum(axes=1)`                             | (B, H)               |
-| lifts          | `lift_r2`, `lift_u`: r² = Δη² + Δφ², tail = (Δη, Δφ, r²), u = (p, p tail)      | (B, N, 3), (B, N, 4) |
-| moments, cut c | `moments{c}_u`: `QSum` of u, U; `moments{c}_m`: `QEinsum` of u and tail, C     | (B, 4), (B, 4, 3)    |
-|                | `moments{c}_pair`, `_mgu`, `_chain`, `_pair4`, `_gm2`, `_triangle`: `QEinsum`  | (B,) per moment      |
-| head           | `head{j}`: `QDense` and ReLU on the pooled vector and the moments              | (B, w_j)             |
-| logits         | `head_last`: `QDense`, output fixed kif (1, 6, 8), SAT                         | (B, 5)               |
+The switch `inputs` sets what the port reads from the rows, which `_prepare_inputs` de-normalises
+to GeV and radians and sorts by p_T. Under `standardised`, the default and the published input, it
+standardises each column by its mean and standard deviation over every jet and slot of the pooled
+training and validation splits, padded rows included (they enter as −μ/σ), computed in float64 at
+`setup("fit")` and kept in the checkpoint as `input_mean` and `input_std`. The first layer's
+trainable input quantiser, one width per slot and feature, is then the only input quantisation
+(7 to 11 bits per element in the shipped Table II design), and the stored test inputs are its
+output, on which alkaid's trace of it is the identity. Under `words` the port reads the fixed
+trigger words of `vn_hgq`, p_T in units of 16 GeV and padded rows zero. `setup()` accepts
+`[pt, etarel, phirel]` and `[pt, eta, phi]` alone, the latter under `words` only with an angle word
+that holds ±π (`angle_kif: [1, 2, 8]`). Keras runs in float64. `export.json` adds the columns, the
+input mode, `per_slot`, the word widths or the standardisation and the rounding; its `beta` is null
+beside `beta_schedule`, so `synthesis.csv` carries no β.
 
-The maximum pools through `QGlobalMaxPooling1D`, and the sum and `sum_over_n` through `QSum`, the
-latter as the plain sum, with 1/N folded by the copy into the two layers that read a pool. With
-M = [U, C] the (4, 4) matrix Σ_i u_i n_iᵀ of "Jet moments" and G the form, applied by `_metric` as
-in the vn port, the moments are sum_p = U₀, pair = Uᵀ G U, chain = (G U)ᵀ M (G U),
-pair4 = tr(G M G M) and triangle = tr(G M G M G M). Every datalane (`q.datalane()`) is a kif
-quantiser with WRAP overflow whose fraction bits are trained and whose integer bits are traced,
-and it truncates under this row's `round_mode: TRN`; kernels are kbi quantisers with SAT_SYM
-overflow and biases kbi with WRAP, while the words, the keep bit and the logits are fixed and round
-to nearest, as in `vn_hgq`.
+The configs carry the published recipe (`configs/sweep-n16-f3.yaml` and `src/train.py`): 7000
+epochs on batches of 2790, Adam at 3e-3 without weight decay or clipping under `CosineRestarts`, as
+in blocks 37 and 38 of `vn_hgq`, and β rising linearly from 2e-8 to 3e-7 over 2000 epochs, then
+geometrically to 3e-6 at epoch 7000. Four differences remain: the learning rate is stepped per
+batch, where theirs is set once per epoch; validation uses the record's split, where they hold out
+10 % of the shuffled training files (their test set is the record's test split); Keras runs in
+float64, where they used TF32 products on float16 inputs; and the results rows hold the macro
+accuracy, where the paper quotes the micro, as the figures below do. Their Table II run stopped on
+a NaN at epoch 5120, and Table II is its epoch 4350, where our first run of the reproduction read a
+training accuracy of 0.7205 at 64.7 k logged EBOPs against their 0.7190 at 60.4 k.
 
-Under `rankcut` each cut c builds its moments on the leading slots alone, c = 0 on every slot and
-c = 1 to 4 on the top 1, 2, 4 and 8 (a slice `u[:, :k]`, no layer). It builds only the columns
-that can be nonzero, those whose support, the fewest constituents the moment needs, fits within the
-cut: under the top-1 cut sum_p alone, taken as `p[:, :1]` without a layer, and under the top-2 cut
-no `gm2` or triangle. The port therefore has 20 moment columns under `rankcut` and 5 under
-`uniform`, in the order of the float row's nonzero columns
-(`np.flatnonzero(JetMoments.support.flatten())`); the five columns that the float row masks to
-exact zeros are not built. The moments need no mask, since a padded row has p = 0 and so u = 0.
+Blocks 1 to 4 of each catalogue train one variant each, with a checkpoint every epoch, in
+`logs/train/hls4ml/jedi_linear_hgq/nconst16/baseline_<variant>_allepochs`; they differ in their
+inputs alone. `axis_trained`, the reproduction, reads `etarel` and `phirel` from the full jet's
+axis (`data.full_axis=true`) as standardised rows. `kept_words` reads them from the kept
+constituents' axis as fixed trigger words, the like-for-like row against the vector neurons.
+`abs_words` reads the absolute `[pt, eta, phi]` as fixed words, the paper's text taken literally
+("only pT, eta, and phi are used"). `kept_trained` reads the kept axis as standardised rows, so
+that `axis_trained` minus `kept_trained` measures the kept axis under the published recipe and
+`kept_trained` minus `kept_words` the fixed words. The evaluations write the rows
+`jedi_linear_hgq_<variant>` to `results/quantised/`, the probe off for `axis_trained`, whose
+invariance figures would mean nothing, since a transform rebases `etarel` and `phirel` on the kept
+constituents.
 
-The pools need the keep bit and nothing more. A ReLU output is never negative, so the maximum over
-all N slots after the padded ones are multiplied by zero equals the float row's maximum over the
-real slots, in which a padded slot enters as minus infinity, for every jet with a real
-constituent; a sum over the zeroed slots is the float row's masked sum. HGQ2 0.2.0 has
-`QGlobalMaxPooling1D`, its alkaid plugin replays the layer through alkaid's `ReplayPool` (`np.amax`
-on the fixed-point arrays), and HGQ2 prices a maximum as the sum of its input bits. A small port
-built in memory on olgpu on 2026-10-09, with the maximum pool with and without `keepdims`, the
-broadcast `QAdd`, `QSum` over a slice, the `QEinsum` of u and the tail and the (4, 4)
-contractions, matched alkaid's emulation on 10 000 logits with no mismatch, at truncating lanes of
-14 data and 8 weight bits. The comparator trees of the maximum meet Verilator and Vivado for the
-first time in this row.
+Their `src/train.py` keeps every epoch on HGQ2's `ParetoFront` of validation accuracy (above 0.5)
+against EBOPs, so Table II was selected on validation. The row takes the same rule, which replaced
+a pick on the training plateau on 2026-10-12: the front of each epoch's validation accuracy against
+the EBOPs of its last step, as `train.log` logs them, then the front point whose EBOPs, traced on
+the training split by its evaluation, lie nearest a target, 57 237 for Table II. The test accuracy
+plays no part. `scripts/experiments/quantised_picks.py` implements it: `front <run dir>` prints
+the front epochs read off `<run dir>/train.log`, and
+`pick <run dir> <evaluations> <target> <picks dir>` reads each front epoch's traced EBOPs from
+`<evaluations>/epoch_<k>/outputs/main_hgq/export.json` and writes the picked checkpoint's manifest
+to `<picks dir>`, or `<picks dir>/fold_<i>` for a fold, the layout `src/eval.py` merges; the eval
+blocks point `checkpoint_manifest_path` at `<run dir>/picks/<tag>`, `target57237` for Table II's
+EBOPs and `matched_a2_trained` and `matched_d2` for the points at the vector neurons' EBOPs below.
+A training that `chain.sh` of the campaign stopped after its collapse wrote no manifest, since
+`train.py` writes it last; it was written afterwards with the last checkpoint and the run's MLflow
+run, as `train.py` would have. Checkpoints are kept every
+epoch because the cadence matters: a first run that kept one every 50 epochs put the reproduction
+1.0 point under Table II (70.89 % at 54 182 EBOPs), although the per-epoch fronts of their history
+and of that run coincide within 0.001 (the best validation accuracy at no more than 57.2 k logged
+EBOPs is 0.7166 and 0.7174); on every 50th epoch alone ours read 0.7098, about 0.75 points lower.
 
-The words are those of `vn_hgq`: p_T at kif (0, 12, 2), an LSB of 0.25 GeV, and the angles at kif
-(1, 1, 8), an LSB of 2⁻⁸ rad, both WRAP, each column clamped in torch to its word's range
-(`_clamp_words`). A constituent below 0.125 GeV becomes a zero word and is read as padding. The
-angles are the `etarel` and `phirel` that the float rows read, measured from the axis of the kept
-constituents, the direction of their summed momentum (`rebase_on_kept_axis`). `_prepare_inputs`
-de-normalises the batch and sorts each jet by p_T; the rank cuts need the order, while the pools
-and the uniform moments do not. The axis, the subtraction and the sort lie outside the block, as
-the JEDI-linear paper's `etarel` and `phirel` are computed offline, and the latencies and costs
-leave them out. These inputs sit one step further from the trigger than those of `vn_hgq`, whose
-angles are measured from the leading constituent by one subtraction of the words: the axis needs a
-sum of momenta and the η and φ of the sum. They keep the row comparable with `jedi_linear` and the
-moment rows, which read the same columns, and no switch to leader-relative angles exists.
+The runs ended on 2026-10-12, `abs_words` stopped once its EBOPs fell below 1000 near epoch 5160.
+`scripts/synthesis/synthesise_vn.py` implemented each pick, its top module and its Vivado reports'
+directory named after the export's `port` (or `--project`), in both flows of blocks 37 and 38 of
+`vn_hgq`: 5 ns with a latency cutoff of 4.2 ns, and the published pipelining, 2 ns with a cutoff
+of 2.7 ns. The picks at N = 16 (main runs, micro test accuracy):
 
-`copy_float_weights` in `src/algorithms/utils/jedi_linear_port.py` copies a float
-`jedi_linear_moments` or `jedi_linear` run into the port. It reuses `_checkpoint_path`,
-`_net_state`, `_numpy`, `_copy_linear`, `_linears` and `_port_statistics` of
-`vector_neurons_port.py`, whose `_check_architecture` takes the keys to compare and whose
-`_fold_norm` now rests on `fold_statistics(norm, scales, rows=None)` with the same arithmetic.
-`algorithm.init_from` names the float run as a run directory, a manifest or a `.ckpt`.
-`load_float_network` refuses it unless `nconstituents`, `nbr_feats`, `hidden`, `head_layers`,
-`aggregation` and `moments` (`ARCHITECTURE_KEYS`) equal the port's, a plain `jedi_linear`
-checkpoint being read at `moments: none` (`LEGACY_DEFAULTS`). N is compared because the record's
-angle scales depend on it, and `nbr_feats` to refuse a JEDI-linear on the four-momentum. Three
-columns alone do not tell `[pt, etarel, phirel]` from `[pt, eta, phi]`, so `_check_columns` also
-refuses a run whose `.hydra/config.yaml`, when present, names other features. Let s be the
-record's scales of the three columns (s_pT = 1559.19 GeV at every N; s_η = 1.242, 1.323 and 1.324
-and s_φ = 0.463, 0.535 and 0.582 at N = 16, 50 and 150), λ = 20/16 the ratio of the units, n = N
-under `sum_over_n` and 1 otherwise, and W each torch weight, whose transpose is the Keras kernel:
+| design         | epoch | EBOPs  | test acc | 5 ns: latency, LUTs | 2 ns: latency, LUTs |
+| -------------- | ----- | ------ | -------- | ------------------- | ------------------- |
+| Table II       | 4350  | 57 237 | 71.95 %  |                     | 53.6 ns, 43.8 k     |
+| `axis_trained` | 4498  | 55 363 | 71.48 %  | 56.3 ns, 31.1 k     | 48.1 ns, 38.6 k     |
+| `kept_trained` | 3336  | 57 976 | 70.93 %  | 57.0 ns, 33.7 k     | 55.4 ns, 40.6 k     |
+| `kept_words`   | 3576  | 55 798 | 70.83 %  | 57.9 ns, 30.5 k     | 51.7 ns, 38.6 k     |
+| `abs_words`    | 3279  | 57 574 | 53.25 %  | 56.2 ns, 30.0 k     | 48.2 ns, 37.5 k     |
 
-```
-embed                       K = diag(16 / s_pT, 1 / s_η, 1 / s_φ) W_eᵀ,  bias b_e
-context                     K = W_cᵀ / n
-local, shared, head{j ≥ 1}  K = Wᵀ  (_copy_linear), as head_last
-head0, pooled rows          K = W_0ᵀ[:H] / n
-head0, moment rows          K = diag(a′) W_0ᵀ[H + kept columns]
-head0, bias                 b_0 + W_0[:, H:] t, over every moment column
-```
+The reproduction lies 0.47 points under Table II (71.40 % macro), and two runs of the recipe
+differ by about 0.3 points of validation accuracy at fixed EBOPs. It takes 12 cycles at 5 ns and
+18 stages at the published pipelining, against Table II's 19, and is faster and smaller there than
+the published design. The kept axis costs about 0.55 points and the fixed words about 0.1.
+`abs_words` reflects the network on absolute coordinates, not the port: the searched float
+`jedi_linear` reaches 62.7 % on `[pt, eta, phi]` at N = 16 against 71.6 % on
+`[pt, etarel, phirel]`.
 
-where (a′, t) = `fold_statistics` of the moments' BatchNorm1d at the scale λ^d of each column,
-d = 1, 2, 3, 2 and 3 for sum_p, pair, chain, pair4 and triangle (`MOMENT_DEGREES`, repeated over
-the cuts): a′ = γ / (λ^d √(σ² + ε)) and t = β − γ μ / √(σ² + ε). The port reads (p_T/16, Δη, Δφ) in
-GeV and radians where the float row read (p_T/s_pT, Δη/s_η, Δφ/s_φ), so the embedding's rows take
-the factors 0.0103, 0.80 and 2.16 at N = 16. The weights are quantised per element, so the factors
-move integer bits alone, which `seed_weight_bits` sets from the copied values. The port's moments
-are λ^d times the float row's, which a′ absorbs. The bias takes t over all 5 or 25 columns, the
-unbuilt ones included: their float input is exactly zero, so the batch normalisation emits the
-constant t there. The port has no batch normalisation, so `build_net` refuses
-`quantisation.fold_norm: false` and `export.json` records `fold_norm: true`.
+alkaid's pass `canonicalize_msb_wraps` (0.8.1, unchanged on `master` at 7cfabca) broke five
+checkpoints of the first run: in each it rewrote exactly one op, a one-bit unsigned wrap with a
+shift of +1 to +3, so that the op read its source's MSB, and the emulation differed from Keras on
+13 to 5204 of 1.3 M test logits. Without the pass all five were exact in Keras and Verilator at the
+same op count and cost, so every design is traced without it; da4ml 0.3, which built the published
+designs, emits no shift on a quantise op. Every design here was exact and co-simulated exactly.
 
-`JEDILinearHGQ(KerasQuantisedModule)` pins `[pt, etarel, phirel]` through `required_features`.
-`build_net` takes the float network's architecture keys, `units` (16), the quantisation and the
-training keys of `vn_hgq` (β and its schedule, `init_from`, `calibration_jets`, `floatx`, the JAX
-platform and devices, `warmup_fraction`) and calls `_keras_net`. The FLOPs are
-priced on `JEDILinearNet` of the same architecture (`_float_twin`), so `flops_mean` equals the float
-row's, while `ebops_mean` holds HGQ2's EBOPs of the traced port. `_prepare_inputs` de-normalises,
-sorts and clamps the words. A batch of HGQ2's trace holds max(1024, 16 384 · 16 // N) jets, where
-the vn's holds 16 384 at every N, because a (B, N, 128) float64 tensor of 16 384 jets takes 2.5 GB
-at N = 150. The protocol is that of `vn_hgq`: 100 epochs of fine-tuning at one constant β on batches
-of 2048, Keras's AdamW with a cosine decay from 1e-3 to 1e-5, the bit widths seeded at 14 data and
-8 weight bits, `callbacks=quantised` and the last epoch as the model, main runs alone.
+Blocks 40 to 43 of `runvn_hgq_train.sh` fine-tune D2 and A2 under the same recipe, checkpoints and
+selection (see `vn_hgq`). The VN runs collapse before their EBOPs fall below about 100 k, so the
+pick nearest 57 237 is each VN run's cheapest front point. The agreed pairs read the same
+information: the full axis with trained words, `axis_trained` against A2 with trained words (one
+width per slot for both angles, unstandardised, where JEDI-linear's are per element on standardised
+rows); and trigger information with fixed words, `kept_words` against D2, which reads no axis.
+Under this protocol the VN picks are the more accurate, 72.63 against 71.48 % and 71.31 against
+70.83 %, at more than twice the EBOPs. The JEDI-linear points at equal cost are picked from the
+same fronts with each VN pick's traced EBOPs as the target (`kept_words` has no front point
+between 102 k and 156 k):
 
-β is scanned. Seeded at 14 and 8 bits, this network prices E₀ = 58.8 M EBOPs at N = 16 (176 M at
-50 and 513 M at 150; measured in memory on olgpu on 2026-10-09), against the 1.99 M at which the
-one-block vn started. β = 3e-7 would weigh the EBOPs 23 times the cross entropy from the first
-step, where the same grid weighed them 0.037 to 1.1 times on the two-block vn; at 1e-8 the ratio
-is about 0.8. Both designs therefore run β ∈ {1e-8, 3e-8, 1e-7, 3e-7}, the range over which the
-published JEDI-linear ramps its β (2e-8 to 3e-7 over 2000 epochs of training from scratch), and
-the pair is read at one β, the most accurate under 100 ns. Should even 1e-8 cost more than the
-0.37 points that the one-block vn lost at 3e-7, the next step is a scan below 1e-8 or a schedule.
-The moments carry a dynamic range that the scan has to survive: chain and triangle grow as (Σ p)³,
-with Σ p up to about 75 in units of 16 GeV, so 14 seeded bits may leave narrow jets few fraction
-bits before training sets f. The moments design at one β is therefore judged against the control
-at the same β, so that a gain of the moments lost to quantisation shows.
+| pair                             | design            | epoch | EBOPs   | test acc | 5 ns: latency, LUTs | 2 ns: latency, LUTs |
+| -------------------------------- | ----------------- | ----- | ------- | -------- | ------------------- | ------------------- |
+| full axis, trained words         | `axis_trained`    | 1987  | 141 007 | 73.54 %  | 72.1 ns, 90.4 k     | 71.0 ns, 109.9 k    |
+|                                  | A2, trained words | 1300  | 142 419 | 72.63 %  | 83.5 ns, 76.0 k     | 85.2 ns, 93.4 k     |
+| trigger information, fixed words | `kept_words`      | 1780  | 101 841 | 71.22 %  | 68.7 ns, 63.5 k     | 68.0 ns, 72.1 k     |
+|                                  | D2                | 1091  | 124 656 | 71.31 %  | 76.0 ns, 54.4 k     | 77.9 ns, 72.1 k     |
 
-The catalogues hold thirteen blocks each at N = 16. Block 1 trains the control in float, the main run
-(`fold=null`) of `jedi_linear` on `[pt, etarel, phirel]` at the settings of the moments design
-(hidden 128, head [64, 32, 16], the maximum, learning rate 3.36e-3, weight decay 1e-5), in
-`logs/train/hls4ml/pt_etarel_phirel/jedi_linear/nconst16/baseline_control`; the grid's
-`jedi_linear` final at N = 16 on these columns pools by the sum with head [32, 32, 16] and is no
-control. Blocks 2 to 5 fine-tune the moments design at the four β from the finals' main checkpoint
-of `jedi_linear_moments` at N = 16 (trial 66 of its study, `val/acc` 0.7229, `epoch_183.ckpt`),
-which lies on the NGT shared volume and is copied to the same path under olgpu's `logs/` first;
-`init_from` names the `.ckpt`, because the run's manifest holds absolute /shared paths. Blocks 6
-to 9 fine-tune the control at the same β from block 1's run, once it has finished. Blocks 10 to 13
-fine-tune the tuned control at the same β: the grid's own `jedi_linear` final at N = 16 on these
-columns (sum pooling, head [32, 32, 16], hidden 128, `val/acc` 0.7163, `epoch_184.ckpt`), copied
-from the NGT shared volume as the moments design's checkpoint is. They were added after the scan
-of 2026-10-10 (below), in which the control, pooling by the maximum without the moments, lost 2.5
-points to this network in float. The runs go to
-`logs/train/hls4ml/jedi_linear_hgq/nconst16/baseline_{moments,control,tuned}_beta<β>`; folding and
-truncation are the row's defaults, so no block overrides them. The twelve quantised blocks share
-one label, so `--only` selects them by index. Their evaluations run Keras in float64 on the CPU,
-leave the probe on, since a rotation about the beam leaves the three columns unchanged, and write
-the rows `jedi_linear_hgq_{moments,control,tuned}_beta<β>` to `results/quantised/`, where the
-control's float evaluation also goes, as `jedi_linear_control`. The float reference of each design
-is the evaluation of the run it was copied from (the finals' main runs, and block 1 for the
-control), against which `scripts/analysis/compare_outputs.py` reads each quantised evaluation. `scripts/synthesis/synthesise_vn.py` serves both rows: `--project`
-names the top module, by default the export's `port`, else `vn_hgq` for the exports written before
-that key existed, the Vivado reports land in `prj/output_<project>/reports/`, and `check.json`
-records the project while the CSV keeps its columns. alkaid unrolls the per-slot layers of width
-128, and the time of a full trace is unmeasured, so the campaign's chain traces each export once at
-the default method and scans the CMVM methods for the chosen pair alone; the chain and the Vivado
-runners stay in scratch, in `/data/deodagiu/claude/jet_tagging_gdl/hgq_jedi/` on olgpu.
+At equal cost JEDI-linear leads by 0.9 points on the full axis and is 11 to 14 ns faster with 18
+to 19 % more LUTs. On trigger information the two tie: D2 leads by 0.1 points, within the scatter
+between runs, at 22 % more EBOPs; JEDI-linear is 7 to 10 ns faster; and D2 takes fewer LUTs at
+5 ns and as many at 2 ns. JEDI-linear is faster in every pairing; the vector neurons spend fewer
+LUTs per EBOP. Each configuration ran once. The VN fronts rest on a logged validation accuracy that
+wraps (see `vn_hgq`): D2's fell to 0.47 at epoch 700 and 0.35 at 1000 while its training accuracy
+stayed at 0.70 and its front points tested at 71.2 to 71.4 %, whereas JEDI-linear's tracked its
+test accuracy within 0.002. Patrick kept one protocol for both and reports this as a caveat.
 
-The β scan at N = 16 ran on 2026-10-10 on one V100 of olgpu, the eight fine-tunes of the moments
-design and the control taking about 45 minutes together, those of the tuned control another 30.
-Each design's test macro accuracy (main runs), its EBOPs and, for the first two, the stages of
-alkaid's default trace (`wmc`, `hard_dc` 1, latency-aware fusion, cutoff 4.2 ns), before the
-method scan and Vivado:
+Nothing has run at N = 50 and 150, whose experiments carry the same recipe; Patrick kept the
+grid's counts over the published 32, 64 and 128, since the published accuracy saturates from
+N = 64. Both pairs of the table are to train there as main runs, and the five folds of the four
+pair designs at N = 16, then of those at 50 and 150, on NGT. No fold has been fitted.
 
-| β     | moments: acc, EBOPs, stages | control: acc, EBOPs, stages | tuned: acc, EBOPs |
-| ----- | --------------------------- | --------------------------- | ----------------- |
-| float | 72.04 %                     | 69.14 %                     | 71.49 %           |
-| 1e-8  | 72.15 %, 979 k, 21          | 69.73 %, 2.32 M, 21         | 71.70 %, 2.04 M   |
-| 3e-8  | 72.10 %, 634 k, 20          | 69.69 %, 1.42 M, 20         | 71.60 %, 1.31 M   |
-| 1e-7  | 72.03 %, 366 k, 19          | 69.48 %, 783 k, 19          | 71.48 %, 754 k    |
-| 3e-7  | 71.84 %, 205 k, 17          | 68.82 %, 415 k, 18          | 70.96 %, 441 k    |
-
-alkaid emulated all eight exports of the first two designs exactly. The moments design keeps its
-float accuracy down to β = 1e-7 and costs half the EBOPs and half the alkaid cost of the control
-at every β. The control lies 2.9 points under it, far more than the moments' lift of the tuned
-`jedi_linear` in float: under the maximum without the moments, the head loses the summed p_T and
-the multiplicity that a sum would carry, and the moments supply both. Hence the tuned control of
-blocks 10 to 13, against which the moments gain 0.4 to 0.9 points at every β, at about half its
-EBOPs. β = 1e-7, the most accurate moments design under 100 ns by the default trace (19 stages,
-95 ns at 5 ns), goes on to the method scan, the co-simulation and Vivado for all three designs.
-
-The blocks at N = 50 and 150 (14 to 19) run at that β on the finals' architectures, hidden 128 and
-head [64, 32]: at 50 the moments design (the maximum, the rank-cut moments), its control (the float
-run of block 14 at the finals' learning rate 3.66e-3 and no weight decay, then its fine-tune) and
-the tuned control (`sum_over_n`); at 150 the moments design (`sum_over_n`, the rank-cut moments)
-and the tuned control, which there is the moments design's network without the moments and so is
-also its control. β = 1e-7 weighs the seeded EBOPs, 176 M and 513 M, 3 and 9 times more than at
-16. A design that accepts a jet per clock replicates the per-constituent
-dense layers of width 128 N times, so it may not fit the VU13P and its 1.73 M LUTs. Before any
-Vivado run at those counts, alkaid's cost and stage count from the default trace decide: measured
-against D2's 84 k LUTs for 206 k EBOPs, a design that would not fit stops the campaign. The
-fallback, to be decided with Patrick, is hidden 64, which the studies put 0.12 points lower at
-N = 50 and 0.05 at 150 for a quarter of the dense multiplications, and which needs new float runs.
-
-`tests/test_quantised.py` checks the port on the CPU, on the record stub of the vn tests, which can
-now store its columns divided by the record's scales (`JEDI_SCALES`, those of N = 16). Over every
-pooling and every moment set, a float `jedi_linear` or `jedi_linear_moments` of random weights, its
-moment normalisation calibrated, is saved as a run and copied through `init_from` into a port in
-float mode, which then reproduces it to 1e-5 of max(1, |logit|) and differs from it before the copy;
-the head's first kernel has H + 0, 5 or 20 rows, and a float run of another width or N is refused,
-as are one on other columns and an unfolded normalisation. Two epochs of training at the rank-cut
-moments and the maximum step Keras and round-trip a checkpoint. The evaluation of that checkpoint
-exports a model whose prediction of the stored words equals `logits_clean`, names its port
-`jedi_linear_hgq`, stores the words sorted by p_T and traces the training split alone; a second
-export, untrained, under `sum_over_n` and without moments, covers the `QSum` pools and the control.
-With alkaid installed, `synthesise_vn.py` emulates both exports bit for bit and writes the top
-module `jedi_linear_hgq`; a vn export without `port` takes `vn_hgq`, and `--project` wins over both.
-Where Verilator exists, the design co-simulates exactly. `tests/test_configs.py` holds the three
-experiments to layout digests and `jedi_linear_hgq.yaml` to its two parents.
+`tests/test_quantised.py` checks, on the CPU and the record stub of the vn tests, that the port
+builds the published layers and quantisers under both `inputs` and both `per_slot`, that it refuses
+other columns, a narrow angle word for absolute angles and an unknown `inputs`, and that
+`CosineRestarts` follows the published `cosine_decay_restarts` at every epoch start. Two epochs
+from scratch set the standardisation of the pooled splits, padded rows included, and round-trip it
+in the checkpoint. The evaluation of that checkpoint, and that of an untrained port on absolute
+words shared by the slots, export a model that predicts `logits_clean` from the stored inputs,
+which `synthesise_vn.py` emulates bit for bit and, where Verilator exists, co-simulates exactly.
+`tests/test_configs.py` holds the three experiments to layout digests, and
+`tests/test_quantised_picks.py` checks the front on a synthetic `train.log` and that the picks of a
+main run and a fold, chosen on traced rather than logged EBOPs, merge as `src/eval.py` merges them.
 
 ## JEDI-linear
 

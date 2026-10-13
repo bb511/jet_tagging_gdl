@@ -338,13 +338,10 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--features",
-        help="report the studies of this comma-separated feature set, e.g. "
-        "'pt,eta,phi', instead of the four-momentum ones; hls4ml alone",
+        help="report the grid rows' studies of this comma-separated feature set, e.g. "
+        "'pt,eta,phi', instead of those of the data set's default set",
     )
-    args = parser.parse_args()
-    if args.features and args.dataset != "hls4ml":
-        parser.error("--features applies to the hls4ml data set alone")
-    return args
+    return parser.parse_args()
 
 
 def main() -> int:

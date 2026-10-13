@@ -18,6 +18,7 @@ from torch import nn
 from src.algorithms import DenormalisedModule
 from src.algorithms.components.hgq_port import (
     KEEP_KIF,
+    WORD_F_RANGE,
     KerasNetwork,
     Quantisation,
     calibrate,
@@ -27,6 +28,7 @@ from src.algorithms.components.hgq_port import (
     require_cpu_jax,
     seed_datalane_bits,
     seed_weight_bits,
+    seed_word_bits,
     set_beta,
     total_ebops,
     word_range,
@@ -144,13 +146,13 @@ class KerasQuantisedModule(DenormalisedModule):
         and angle words (jets, N, 2).
 
         The words wrap: alkaid traces nothing but WRAP on a model input, so the caller
-        clamps the rows to the words' ranges.
+        clamps the rows to the words' ranges. Trained words have one width per slot, the
+        two angles of a slot sharing theirs, so that a rotation of the (eta, phi) plane
+        acts on words of equal precision.
         """
         q = self.q
-        pt = Quantizer(q.fixed(q.pt_kif, "WRAP"), name="pt_word")(x[:, :, 0])
-        angles = Quantizer(q.fixed(q.angle_kif, "WRAP"), name="angle_word")(
-            x[:, :, 1:3]
-        )
+        pt = Quantizer(q.word(q.pt_kif, (0,)), name="pt_word")(x[:, :, 0])
+        angles = Quantizer(q.word(q.angle_kif, (0, 2)), name="angle_word")(x[:, :, 1:3])
         return pt, angles
 
     def _word_rows(self, pt, angles, offset):
@@ -170,9 +172,11 @@ class KerasQuantisedModule(DenormalisedModule):
         # tensor and a Python scalar sparse, which the float32 build fails to trace.
         # alkaid replays both as the same shift.
         p = pt / self.units
-        # Exact: a real p_T is a multiple of the word's LSB, and a cast of a bool has no
+        # Exact: a real p_T is a multiple of its word's LSB, at least 2**-f with f the
+        # word's fraction bits or a trained word's greatest, and a cast of a bool has no
         # alkaid handler.
-        keep = ops.expand_dims(ops.minimum(pt * 2.0 ** self.q.pt_kif[2], 1.0), -1)
+        f = WORD_F_RANGE[1] if self.q.trained_words else self.q.pt_kif[2]
+        keep = ops.expand_dims(ops.minimum(pt * 2.0**f, 1.0), -1)
         return p, keep
 
     def _lifts(self, p, angles):
@@ -252,6 +256,8 @@ class KerasQuantisedModule(DenormalisedModule):
         jets = datamodule.data_train.X[: self.hparams.calibration_jets]
         rows, batch = self._keras_inputs(jets), self._calibration_batch()
         ebops = seed_datalane_bits(model, rows, q.data_bits, batch)
+        if q.trained_words:
+            ebops = seed_word_bits(model, q, rows, batch)
         log.info(f"{ebops} EBOPs at {q.data_bits} data and {q.weight_bits} weight bits")
         log.info(f"beta x EBOPs {self._beta_at(0) * ebops:.4g} in the first epoch")
 
@@ -280,6 +286,9 @@ class KerasQuantisedModule(DenormalisedModule):
         logs = self.net.train_on_batch(rows, y.cpu().numpy().astype(rows.dtype))
         # The mock optimiser's step does nothing but advance global_step.
         self.optimizers().step()
+        # Keras resets its metrics at every train_on_batch, so acc is the batch's own.
+        self._epoch_hits += logs["acc"] * len(x)
+        self._epoch_jets += len(x)
         means = {"train/loss": logs["ce"], "train/acc": logs["acc"]}
         means["train/loss_total"] = logs["loss"]
         self.log_dict(means, on_step=False, on_epoch=True, batch_size=len(x))
@@ -293,18 +302,26 @@ class KerasQuantisedModule(DenormalisedModule):
         return PieceWiseSchedule([tuple(point) for point in points])(epoch)
 
     def on_train_epoch_start(self) -> None:
-        """Give every quantised layer this epoch's beta."""
+        """Give every quantised layer this epoch's beta and start counting the epoch's
+        correct predictions."""
         set_beta(self.net.keras_model, self._beta_at(self.current_epoch))
+        self._epoch_hits, self._epoch_jets = 0.0, 0
 
     def on_train_epoch_end(self) -> None:
-        """Log the EBOPs of the epoch's last step, its beta and the next learning rate.
+        """Log the EBOPs of the epoch's last step, its beta, the next learning rate and
+        the epoch's Keras accuracy, the mean over its jets.
 
-        The base's summary would read ``train_acc``, which this row never updates.
+        The base's summary would read ``train_acc``, which this row never updates. The
+        campaign scripts parse the INFO line, so its format is an interface.
         """
         epoch, ebops = self.current_epoch, total_ebops(self.net.keras_model)
         beta, lr = self._beta_at(epoch), self.net.learning_rate()
+        acc = self._epoch_hits / max(self._epoch_jets, 1)
         self.log_dict({"train/ebops": float(ebops), "train/beta": beta, "train/lr": lr})
-        log.info(f"[epoch {epoch:>3d}] EBOPs {ebops}, beta {beta:.3g}, lr {lr:.3g}")
+        log.info(
+            f"[epoch {epoch:>4d}] EBOPs {ebops}, beta {beta:.3g}, lr {lr:.3g}, "
+            f"train acc {acc:.4f}"
+        )
 
     def on_fit_start(self) -> None:
         """Send the count of Keras variables to the loggers; the torch count is zero."""
@@ -348,7 +365,8 @@ class KerasQuantisedModule(DenormalisedModule):
         probe's jet order."""
         out = super().test_step(batch, batch_idx)
         words = self.net.quantised_inputs(self._keras_inputs(batch[0]))
-        # Exact: a word holds 14 bits at most.
+        # Exact for words of at most 24 significant bits, float32's; synthesise_vn.py's
+        # check of the reloaded port on them would show any loss.
         self._test_inputs.append(words.astype(np.float32))
         return out
 

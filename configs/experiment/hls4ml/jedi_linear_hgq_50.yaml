@@ -1,5 +1,5 @@
 # @package _global_
-# JEDI-linear with the moments quantised with HGQ2 at 50 constituents, fine-tuned from init_from.
+# JEDI-linear as published, quantised with HGQ2 at 50 constituents on its recipe, from scratch.
 defaults:
   - override /algorithm: jedi_linear_hgq
   - override /callbacks: quantised
@@ -11,22 +11,16 @@ experiment_name: hls4ml_jedi_linear_hgq_nconst50
 
 data:
   nconstituents: 50
-  # The network's own columns; required_features makes setup() refuse any other list.
+  # Or [pt, eta, phi]; setup() refuses any other list.
   features: [pt, etarel, phirel]
+  batch_size: 2790
   # In the driver: forked loader workers do not mix with the threads JAX has started.
   num_workers: 0
   pin_memory: false
 
-# The best of the jedi_linear_moments study at N = 50, the architecture of its finals.
-algorithm:
-  hidden: 128
-  head_layers: [64, 32]
-  aggregation: max
-  moments: rankcut
-
-# fp32: 16-mixed would put a gradient scaler on the mock step; Keras clips (global_clipnorm).
+# fp32: 16-mixed would put a gradient scaler on the mock step; the recipe has no clipping.
 trainer:
-  max_epochs: 100
+  max_epochs: 7000
   precision: 32
   gradient_clip_val: null
 

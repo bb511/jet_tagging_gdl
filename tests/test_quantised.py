@@ -4,10 +4,14 @@ import os
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 os.environ.setdefault("KERAS_BACKEND", "jax")
 
+import contextlib
 import csv
 import json
+import logging
 import math
+import re
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +21,6 @@ import torch
 from hydra.errors import InstantiationException
 from lightning import Callback, LightningDataModule, Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
-from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 pytest.importorskip("hgq")
@@ -25,8 +28,9 @@ pytest.importorskip("hgq")
 import jax
 import keras
 from hgq.layers.core import QLayerBase
+from hgq.quantizer.internal import FixedPointQuantizerKBI, FixedPointQuantizerKIF
 
-from src.algorithms.components.hgq_port import WEIGHT_I_MIN, seed_weight_bits
+from src.algorithms.components.hgq_port import WEIGHT_I_MIN
 from src.algorithms.utils.keras_schedules import CosineRestarts
 from src.callbacks.invariance import InvarianceMetricCallback
 from src.data.components.dataset import HLS4MLDataset
@@ -35,7 +39,6 @@ from tests.conftest import (
     PT_ETA_PHI,
     PT_ETAREL_PHIREL,
     RECORD_COLUMNS,
-    _calibrated,
     algorithm,
     attach,
     labels,
@@ -70,6 +73,12 @@ VARIANTS = [
 AXIS_FEATURES = [*PT_ETA_PHI, "etarel", "phirel"]
 COLUMNS = [RECORD_COLUMNS.index(f"j1_{name}") for name in PT_ETA_PHI]
 AXIS_COLUMNS = [RECORD_COLUMNS.index(f"j1_{name}") for name in ("etarel", "phirel")]
+# A port whose p_T, angle and offset words are trained, the offset reading the axis.
+TRAINED_WORDS = {
+    "axis_offset": True,
+    "nbr_feats": len(AXIS_FEATURES),
+    "quantisation": {"trained_words": True},
+}
 # Jets per split, in batches of 16; the test split ends in a partial batch.
 SIZES = {"train": 64, "validation": 32, "test": 40}
 BATCH = 16
@@ -83,14 +92,25 @@ SYNTHESIS_COLUMNS = (
     "n_mismatch max_abs_diff n_cosim cosim_exact vivado_done export_dir prj_dir "
     "alkaid_version hgq_version keras_version timestamp"
 ).split()
-# The record's scales of pt (GeV), etarel and phirel (rad) at N = 16.
-JEDI_SCALES = {"pt": 1559.19, "etarel": 1.242, "phirel": 0.463}
+# The scales of the stored columns the JEDI port reads, about the record's at N = 16: p_T
+# in GeV, the angles in radians.
+JEDI_SCALES = {"pt": 1559.19, "etarel": 1.242, "phirel": 0.463, "eta": 2.4, "phi": 3.14}
 JEDI_ARCHITECTURE = {"hidden": 8, "head_layers": [16, 8]}
-# The design of the moments row at N = 50: max pools and the rank-cut moments.
-JEDI_DESIGN = {"aggregation": "max", "moments": "rankcut"}
-# The moment columns the head's first layer reads: the five uniform ones, or the 20 of
-# the 25 rank-cut ones that do not vanish.
-MOMENTS_BUILT = {"none": 0, "uniform": 5, "rankcut": 20}
+# The trigger's words of the absolute columns, the angle word wide enough for phi.
+JEDI_ABSOLUTE = {"inputs": "words", "quantisation": {"angle_kif": [1, 2, 8]}}
+JEDI_DENSE = {"embed", "local", "context", "shared", "head0", "head1", "head_last"}
+JEDI_LAYERS = JEDI_DENSE | {"pool0", "context_add", "pool1"}
+# What each JEDI export records of its port: the columns, the input mode and whether the
+# datalane widths are per slot.
+JEDI_EXPORTS = {
+    "jedi_evaluated": (PT_ETAREL_PHIREL, "standardised", True),
+    "jedi_words_evaluated": (PT_ETA_PHI, "words", False),
+}
+# The per-epoch INFO message of a quantised row, which the campaign scripts parse.
+EPOCH_LINE = (
+    r"\[epoch (?P<epoch>[ \d]{3}\d)\] EBOPs \d+, beta \S+, lr \S+, "
+    r"train acc (?P<acc>\d\.\d{4})$"
+)
 
 
 def _record(n_jets: int, seed: int) -> torch.Tensor:
@@ -459,107 +479,132 @@ def test_the_design_cosimulates_exactly(
     assert (check["n_cosim"], check["cosim_exact"]) == (SIZES["test"], True)
 
 
-def _jedi_port(nconstituents: int = N_SLOTS, **overrides: object) -> torch.nn.Module:
+def _word_quantiser(model: keras.Model, name: str) -> FixedPointQuantizerKIF:
+    lanes = model.get_layer(name)._flatten_layers()
+    return next(lane for lane in lanes if isinstance(lane, FixedPointQuantizerKIF))
+
+
+def test_trained_words_start_at_the_trigger_widths_one_per_slot() -> None:
+    names = ("pt_word", "angle_word", "offset_word")
+    trained = attach(_port(**TRAINED_WORDS), _Record(AXIS_FEATURES)).net.keras_model
+    fixed = _port(axis_offset=True, nbr_feats=len(AXIS_FEATURES)).net.keras_model
+    pt, angles, offset = (
+        keras.ops.convert_to_numpy(_word_quantiser(trained, name)._f) for name in names
+    )
+
+    # One width per slot, the two angles of a slot sharing theirs and the two offset
+    # words one, each seeded at its trigger word's fraction bits.
+    assert (pt.size, angles.size, offset.size) == (N_SLOTS, N_SLOTS, 1)
+    assert np.all(pt == 2) and np.all(angles == 8) and np.all(offset == 8)
+    assert all(_word_quantiser(trained, name).trainable for name in names)
+    assert not any(_word_quantiser(fixed, name).trainable for name in names)
+
+
+@pytest.fixture(scope="module")
+def trained_words_evaluated(tmp_path_factory: pytest.TempPathFactory):
+    # Two epochs with trained words, then the checkpoint tested as eval.py tests it.
+    root = tmp_path_factory.mktemp("trained_words")
+    checkpoint = ModelCheckpoint(
+        dirpath=root / "checkpoints",
+        filename="epoch_{epoch:03d}",
+        monitor=None,
+        save_top_k=1,
+        auto_insert_metric_name=False,
+    )
+    fit, module = _trainer(root, checkpoint, max_epochs=2), _port(**TRAINED_WORDS)
+    fit.fit(module, datamodule=_Record(AXIS_FEATURES))
+    probe = InvarianceMetricCallback(probe=False)
+    probe.subdir = "main"
+    test = _trainer(root / "eval", probe, enable_checkpointing=False)
+    port, datamodule = _port(**TRAINED_WORDS), _Record(AXIS_FEATURES)
+    ckpt_path = checkpoint.best_model_path
+    test.test(port, datamodule=datamodule, ckpt_path=ckpt_path, weights_only=False)
+    outputs = root / "eval" / "outputs"
+    return SimpleNamespace(export=outputs / "main_hgq", npz=outputs / "main.npz")
+
+
+def test_synthesise_vn_emulates_the_trained_word_port_bit_for_bit(
+    synth, trained_words_evaluated: SimpleNamespace, tmp_path: Path
+) -> None:
+    out = tmp_path / "synth"
+    check = _synthesise(
+        synth, trained_words_evaluated, out, "--no-cosim", "--no-vivado"
+    )
+
+    assert (check["n_mismatch"], check["n_mismatch_keras"]) == (0, 0)
+    assert check["n_test"] == SIZES["test"]
+
+
+@pytest.mark.skipif(shutil.which("verilator") is None, reason="no Verilator")
+def test_the_trained_word_design_cosimulates_exactly(
+    synth, trained_words_evaluated: SimpleNamespace, tmp_path: Path
+) -> None:
+    jets = str(SIZES["test"])
+    check = _synthesise(
+        synth,
+        trained_words_evaluated,
+        tmp_path / "synth",
+        "--no-vivado",
+        "--cosim-jets",
+        jets,
+    )
+
+    assert (check["n_cosim"], check["cosim_exact"]) == (SIZES["test"], True)
+
+
+def _jedi_port(features: list[str] = PT_ETAREL_PHIREL, **overrides: object):
     # Seeded, so that two ports built alike start from the same weights.
     torch.manual_seed(0)
-    overrides = JEDI_ARCHITECTURE | {"calibration_jets": SIZES["train"]} | overrides
-    return algorithm("jedi_linear_hgq", nconstituents, **overrides)
+    overrides = JEDI_ARCHITECTURE | overrides
+    return algorithm("jedi_linear_hgq", N_SLOTS, features=features, **overrides)
 
 
-def _float_jedi(
-    aggregation: str, moments: str, features: list[str] = PT_ETAREL_PHIREL
-) -> torch.nn.Module:
-    # The float row of random weights: jedi_linear_moments, or jedi_linear for the
-    # control without moments.
-    torch.manual_seed(0)
-    row = "jedi_linear" if moments == "none" else "jedi_linear_moments"
-    extra = {} if moments == "none" else {"moments": moments}
-    variant = JEDI_ARCHITECTURE | {"aggregation": aggregation} | extra
-    module = algorithm(row, N_SLOTS, features=features, **variant)
-    with torch.no_grad():
-        for parameter in module.parameters():
-            parameter.normal_(0.0, 0.5)
-    return module
+def _kbi_quantisers(model: keras.Model) -> list[FixedPointQuantizerKBI]:
+    return [x for x in model._flatten_layers() if isinstance(x, FixedPointQuantizerKBI)]
 
 
-def _save_run(module: torch.nn.Module, directory: Path) -> None:
-    # A checkpoint and the manifest naming it, as train.py leaves a run.
-    path = directory / "checkpoints" / "epoch_000.ckpt"
-    path.parent.mkdir()
-    state = {"hyper_parameters": dict(module.hparams)}
-    torch.save(state | {"state_dict": module.state_dict()}, path)
-    run = ManifestRun("main", None, str(path))
-    write_manifest(Manifest(0, str(directory), "test", [run]), directory)
-
-
-@pytest.mark.parametrize("moments", ["none", "uniform", "rankcut"])
-@pytest.mark.parametrize("aggregation", ["sum", "max", "sum_over_n"])
-def test_the_jedi_port_copies_a_float_jedi_linear_so_keras_and_torch_agree(
-    tmp_path: Path, aggregation: str, moments: str
+@pytest.mark.parametrize("per_slot", [True, False])
+@pytest.mark.parametrize("inputs", ["standardised", "words"])
+def test_the_jedi_port_builds_the_published_network(
+    inputs: str, per_slot: bool
 ) -> None:
-    # The moments' batch normalisation is set to the test jets' statistics, so that
-    # every moment reaches the head at unit scale; under rankcut the five that vanish
-    # keep a zero mean and variance, whose constant output the copy folds into a bias.
-    datamodule = _Record(PT_ETAREL_PHIREL, JEDI_SCALES)
-    x = datamodule.splits["test"][0][..., datamodule.columns]
-    float_row = attach(_float_jedi(aggregation, moments), datamodule)
-    if moments != "none":
-        _calibrated(float_row.net, x)
-    _save_run(float_row, tmp_path)
-    # The network itself: forward() would round the rows to float32 before the first
-    # Linear, which no de-normalisation promotes here.
-    with torch.no_grad():
-        expected = float_row.net.double().eval()(x.double())
-    variant = {"aggregation": aggregation, "moments": moments}
-    variant["init_from"] = str(tmp_path)
-    port = _jedi_port(quantisation={"float_mode": True}, **variant)
-    before = port(x)
+    port = _jedi_port(inputs=inputs, per_slot=per_slot)
+    model, words = port.net.keras_model, port.net.inputs_model
+    names = {layer.name for layer in model.layers}
+    embed = model.get_layer("embed")
+    weights = _kbi_quantisers(model)
 
-    attach(port, datamodule)
-
-    # The float port differs from the float network by the rounding of the float32
-    # rows alone.
-    tolerance = 1e-5 * max(1.0, float(expected.abs().max()))
-    head0 = port.net.keras_model.get_layer("head0").kernel.shape
-    assert (port(x) - expected).abs().max() <= tolerance
-    assert (before - expected).abs().max() > tolerance
-    assert head0[0] == JEDI_ARCHITECTURE["hidden"] + MOMENTS_BUILT[moments]
-    refusals = [({"hidden": 16}, "hidden 8 vs 16"), ({"nconstituents": 9}, "8 vs 9")]
-    for overrides, refused in refusals:
-        with pytest.raises(ValueError, match=refused):
-            attach(_jedi_port(**(variant | overrides)), datamodule)
+    assert JEDI_LAYERS <= names
+    # Under words the fixed trigger words come first; standardised rows meet the first
+    # layer's trainable quantiser alone.
+    assert ({"pt_word", "angle_word"} <= names) == (inputs == "words")
+    assert words.output_shape == model.input_shape == (None, N_SLOTS, 3)
+    assert model.output_shape == (None, 5)
+    # One width per slot and feature, or one per feature shared by the slots.
+    assert tuple(embed.iq.quantizer._f.shape) == (1, N_SLOTS if per_slot else 1, 3)
+    assert model.get_layer("pool0").scale == 1 / N_SLOTS
+    assert model.get_layer("pool1").scale == 1 / 16
+    assert not model.get_layer("head_last").enable_oq
+    # Every weight and bias of seven bits, saturating, with WEIGHT_I_MIN integer bits
+    # at least.
+    assert len(weights) == 2 * len(JEDI_DENSE)
+    assert {q.overflow_mode for q in weights} == {"SAT_SYM"}
+    assert all(np.all(np.asarray(q.b) == 7) for q in weights)
+    assert {q.i_constraint.min_value for q in weights} == {WEIGHT_I_MIN}
 
 
-def test_the_jedi_copy_refuses_a_float_run_on_other_columns(tmp_path: Path) -> None:
-    # nbr_feats 3 alone cannot tell [pt, eta, phi] from [pt, etarel, phirel]; the run's
-    # composed config can.
-    _save_run(_float_jedi("sum", "none", features=PT_ETA_PHI), tmp_path)
-    (tmp_path / ".hydra").mkdir()
-    OmegaConf.save({"data": {"features": PT_ETA_PHI}}, tmp_path / ".hydra/config.yaml")
-    port = _jedi_port(init_from=str(tmp_path), aggregation="sum", moments="none")
+def test_the_jedi_port_refuses_other_columns_and_a_narrow_angle_word() -> None:
+    absolute = _Record(PT_ETA_PHI, JEDI_SCALES)
 
-    with pytest.raises(ValueError, match="trained on"):
-        attach(port, _Record(PT_ETAREL_PHIREL, JEDI_SCALES))
-
-
-def test_the_jedi_port_refuses_an_unfolded_normalisation() -> None:
-    # The port has no batch normalisation, and export.json must not say otherwise.
-    with pytest.raises(InstantiationException, match="fold_norm"):
-        _jedi_port(quantisation={"fold_norm": False})
-
-
-def test_a_near_zero_weight_keeps_the_least_integer_bits() -> None:
-    # Seeded at its own minimal integer bits, a weight of 1e-30 would take f = 31
-    # fraction bits, which alkaid emulates wrongly.
-    model = _jedi_port().net.keras_model
-    layer = model.get_layer("head0")
-    kernel = np.array(layer.kernel)
-    kernel[0, 0] = 1e-30
-    layer.kernel.assign(kernel)
-    seed_weight_bits(model, 8)
-    quantiser = layer.kq.quantizer
-    assert np.asarray(quantiser.i).min() >= WEIGHT_I_MIN
-    assert quantiser.i_constraint.min_value == WEIGHT_I_MIN
+    with pytest.raises(ValueError, match="but data.features is"):
+        attach(_jedi_port(), _Record([*PT_ETA_PHI, "etarel"], JEDI_SCALES))
+    with pytest.raises(ValueError, match=r"angle_kif to \[1,2,8\]"):
+        attach(_jedi_port(PT_ETA_PHI, inputs="words"), absolute)
+    with pytest.raises(InstantiationException, match="inputs must be one of"):
+        _jedi_port(inputs="raw")
+    # Standardised rows have no angle word, and the wider word holds any phi.
+    attach(_jedi_port(PT_ETA_PHI), absolute)
+    attach(_jedi_port(PT_ETA_PHI, **JEDI_ABSOLUTE), absolute)
 
 
 def _jedi_linear_rate(epoch: int) -> float:
@@ -600,34 +645,75 @@ def _main_probe() -> InvarianceMetricCallback:
     return probe
 
 
+@contextlib.contextmanager
+def _info_lines(name: str) -> Iterator[list[str]]:
+    # The INFO messages of the logger *name*, which caplog cannot collect for a
+    # module-scoped fixture.
+    logger, lines, level = logging.getLogger(name), [], logging.getLogger(name).level
+    handler = logging.Handler()
+    handler.emit = lambda record: lines.append(record.getMessage())
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        yield lines
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
 @pytest.fixture(scope="module")
 def jedi_fitted(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
-    # Two epochs of the moments design under the beta schedule.
+    # Two epochs on standardised rows under the beta schedule, the per-epoch lines kept.
     root = tmp_path_factory.mktemp("jedi_fit")
     datamodule, betas = _Record(PT_ETAREL_PHIREL, JEDI_SCALES), _BetaRecorder()
-    module = _jedi_port(beta_schedule=SCHEDULE, **JEDI_DESIGN)
+    module = _jedi_port(beta_schedule=SCHEDULE)
     trainer = _trainer(root, _last_epoch(root), betas, max_epochs=2)
-    trainer.fit(module, datamodule=datamodule)
+    with _info_lines("src.algorithms.keras_base") as lines:
+        trainer.fit(module, datamodule=datamodule)
     return SimpleNamespace(
-        datamodule=datamodule, module=module, trainer=trainer, betas=betas
+        datamodule=datamodule, module=module, trainer=trainer, betas=betas, lines=lines
     )
 
 
-def test_the_jedi_module_trains_on_keras_and_round_trips_a_checkpoint(
+def test_the_jedi_standardisation_is_that_of_the_pooled_splits_padding_included(
     jedi_fitted: SimpleNamespace,
 ) -> None:
-    model = jedi_fitted.module.net.keras_model
+    datamodule, module = jedi_fitted.datamodule, jedi_fitted.module
+    scales = torch.tensor([JEDI_SCALES[name] for name in PT_ETAREL_PHIREL])
+    pooled = torch.cat([datamodule.splits[s][0] for s in ("train", "validation")])
+    rows = (pooled[..., datamodule.columns] * scales).double().numpy()
+    pt = rows[..., 0]
+
+    assert datamodule.requested == ["train", "validation"]
+    assert np.allclose(module.input_mean.numpy(), rows.mean(axis=(0, 1)), rtol=1e-10)
+    assert np.allclose(module.input_std.numpy(), rows.std(axis=(0, 1)), rtol=1e-10)
+    # The padded rows count: the real constituents alone have a larger mean p_T.
+    assert pt[pt > 0].mean() > 1.2 * float(module.input_mean[0])
+
+
+def test_the_jedi_module_trains_from_scratch_and_round_trips_a_checkpoint(
+    jedi_fitted: SimpleNamespace,
+) -> None:
+    module, model = jedi_fitted.module, jedi_fitted.module.net.keras_model
     steps = 2 * len(jedi_fitted.datamodule.train_dataloader())
     best = jedi_fitted.trainer.checkpoint_callback.best_model_path
-    rows = jedi_fitted.module._keras_inputs(jedi_fitted.datamodule.data_train.X)
-    restored = _jedi_port(**JEDI_DESIGN)
+    saved = torch.load(best, weights_only=False)
+    jets = jedi_fitted.datamodule.data_train.X
+    rows = module._keras_inputs(jets)
+    restored = _jedi_port()
     untrained = restored.net.keras_model.predict_on_batch(rows)
-    restored.on_load_checkpoint(torch.load(best, weights_only=False))
+    restored.load_state_dict(saved["state_dict"])
+    restored.on_load_checkpoint(saved)
     metrics = jedi_fitted.trainer.callback_metrics
     scheduled = [np.unique(betas).tolist() for betas in jedi_fitted.betas.seen]
+    epochs = [re.search(EPOCH_LINE, line) for line in jedi_fitted.lines]
+    epochs = [match for match in epochs if match]
 
     assert jedi_fitted.trainer.global_step == steps
     assert [path.name for path in Path(best).parent.iterdir()] == ["epoch_001.ckpt"]
+    # The standardisation travels in the checkpoint beside the Keras weights.
+    assert not torch.equal(module.input_std, torch.ones(3, dtype=torch.float64))
+    assert np.array_equal(restored._keras_inputs(jets), rows)
     assert not np.array_equal(untrained, model.predict_on_batch(rows))
     assert np.array_equal(
         restored.net.keras_model.predict_on_batch(rows), model.predict_on_batch(rows)
@@ -635,6 +721,12 @@ def test_the_jedi_module_trains_on_keras_and_round_trips_a_checkpoint(
     assert [len(betas) for betas in scheduled] == [1, 1]
     assert [betas[0] for betas in scheduled] == pytest.approx([1e-6, 3e-6])
     assert metrics["train/ebops"] > 0 and torch.isfinite(metrics["train/loss_total"])
+    # One line per epoch, which the campaign scripts parse; its accuracy is the mean of
+    # Keras's over the epoch's jets, as Lightning's epoch mean of train/acc.
+    assert [match["epoch"] for match in epochs] == ["   0", "   1"]
+    assert float(epochs[-1]["acc"]) == pytest.approx(
+        float(metrics["train/acc"]), abs=1e-4
+    )
 
 
 @pytest.fixture(scope="module")
@@ -644,7 +736,7 @@ def jedi_evaluated(
     # As eval.py runs it: a port built anew and the checkpoint loaded into it.
     root = tmp_path_factory.mktemp("jedi_eval")
     datamodule = _Record(PT_ETAREL_PHIREL, JEDI_SCALES)
-    port = _jedi_port(beta_schedule=SCHEDULE, **JEDI_DESIGN)
+    port = _jedi_port(beta_schedule=SCHEDULE)
     trainer = _trainer(root, _main_probe(), enable_checkpointing=False)
     ckpt_path = jedi_fitted.trainer.checkpoint_callback.best_model_path
     trainer.test(port, datamodule=datamodule, ckpt_path=ckpt_path, weights_only=False)
@@ -658,44 +750,66 @@ def jedi_evaluated(
 
 
 @pytest.fixture(scope="module")
-def jedi_sum_evaluated(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
-    # The control on the plain sums of sum_over_n, its bits seeded as a fit seeds them
-    # and left untrained, then tested as eval.py tests a checkpoint.
-    root = tmp_path_factory.mktemp("jedi_sum")
-    datamodule = _Record(PT_ETAREL_PHIREL, JEDI_SCALES)
-    port = attach(_jedi_port(aggregation="sum_over_n", moments="none"), datamodule)
+def jedi_words_evaluated(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
+    # The trigger's words of the absolute columns, the widths shared by the slots,
+    # untrained and tested as eval.py tests a checkpoint.
+    root = tmp_path_factory.mktemp("jedi_words")
+    datamodule = _Record(PT_ETA_PHI, JEDI_SCALES)
+    port = _jedi_port(PT_ETA_PHI, per_slot=False, **JEDI_ABSOLUTE)
+    attach(port, datamodule)
     _trainer(root, _main_probe(), enable_checkpointing=False).test(
         port, datamodule=datamodule
     )
     outputs = root / "outputs"
-    return SimpleNamespace(export=outputs / "main_hgq", npz=outputs / "main.npz")
-
-
-def test_the_jedi_evaluation_exports_the_bit_exact_reference(
-    jedi_evaluated: SimpleNamespace,
-) -> None:
-    meta = json.loads((jedi_evaluated.export / "export.json").read_text())
-    with np.load(jedi_evaluated.npz) as outputs:
-        clean = outputs["logits_clean"]
-    with np.load(jedi_evaluated.export / "inputs.npz") as stored:
-        words = stored["inputs_clean"]
-    reloaded = keras.models.load_model(
-        jedi_evaluated.export / "model.keras", compile=False
+    return SimpleNamespace(
+        export=outputs / "main_hgq",
+        npz=outputs / "main.npz",
+        datamodule=datamodule,
+        port=port,
     )
+
+
+@pytest.mark.parametrize("exported", list(JEDI_EXPORTS))
+def test_the_jedi_evaluation_exports_the_bit_exact_reference(
+    exported: str, request: pytest.FixtureRequest
+) -> None:
+    evaluated = request.getfixturevalue(exported)
+    port = evaluated.port
+    meta = json.loads((evaluated.export / "export.json").read_text())
+    with np.load(evaluated.npz) as outputs:
+        clean = outputs["logits_clean"]
+    with np.load(evaluated.export / "inputs.npz") as stored:
+        words = stored["inputs_clean"]
+    reloaded = keras.models.load_model(evaluated.export / "model.keras", compile=False)
     logits = np.asarray(reloaded.predict_on_batch(words.astype(np.float64)))
+    features, inputs, per_slot = JEDI_EXPORTS[exported]
+    standardised = inputs == "standardised"
+    moments = {"mean": port.input_mean.tolist(), "std": port.input_std.tolist()}
 
-    assert jedi_evaluated.datamodule.requested == ["train"]
-    # The words in GeV and radians, sorted by decreasing p_T, the padded rows last.
+    assert evaluated.datamodule.requested == ["train"]
     assert words.shape == (SIZES["test"], N_SLOTS, 3)
-    assert np.all(np.diff(words[..., 0], axis=1) <= 0)
-    assert np.abs(words[..., 0]).max() > 1.0
     assert np.array_equal(logits.astype(np.float32), clean)
+    # The stored inputs are those the port reads, on which its input quantisers are the
+    # identity.
+    assert np.array_equal(port.net.quantised_inputs(words.astype(np.float64)), words)
     assert (meta["row"], meta["port"]) == ("jedi_linear_hgq", "jedi_linear_hgq")
-    assert meta["ebops"] == jedi_evaluated.port.ebops_total > 0
-    assert meta["quantisation"]["fold_norm"]
+    assert meta["ebops"] == port.ebops_total > 0
+    assert (meta["features"], meta["inputs"], meta["per_slot"]) == (
+        features,
+        inputs,
+        per_slot,
+    )
+    assert meta["round_mode"] == "RND"
+    assert meta["standardisation"] == (moments if standardised else None)
+    assert (meta["quantisation"] is None) == standardised
+    # The words in GeV and radians, sorted by decreasing p_T, the padded rows zero.
+    if not standardised:
+        assert np.all(np.diff(words[..., 0], axis=1) <= 0)
+        assert np.abs(words[..., 0]).max() > 1.0
+        assert not np.any(words[words[..., 0] == 0])
 
 
-@pytest.mark.parametrize("exported", ["jedi_evaluated", "jedi_sum_evaluated"])
+@pytest.mark.parametrize("exported", list(JEDI_EXPORTS))
 def test_synthesise_vn_emulates_the_jedi_exports_bit_for_bit(
     synth, exported: str, request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
@@ -731,7 +845,7 @@ def test_synthesise_vn_names_the_project_from_the_option_or_the_export(
 
 
 @pytest.mark.skipif(shutil.which("verilator") is None, reason="no Verilator")
-@pytest.mark.parametrize("exported", ["jedi_evaluated", "jedi_sum_evaluated"])
+@pytest.mark.parametrize("exported", list(JEDI_EXPORTS))
 def test_the_jedi_design_cosimulates_exactly(
     synth, exported: str, request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:

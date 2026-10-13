@@ -8,7 +8,9 @@ count is zero, is given the count of the float network it was copied from: its
 ``algorithm/init_from`` names that network's run directory, or a ``.ckpt`` in its
 ``checkpoints/``, relative to the root, and the count is that of the run whose main
 manifest entry stands there. Its own ``algorithm/keras_params`` is not used, since
-Keras counts the quantisers' per-weight bit widths beside the weights. The BDT rows have
+Keras counts the quantisers' per-weight bit widths beside the weights. A quantised row
+trained from scratch, as the JEDI-linear port is, names no ``init_from``, and its count
+is ``nan``. The BDT rows have
 no network, so their count is ``nan``.
 
 Each root holds ``logs/train/hls4ml`` and ``logs/mlflow/mlruns``, as a clone of this
@@ -109,8 +111,11 @@ def _run_dir(init_from: str) -> Path:
 
 
 def _float_params(root: Path, run: Path) -> str:
-    """The count of the float network a quantised run names as its ``init_from``."""
+    """The count of the float network a quantised run names as its ``init_from``, nan
+    for one that names none."""
     source = _param(run, "algorithm/init_from")
+    if source in (NAN, "None"):
+        return NAN
     manifest = root / _run_dir(source) / MANIFEST
     entry = _main_entry(manifest) if source != NAN and manifest.is_file() else None
     float_run = _store_run(root, entry.get("mlflow_run_id") if entry else None)

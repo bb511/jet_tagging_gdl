@@ -1,7 +1,7 @@
 # Jet tagging with geometric deep learning
 
 Are symmetry-based inductive biases useful for fast jet tagging?
-This repository contains a series of experiments providing insight into this conundrum.
+This repository contains a series of experiments providing insight into this question.
 We investigate three different ways of symmetry learning in a neural network: data augmentation, symmetry-consistency loss (SCL),
 and embedding a symmetry into the architecture of the network.
 Data augmentation involves generating additional copies of the jets by transforming them under a symmetry group; the network can thus understand a symmetry by learnint to map the original and transformed jets to the same output.

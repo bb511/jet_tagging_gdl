@@ -175,6 +175,28 @@ def test_best_trial_keeps_to_the_first_200_completed_trials(tmp_path: Path) -> N
     assert generator.best_trial(empty, "absent") is None
 
 
+def _top_tagging_blocks(home: Path, row: str, logs: str) -> list[dict[str, str]]:
+    # A grid row runs the seven regimes and every other row the baseline alone, at
+    # N = 100 under logs/<task>/<logs>/; each eval block repeats its training block's
+    # overrides and reads that block's run directory. Returns the training blocks.
+    train, evaluate = (
+        _blocks(home / f"run{row}_{task}.sh") for task in ("train", "eval")
+    )
+    variants = [variant for variant, _, _ in generator.VARIANTS]
+    regimes = variants if row in TOP_TAGGING_GRID else variants[:1]
+    assert [_variant(block) for block in train] == regimes
+    for trained, evaluated, regime in zip(train, evaluate, regimes, strict=True):
+        cell = f"{logs}/{row}/nconst100/{regime}"
+        assert trained["experiment"] == f"top_tagging/{row}_100"
+        assert trained["hydra.run.dir"] == f"logs/train/{cell}"
+        assert evaluated == trained | {
+            "checkpoint_manifest_path": f"logs/train/{cell}",
+            "results_table.invariance_metric": "tv",
+            "hydra.run.dir": f"logs/eval/{cell}",
+        }
+    return train
+
+
 def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
     # The MLP's study holds its best, 0.9, at trial 110, past the budget of 100, within
     # which 0.8 at trial 30 wins. Beside it in the database sits a better study under
@@ -187,7 +209,7 @@ def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
     layout = generator.Layout(dataset="top_tagging")
     generator._generate(dbs, out, ROOT, layout, False)
     tasks = ("train", "eval")
-    # The experiments of the grid rows pin [pt, etarel, phirel], the directory of their
+    # The experiments of the grid rows set [pt, etarel, phirel], the directory of their
     # catalogues; the other rows' catalogues sit at the root.
     labelled = out / "pt_etarel_phirel"
     home = {row: labelled if row in TOP_TAGGING_GRID else out for row in TOP_TAGGING}
@@ -197,19 +219,72 @@ def test_the_top_tagging_layout_keeps_to_its_own_trees(tmp_path: Path) -> None:
     )
     for row in TOP_TAGGING:
         paths = [home[row] / f"run{row}_{task}.sh" for task in tasks]
-        (trained,), (evaluated,) = (_blocks(path) for path in paths)
-        cell = f"top_tagging/{row}/nconst100/baseline"
-        experiment = f"top_tagging/{row}_100"
-        assert trained["experiment"] == evaluated["experiment"] == experiment
-        assert trained["hydra.run.dir"] == f"logs/train/{cell}"
-        assert evaluated["hydra.run.dir"] == f"logs/eval/{cell}"
-        assert evaluated["checkpoint_manifest_path"] == trained["hydra.run.dir"]
+        trained = _top_tagging_blocks(home[row], row, "top_tagging")
+        assert not any("data.features" in block for block in trained)
         assert not any("hls4ml" in path.read_text() for path in paths)
         recipe = "# published top-tagging recipe" in paths[0].read_text()
         assert recipe == (row in TOP_TAGGING_RECIPES)
     mlp = labelled / "runmlp_train.sh"
     assert f"# best trial 30 of {study}, val/acc_best=0.800000" in mlp.read_text()
     assert _blocks(mlp)[0]["x"] == "0.8"
+
+
+@pytest.mark.parametrize("label", sorted(TOP_TAGGING_FEATURES))
+def test_a_top_tagging_feature_set_has_catalogues_of_the_grid_rows_alone(
+    label: str, tmp_path: Path
+) -> None:
+    # The MLP's SO(3) SCL study on this set holds its best, 0.8, at trial 1; the default
+    # set's study of the same name, a directory up, holds 0.9, which this set's blocks
+    # must not read.
+    dbs, out = tmp_path / "optuna", tmp_path / "catalogues"
+    (dbs / label).mkdir(parents=True)
+    study = "top_tagging_mlp_nconst100_symm_loss_so3"
+    _study(dbs / label / "mlp.db", [0.5, 0.8], study)
+    _study(dbs / "mlp.db", [0.9], study)
+    layout = generator.Layout(features=tuple(label.split("_")), dataset="top_tagging")
+    generator._generate(dbs / label, out, ROOT, layout, False)
+    mlp = out / label / "runmlp_train.sh"
+    symm_so3 = _blocks(mlp)[5]
+
+    assert sorted(out.rglob("*.sh")) == sorted(
+        out / label / f"run{row}_{task}.sh"
+        for row in TOP_TAGGING_GRID
+        for task in ("train", "eval")
+    )
+    for row in TOP_TAGGING_GRID:
+        trained = _top_tagging_blocks(out / label, row, f"top_tagging/{label}")
+        features = {block["data.features"] for block in trained}
+        assert features == {TOP_TAGGING_FEATURES[label]}
+    assert f"studies from logs/optuna/top_tagging/{label}/" in mlp.read_text()
+    assert f"# best trial 1 of {study}, val/acc_best=0.800000" in mlp.read_text()
+    assert _variant(symm_so3) == "symm_so3" and symm_so3["x"] == "0.8"
+    root = Path("logs/optuna/top_tagging")
+    assert generator._default(None, root, layout) == root / label
+
+
+@pytest.mark.parametrize("dataset", generator.DATASETS)
+def test_naming_the_default_feature_set_keeps_the_default_trees(
+    dataset: str, tmp_path: Path
+) -> None:
+    # Named, the default set writes the grid rows' catalogues of the plain layout: no
+    # data.features, and studies and runs at the root of the data set's trees, where
+    # its searches put them.
+    dbs, named, plain = (tmp_path / name for name in ("optuna", "named", "plain"))
+    dbs.mkdir()
+    default = generator.DEFAULT_LABEL[dataset]
+    for out, features in ((named, tuple(default.split("_"))), (plain, None)):
+        layout = generator.Layout(features=features, dataset=dataset)
+        generator._generate(dbs, out, ROOT, layout, False)
+    grid = set(MODELS) - set(EMBEDDED)
+    written = sorted(named.rglob("*.sh"))
+
+    assert written == sorted(
+        named / default / f"run{row}_{task}.sh"
+        for row in grid
+        for task in ("train", "eval")
+    )
+    for path in written:
+        assert path.read_text() == (plain / path.relative_to(named)).read_text()
 
 
 def _submit(script: str, *args: str) -> subprocess.CompletedProcess:
@@ -372,6 +447,34 @@ def test_a_top_tagging_feature_set_adds_its_columns_and_its_database(
         (line,) = (line for line in found.stdout.splitlines() if line.startswith("["))
         assert found.returncode == 0, found.stderr
         assert line.startswith("[7/7]") and f"/top_tagging/{label}/{row}.db" in line
+
+
+@pytest.mark.parametrize("label", sorted(TOP_TAGGING_FEATURES))
+def test_sweep_status_reports_a_top_tagging_feature_set(
+    label: str, tmp_path: Path
+) -> None:
+    # The MLP's SO(3) SCL study holds 100 trials in the feature set's own database and
+    # none in the default set's; the set's 35 studies are read from its own catalogues.
+    study = "top_tagging_mlp_nconst100_symm_loss_so3"
+    _study(tmp_path / "mlp.db", [0.5] * 100, study)
+    rows = status.collect(ROOT, str(tmp_path), True, label=label, dataset="top_tagging")
+    found = subprocess.run(
+        [sys.executable, "scripts/experiments/sweep_status.py", "--commands"]
+        + ["--dataset", "top_tagging", "--features", label.replace("_", ",")]
+        + ["--db-root", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    commands = [line for line in found.stdout.splitlines() if line.startswith("bash")]
+
+    assert len(rows) == len(TOP_TAGGING_GRID) * len(generator.VARIANTS)
+    assert {row["script"].rsplit("/", 1)[0] for row in rows} == {
+        f"{TOP_TAGGING_ROOT}/{label}"
+    }
+    assert {row["study"]: row["done"] for row in rows}[study] == 100
+    assert found.returncode == 0, found.stderr
+    assert commands and all(f"{TOP_TAGGING_ROOT}/{label}/" in c for c in commands)
 
 
 def test_a_top_tagging_feature_set_logs_apart_from_hls4ml() -> None:

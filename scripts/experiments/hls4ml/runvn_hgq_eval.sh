@@ -2,14 +2,15 @@
 # ========================================================================
 # VN_HGQ EVALUATION COMMANDS
 # ========================================================================
-# Thirty-nine eval runs, one per block of runvn_hgq_train.sh: twenty-eight at
+# Forty-three eval runs, one per block of runvn_hgq_train.sh: twenty-eight at
 # 16 constituents (the float reference, one per beta, the latency ablation,
 # the full-axis designs and the beta scan of the chosen two), then eight at 50
 # and 150, then the two-block finals at 16 with the full-axis offset, then
 # one picked checkpoint of each of the chosen two trained with JEDI-linear's
-# recipe. Hand-written: vn_hgq has no study and the reference is a variant
-# of a study's best, so scripts/experiments/make_train_catalogues.py neither
-# writes nor regenerates this file.
+# recipe, then the picks of the four designs of blocks 40 to 43.
+# Hand-written: vn_hgq has no study and the reference is a variant of a
+# study's best, so scripts/experiments/make_train_catalogues.py neither writes
+# nor regenerates this file.
 # Baseline only: the vector neurons embed the symmetry, so the augmentation
 # and SCL regimes are not run on them.
 # The first block evaluates the float reference, the one-block vn main run
@@ -68,6 +69,13 @@
 # the published JEDI-linear's pipelining (2 ns clock, cutoff 2.7) is nearest
 # that of its Tables I and II (23 and 19): epoch 1099 for D2 and epoch 1899
 # for A2, both at 24 to 25 stages for either table.
+# Blocks 40 to 43 evaluate the designs of blocks 40 to 43 of runvn_hgq_train.sh,
+# D2 and A2 with fixed and with trained input words under JEDI-linear's recipe
+# and a checkpoint every epoch, picked as the published JEDI-linear picks its
+# own: the point of the front of logged validation accuracy against EBOPs
+# nearest 57 237 EBOPs, through the manifests that
+# scripts/experiments/quantised_picks.py writes to <run dir>/picks/target57237
+# for the main run and each fold; rows vn_hgq_<tag>, the probe off for A2.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
 # file to scripts/experiments/submit_eval.sh, which queues them on a GPU or slurm.
@@ -1337,3 +1345,167 @@
 #     trainer=gpu \
 #     trainer.devices=[0] \
 #     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe_epoch1899
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# D2 (block 40) with JEDI-linear's recipe and a checkpoint every epoch, its pick nearest 57 237 EBOPs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_jedirecipe_everyepoch \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=32 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_jedirecipe_everyepoch/picks/target57237 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_jedirecipe_everyepoch_target57237
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# A2 (block 41) with JEDI-linear's recipe and a checkpoint every epoch, its pick nearest 57 237 EBOPs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     algorithm.invariants=32 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_axis_a2_foldtrn_jedirecipe_everyepoch \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.scalar_channels=128 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe_everyepoch/picks/target57237 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_jedirecipe_everyepoch_target57237
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# D2 with trained input words (block 42) with JEDI-linear's recipe and a checkpoint every epoch, its pick nearest 57 237 EBOPs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_nogate_h32_nostream \
+#     algorithm.invariants=8 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_nogate_h32_nostream_foldtrn_trainedwords_jedirecipe_everyepoch \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.quantisation.trained_words=true \
+#     algorithm.scalar_channels=32 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=4 \
+#     algorithm.vector_channels=16 \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_trainedwords_jedirecipe_everyepoch/picks/target57237 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_nogate_h32_nostream_foldtrn_trainedwords_jedirecipe_everyepoch_target57237
+
+# ------------------------------------------------------------------------
+# vn_hgq  nconst=16  baseline  (method=augmentation, group=none)  beta 2e-08 -> 3e-06
+# A2 with trained input words (block 43) with JEDI-linear's recipe and a checkpoint every epoch, its pick nearest 57 237 EBOPs
+# hand-written, no study
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=hls4ml/vn_hgq_16 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     algorithm.axis_offset=true \
+#     algorithm.beta_schedule='[[0,2e-8,linear],[2000,3e-7,log],[7000,3e-6,constant]]' \
+#     algorithm.dropout=0.0 \
+#     algorithm.floatx=float64 \
+#     algorithm.gate=false \
+#     algorithm.head_layers='[32]' \
+#     algorithm.init_from=logs/train/hls4ml/vn/nconst16/baseline_1block_axis_a2 \
+#     algorithm.invariants=32 \
+#     algorithm.jax_platform=cpu \
+#     algorithm.name=vn_hgq_axis_a2_foldtrn_trainedwords_jedirecipe_everyepoch \
+#     algorithm.nbr_feats=5 \
+#     algorithm.num_blocks=1 \
+#     algorithm.optimizer.global_clipnorm=null \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.quantisation.fold_norm=true \
+#     algorithm.quantisation.round_mode=TRN \
+#     algorithm.quantisation.trained_words=true \
+#     algorithm.scalar_channels=128 \
+#     algorithm.scheduler._target_=src.algorithms.utils.keras_schedules.CosineRestarts \
+#     algorithm.scheduler.alpha=3.3333333e-4 \
+#     +algorithm.scheduler.cycles=70 \
+#     +algorithm.scheduler.flat_fraction=0.1 \
+#     algorithm.scheduler.initial_learning_rate=3e-3 \
+#     algorithm.stream_channels=0 \
+#     algorithm.tensor_invariants=1 \
+#     algorithm.vector_channels=16 \
+#     callbacks.invariance_metric.probe=false \
+#     checkpoint_manifest_path=logs/train/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_trainedwords_jedirecipe_everyepoch/picks/target57237 \
+#     data.features='[pt,eta,phi,etarel,phirel]' \
+#     data.full_axis=true \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/hls4ml/vn_hgq/nconst16/baseline_axis_a2_foldtrn_trainedwords_jedirecipe_everyepoch_target57237

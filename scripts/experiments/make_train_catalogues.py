@@ -14,9 +14,12 @@ The hyperparameter optimisation is located at ``logs/optuna/hls4ml``, or under
 ``logs/optuna/hls4ml/<label>/`` for a feature set other than the four-momentum.
 
 ``--dataset top_tagging`` writes the catalogues of the top-tagging replica to
-``scripts/experiments/top_tagging``: its 18 rows at 100 constituents in the baseline
-alone, the searched ones tuned on the studies under ``logs/optuna/top_tagging``, the
-others on the published recipes of their experiment configs.
+``scripts/experiments/top_tagging``, at 100 constituents. The five grid rows run the
+seven regimes on [pt, etarel, phirel], the columns their experiments set, or on the set
+``--features`` names; the 13 rows that pin their columns run the baseline alone and have
+catalogues on the default set alone. The searched rows are tuned on the studies under
+``logs/optuna/top_tagging``, or under ``logs/optuna/top_tagging/<label>/`` for another
+feature set, and the others on the published recipes of their experiment configs.
 """
 
 from __future__ import annotations
@@ -125,7 +128,7 @@ TRIAL_BUDGET = 200
 
 DATASETS = ("hls4ml", "top_tagging")
 # The feature set the grid rows of each data set read by default: the four-momentum of
-# configs/data/hls4ml.yaml, and the columns the top-tagging experiments pin.
+# configs/data/hls4ml.yaml, and the columns the top-tagging grid experiments set.
 DEFAULT_LABEL = {"hls4ml": "px_py_pz_e", "top_tagging": "pt_etarel_phirel"}
 # The rows of the top-tagging replica that follow a published recipe, which no study tunes.
 TOP_TAGGING_RECIPES = [
@@ -139,9 +142,9 @@ TOP_TAGGING_RECIPES = [
     "lloca_so2",
     "lloca_so3",
 ]
-# Every row of the replica, at one constituent count in the baseline regime alone: the
-# recipe rows, the vector neurons, the five grid rows on [pt, etarel, phirel] and the
-# moment rows.
+# Every row of the replica, at one constituent count: the recipe rows, the vector
+# neurons, the five grid rows, which alone run the seven regimes and the three feature
+# sets, and the moment rows.
 TOP_TAGGING = [
     *TOP_TAGGING_RECIPES,
     "vn",
@@ -237,14 +240,14 @@ def overrides_of(params: dict[str, str]) -> list[str]:
 class Layout:
     """Where one data set's and feature set's catalogues, studies and runs live.
 
-    Each data set has trees of its own, named after it. The four-momentum set, which
-    every hls4ml experiment config reads, sits at the root of the hls4ml trees under
-    ``logs/``; any other set is held apart under its own label, the underscore join of
-    its feature names that ``src/utils/results_table.py`` also uses for
-    ``results/<label>/``. The experiments of the top-tagging set pin their features, so
-    its trees have the root alone. The catalogues of the grid rows go under
-    ``<out>/<label>/``, the default set's included (``DEFAULT_LABEL``), and those of the
-    rows that pin their columns at ``<out>/``.
+    Each data set has trees of its own, named after it. Its default set
+    (``DEFAULT_LABEL``) sits at the root of its trees under ``logs/``: the four-momentum
+    that every hls4ml experiment config reads, and the [pt, etarel, phirel] that every
+    top-tagging grid experiment sets. Any other set is held apart under its own label,
+    the underscore join of its feature names that ``src/utils/results_table.py`` also
+    uses for ``results/<label>/``. The catalogues of the grid rows go under
+    ``<out>/<label>/``, the default set's included, and those of the rows that pin their
+    columns at ``<out>/``.
     """
 
     features: tuple[str, ...] | None = None
@@ -252,8 +255,10 @@ class Layout:
 
     @property
     def label(self) -> str | None:
-        """The directory component of this feature set, None for the four-momentum."""
-        return "_".join(self.features) if self.features else None
+        """The directory component of this feature set, None for the data set's default
+        set, named or not, whose blocks read the experiment's own columns."""
+        label = "_".join(self.features) if self.features else None
+        return None if label == DEFAULT_LABEL[self.dataset] else label
 
     @property
     def budget(self) -> int:
@@ -277,7 +282,7 @@ class Layout:
 
     def overrides(self) -> list[str]:
         """The feature-set override every block of this layout carries, if any."""
-        if not self.features:
+        if self.label is None:
             return []
         return [f"data.features={quote('[' + ','.join(self.features) + ']')}"]
 
@@ -300,13 +305,6 @@ def counts_of(model: str, layout: Layout) -> list[int]:
     if layout.dataset == "top_tagging":
         return TOP_TAGGING_NCONSTITUENTS
     return NCONSTITUENTS_OF[model]
-
-
-def variants_of(model: str, layout: Layout) -> list[Variant]:
-    """The regimes a row is trained in: the baseline alone for every top-tagging row."""
-    if layout.dataset == "top_tagging":
-        return VARIANTS[:1]
-    return VARIANTS_OF[model]
 
 
 def _provenance(trial: Trial | None, study: str, recipe: bool) -> str:
@@ -400,20 +398,14 @@ JET_LEVEL_NOTE = [
     "# Baseline only: the jet-level observables are computed upstream and never",
     "# transformed, so the augmentation and SCL regimes have nothing to act on.",
 ]
-TOP_TAGGING_NOTE = [
-    "# Baseline only: the top-tagging replica (Zenodo 2603256) runs every row in the",
-    "# unaugmented regime, the embedded and the grid rows alike.",
-]
 RECIPE_NOTE = [
     "# The block follows the published recipe its experiment config holds; no study",
     "# tunes it.",
 ]
 
 
-def regime_note(model: str, layout: Layout) -> list[str]:
+def regime_note(model: str) -> list[str]:
     """Why a catalogue covers the baseline alone; nothing for the full grid."""
-    if layout.dataset == "top_tagging":
-        return TOP_TAGGING_NOTE
     if model in JET_LEVEL:
         return JET_LEVEL_NOTE
     return BASELINE_ONLY_NOTE if model in EMBEDDED else []
@@ -438,8 +430,8 @@ def features_note(layout: Layout) -> list[str]:
         return []
     return [
         f"# Feature set [{', '.join(layout.features)}]: studies from"
-        f" {layout.under('logs/optuna/hls4ml')}/, runs under"
-        f" logs/{{train,eval}}/hls4ml/{layout.label}/."
+        f" {layout.under(f'logs/optuna/{layout.dataset}')}/, runs under"
+        f" logs/{{train,eval}}/{layout.dataset}/{layout.label}/."
     ]
 
 
@@ -447,7 +439,7 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
     """The banner a catalogue opens with, naming the grid it covers and where it came
     from."""
     what = "TRAINING" if task == "train" else "EVALUATION"
-    ncounts, nvariants = len(counts_of(model, layout)), len(variants_of(model, layout))
+    ncounts, nvariants = len(counts_of(model, layout)), len(VARIANTS_OF[model])
     grid = f"{ncounts} x {nvariants} = {ncounts * nvariants}"
     return [
         "#!/usr/bin/env bash",
@@ -458,7 +450,7 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
         "# by scripts/experiments/make_train_catalogues.py; regenerate"
         " rather than edit by hand.",
         *features_note(layout),
-        *regime_note(model, layout),
+        *regime_note(model),
         *tuned_note(model, layout),
         "#",
         "# Every command is commented out: copy one to run it by hand, or feed the whole",
@@ -484,7 +476,7 @@ def render(model: str, task: str, dbs: Path, layout: Layout) -> str:
     out = file_header(model, task, layout)
     for nconst in counts_of(model, layout):
         out += [BANNER, f"# {model}  nconst={nconst}", BANNER, ""]
-        for variant in variants_of(model, layout):
+        for variant in VARIANTS_OF[model]:
             trial = _tuned(model, nconst, variant, dbs, layout)
             out += make_block(model, nconst, variant, trial, layout)
     return "\n".join(out).rstrip("\n") + "\n"
@@ -517,14 +509,13 @@ def models_of(layout: Layout) -> list[str]:
     Each embedded architecture pins its own columns through ``required_features``: the
     four-momentum for all but ``vn``, whose experiment configs set ``[pt, eta, phi]``,
     and the three moment rows, whose experiment configs set ``[pt, etarel, phirel]``.
-    The jet-level rows read no constituent column at all. Only the default layout has
-    catalogues for either. The top-tagging data set has its own rows.
+    The jet-level rows read no constituent column at all. Only a layout without
+    ``--features`` has catalogues for either. The top-tagging data set has its own rows.
     """
-    if layout.dataset == "top_tagging":
-        return TOP_TAGGING
+    rows = TOP_TAGGING if layout.dataset == "top_tagging" else [*MODELS, *JET_LEVEL]
     if layout.features is None:
-        return [*MODELS, *JET_LEVEL]
-    return [model for model in MODELS if model not in EMBEDDED]
+        return rows
+    return [model for model in rows if model in MODELS and model not in EMBEDDED]
 
 
 def _generate(dbs: Path, out: Path, repo: Path, layout: Layout, dry_run: bool) -> int:
@@ -565,20 +556,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--features",
         default=None,
-        help="Comma-separated feature set, e.g. 'pt,eta,phi'; the default is the "
-        "four-momentum layout every experiment config reads. hls4ml alone.",
+        help="Comma-separated feature set of the grid rows, e.g. 'pt,eta,phi'; without "
+        "it, every row on the data set's default set (px,py,pz,e for hls4ml, "
+        "pt,etarel,phirel for top_tagging).",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report which files would change; write nothing.",
     )
-    args = parser.parse_args()
-    # The top-tagging experiments pin their features, so that data set has no
-    # feature-set trees.
-    if args.features and args.dataset != "hls4ml":
-        parser.error("--features applies to the hls4ml data set alone")
-    return args
+    return parser.parse_args()
 
 
 def _features(spec: str | None) -> tuple[str, ...] | None:

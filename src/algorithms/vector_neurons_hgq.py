@@ -109,11 +109,11 @@ class VectorNeuronsHGQ(KerasQuantisedModule, VectorNeurons):
     def _offset_words(self, x):
         """Quantise the leader's eta and phi from the full jet's axis, columns 3:5 of
         row 0 of rows (jets, N, 5), to angle words (jets, 2), which wrap as ``_words``
-        do."""
+        do and, trained, share one width."""
         q = self.q
         # In hardware each is the leader's word minus the jet axis's, phi wrapped,
         # computed outside the block as the leader subtraction is.
-        return Quantizer(q.fixed(q.angle_kif, "WRAP"), name="offset_word")(x[:, 0, 3:])
+        return Quantizer(q.word(q.angle_kif, (0, 1)), name="offset_word")(x[:, 0, 3:])
 
     def _stream(self, r, keep):
         """JEDI-linear's per-rank network of ``Stream`` on the (jets, N, 2) scalars

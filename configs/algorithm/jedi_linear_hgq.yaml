@@ -1,10 +1,10 @@
-# jedi_linear_moments trained quantisation-aware with HGQ2; moments: none builds the control.
+# JEDI-linear as published (Table II of arXiv:2508.15468), trained quantisation-aware with HGQ2.
 _target_: src.algorithms.jedi_linear_hgq.JEDILinearHGQ
 _convert_: all # plain containers for quantisation, beta_schedule and jax_devices
 name: jedi_linear_hgq
 
 nconstituents: ${data.nconstituents}
-nbr_feats: 3 # required_features pins [pt, etarel, phirel]
+nbr_feats: ${len:${data.features}} # setup() refuses all but [pt, etarel, phirel] and [pt, eta, phi]
 output_dim: 5
 
 method: ${data.method}
@@ -12,45 +12,40 @@ group: ${data.augmentation_scheme}
 symm_loss_weight: 0.1
 transform_kwargs: ${data.transform_kwargs}
 
+# The published point, for every N and feature set.
 hidden: 64
 head_layers: [64, 32, 16]
-aggregation: sum # for both pools
-moments: uniform # rankcut builds the 20 of its 25 that do not vanish; none: the control
-units: 16.0 # GeV per unit of p_T, a power of two so that p is a shift of the p_T word
+inputs: standardised # words: the trigger's fixed p_T and angle words in place of standardised rows
+per_slot: true # datalane widths per slot and feature; false shares them across the slots
+units: 16.0 # GeV per unit of p_T under words, a power of two so that p is a shift of the p_T word
 
 quantisation:
-  # (keep_negative, integer bits, fraction bits) of the p_T, angle and logit words.
+  # (keep_negative, integer bits, fraction bits) of the p_T and angle words, read under words.
   pt_kif: [0, 12, 2]
-  angle_kif: [1, 1, 8]
-  output_kif: [1, 6, 8]
-  data_bits: 14 # i + f of every trainable datalane, seeded before training
-  weight_bits: 8
-  float_mode: false # true: every quantiser is the identity
-  fold_norm: true # the port has no batch norm, so the row refuses false
-  round_mode: TRN # truncation, where RND costs a half-LSB adder; fixed quantisers keep RND
+  angle_kif: [1, 1, 8] # [1, 2, 8] for the absolute eta and phi
 
-beta: 1.0e-7 # weight of the EBOPs in the loss, constant unless beta_schedule is set
-beta_schedule: null # [[epoch, beta, linear|log|constant], ...] of HGQ2's PieceWiseSchedule
-init_from: null # a float jedi_linear_moments, or jedi_linear for the control, copied first
-calibration_jets: 100000 # training jets that seed the datalane bits
+beta: null # the EBOPs weight follows beta_schedule
+beta_schedule: # [epoch, beta, interpolation] points of HGQ2's PieceWiseSchedule
+  - [0, 2.0e-8, linear]
+  - [2000, 3.0e-7, log]
+  - [7000, 3.0e-6, constant]
 floatx: float64 # reproduces the fixed-point arithmetic exactly
 jax_platform: ${trainer.accelerator}
 jax_devices: ${trainer.devices}
 
+# No weight decay and no clipping, as published.
 optimizer:
-  _target_: keras.optimizers.AdamW
+  _target_: keras.optimizers.Adam
   _partial_: true
-  weight_decay: 0.05
-  epsilon: 1.0e-8
-  global_clipnorm: 1.0 # manual optimisation refuses the trainer's clipping
 
 # Stepped per batch by Keras; configure_optimizers injects decay_steps and warmup_steps.
 scheduler:
-  _target_: keras.optimizers.schedules.CosineDecay
+  _target_: src.algorithms.utils.keras_schedules.CosineRestarts
   _partial_: true
-  initial_learning_rate: 1.0e-3
-  alpha: 1.0e-2 # the rate ends at 1e-5
-  warmup_target: null # a rate reached from initial_learning_rate over warmup_fraction
-warmup_fraction: 0.0 # of the steps
+  initial_learning_rate: 3.0e-3
+  alpha: 3.3333e-4 # the floor, 1e-6
+  cycles: 70 # one per 100 epochs of the published 7000
+  flat_fraction: 0.1 # the last 10 epochs of each cycle at the floor
+warmup_fraction: 0.0 # CosineRestarts has no warm-up
 
 compile: false

@@ -73,7 +73,7 @@ LAYOUTS = {
     "jet_level_bdt_all53": "0454180ac26f",
     "jet_level_bdt_noeta52": "0454180ac26f",
     "vn_hgq": "8d315eab0580 a376435f525e 9845c7c24750",
-    "jedi_linear_hgq": "42393fcb63ad 1989a15afe4f f5284ab5a705",
+    "jedi_linear_hgq": "1be9340e1af3 17da4cd6cda1 f33036b522ba",
 }
 LAYOUT = {
     f"{row}_{n}": digest
@@ -131,18 +131,11 @@ COPIES = [
         "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
     ),
     (
-        "algorithm/jedi_linear_moments",
+        "algorithm/jedi_linear",
         "algorithm/jedi_linear_hgq",
-        "_target_ name units optimizer scheduler quantisation beta beta_schedule "
-        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
-    ),
-    (
-        "algorithm/vn_hgq",
-        "algorithm/jedi_linear_hgq",
-        "_target_ name num_blocks vector_channels scalar_channels invariants "
-        "tensor_invariants stream_channels mlp_layers gate head_layers dropout "
-        "axis_offset hidden aggregation moments quantisation.gate_f "
-        "quantisation.fold_norm quantisation.round_mode",
+        "_target_ name aggregation inputs per_slot units quantisation beta "
+        "beta_schedule floatx jax_platform jax_devices optimizer scheduler "
+        "warmup_fraction",
     ),
     (
         "search/deepsets",

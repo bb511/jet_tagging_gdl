@@ -22,7 +22,7 @@ import keras
 import numpy as np
 import torch
 from hgq.config import HardSigmoidConfig, QuantizerConfig
-from hgq.constraints import Min
+from hgq.constraints import Min, MinMax
 from hgq.layers import QBatchNormalization, QDense, QEinsumDense, Quantizer
 from hgq.layers.core import QLayerBase
 from hgq.quantizer.internal import (
@@ -30,6 +30,7 @@ from hgq.quantizer.internal import (
     FixedPointQuantizerKIF,
     TrainableQuantizerBase,
 )
+from hgq.regularizers import MonoL1
 from hgq.utils import trace_minmax
 from jax._src.xla_bridge import backends_are_initialized
 from keras import ops
@@ -67,6 +68,11 @@ KEEP_KIF = (0, 1, 0)
 WEIGHT_I_MIN = -12
 # Fraction bits of the gate in float_mode, where its quantiser only implements the clamp.
 FLOAT_GATE_F = 24
+# The fraction bits a trained input word may take: at most 12, so that a real p_T is at
+# least 2**-12 and the keep flag min(p_T * 2**12, 1) stays exact; and the L1 weight of
+# its bits, that of the published JEDI-linear.
+WORD_F_RANGE = (0, 12)
+WORD_BITS_L1 = 1e-8
 # A GPU run keeps the CPU backend beside CUDA, the default: HGQ2's trace_minmax stages
 # its data under keras.device("cpu:0").
 _PLATFORMS = {"gpu": "cuda,cpu", "cuda": "cuda,cpu", "cpu": "cpu"}
@@ -93,6 +99,9 @@ class Quantisation:
         each into the dense layer that reads it.
     :param round_mode: HGQ2's rounding of every trainable datalane: RND adds half an LSB
         before the floor, which alkaid emits as a constant adder, and TRN truncates.
+    :param trained_words: trains the input words from the widths of ``pt_kif`` and
+        ``angle_kif``, one width per slot, the angles of a slot sharing theirs; False
+        keeps them fixed, the port of every checkpoint without the key.
     """
 
     pt_kif: tuple[int, int, int] = (0, 12, 2)
@@ -104,6 +113,7 @@ class Quantisation:
     float_mode: bool = False
     fold_norm: bool = False
     round_mode: str = "RND"
+    trained_words: bool = False
 
     def datalane(self) -> QuantizerConfig:
         """WRAP per element, rounding by ``round_mode``, f trained and i traced."""
@@ -131,6 +141,21 @@ class Quantisation:
         k, i, f = kif
         kwargs = {"k0": k, "i0": i, "f0": f, "overflow_mode": overflow_mode}
         return QuantizerConfig("kif", "datalane", trainable=False, **kwargs)
+
+    def word(
+        self, kif: Sequence[int], homogeneous_axis: tuple[int, ...]
+    ) -> QuantizerConfig:
+        """The input word of (k, i, f), wrapping: fixed, or under ``trained_words``
+        trained from that width, one width per index of the axes not in
+        *homogeneous_axis*."""
+        if not self.trained_words or self.float_mode:
+            return self.fixed(kif, "WRAP")
+        k, i, f = kif
+        kwargs = {"k0": k, "i0": i, "f0": f, "overflow_mode": "WRAP"}
+        bits = {"fc": MinMax(*WORD_F_RANGE), "fr": MonoL1(WORD_BITS_L1)}
+        return QuantizerConfig(
+            "kif", "datalane", homogeneous_axis=homogeneous_axis, **kwargs, **bits
+        )
 
     def gate(self) -> QuantizerConfig:
         """HGQ2's hard sigmoid q(z) / 4 + 1 / 2, q saturating on [-2, 2)."""
@@ -294,6 +319,25 @@ def seed_datalane_bits(
         for lane in _wrap_lanes(model):
             lane._f.assign(bits - lane.i)
     return ebops
+
+
+def seed_word_bits(
+    model: keras.Model, q: Quantisation, inputs: np.ndarray, batch_size: int = 16384
+) -> int:
+    """Give the trained input words the fraction bits of their trigger words, which
+    ``seed_datalane_bits`` set to its own width, and trace the integer bits afresh.
+
+    :return: the EBOPs of the trace.
+    """
+    words = {"pt_word": q.pt_kif, "angle_word": q.angle_kif, "offset_word": q.angle_kif}
+    for layer in model.layers:
+        if layer.name not in words:
+            continue
+        f = words[layer.name][2]
+        for lane in layer._flatten_layers():
+            if isinstance(lane, FixedPointQuantizerKIF):
+                lane._f.assign(ops.full(lane._f.shape, f, lane._f.dtype))
+    return calibrate(model, inputs, batch_size)
 
 
 def set_beta(model: keras.Model, beta: float) -> None:

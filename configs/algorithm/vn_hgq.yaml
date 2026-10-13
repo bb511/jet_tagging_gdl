@@ -36,6 +36,7 @@ quantisation:
   float_mode: false # true: every quantiser but the gates' clamp is the identity
   fold_norm: false # true: batch norms folded into dense layers, saving alkaid a multiply-add
   round_mode: RND # TRN truncates, saving RND's half-LSB adder; fixed quantisers keep RND
+  trained_words: false # true: p_T and angle words trained per slot from these widths
 
 beta: 1.0e-7 # weight of the EBOPs in the loss, constant unless beta_schedule is set
 beta_schedule: null # [[epoch, beta, linear|log|constant], ...] of HGQ2's PieceWiseSchedule

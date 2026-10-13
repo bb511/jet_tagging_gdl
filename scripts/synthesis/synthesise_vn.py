@@ -12,7 +12,8 @@ bit-exact reference. The top module is named by ``--project``, else by the ``por
    refused, since XLA's float64 2**f is inexact on a GPU;
 2. ``import hgq`` registers its layers and alkaid's plugin for them; the model loads;
 3. Keras predicts the exported words, and a drift from the probe's logits is logged;
-4. alkaid traces the model into combinational logic, as ``alkaid convert`` does, its
+4. alkaid traces the model into combinational logic, as ``alkaid convert`` does but
+   without its pass ``canonicalize_msb_wraps`` (see ``_disable_msb_wrap_pass``), its
    constant matrix-vector products solved by ``--method0`` at ``--hard-dc``; under
    ``--ternary aware`` its adder pairs are then fused latency-aware, so that the
    emulation of step 5 and the co-simulation of step 7 check the fused logic;
@@ -381,13 +382,30 @@ def fuse_aware(comb: Any) -> Any:
     return add_surrogate(dead_code_elimin(fused), _skip_op8_cost=True)
 
 
+def _disable_msb_wrap_pass() -> None:
+    """Replace alkaid's pass ``canonicalize_msb_wraps`` by the identity.
+
+    In alkaid 0.8.1 the pass sets to zero the shift of a one-bit quantise op whose
+    output step equals the MSB weight of its source, but the step is measured after the
+    shift and the MSB before it, so a nonzero shift is dropped and the op reads another
+    bit of its source. The emulation and the RTL carry the error alike and only the
+    Keras check sees it; without the pass the affected JEDI-linear designs were exact at
+    the same cost (2026-10-12).
+    """
+    # TODO(Patrick): remove once alkaid fixes the pass upstream.
+    import alkaid.trace.passes.canon as canon
+
+    canon.canonicalize_msb_wraps = lambda comb: comb
+
+
 def trace_comb(model: Any, options: dict[str, Any], ternary: str) -> Any:
     """Trace the model into alkaid's combinational logic with the solver *options*, as
-    ``alkaid convert`` does, and fuse its adders latency-aware under *ternary*
-    ``aware``."""
+    ``alkaid convert`` does but without ``canonicalize_msb_wraps``, and fuse its adders
+    latency-aware under *ternary* ``aware``."""
     from alkaid.converter import trace_model
     from alkaid.trace import HWConfig, trace
 
+    _disable_msb_wrap_pass()
     inputs, outputs = trace_model(model, HWConfig(1, 1, -1), options)
     comb = trace(inputs, outputs)
     return fuse_aware(comb) if ternary == "aware" else comb

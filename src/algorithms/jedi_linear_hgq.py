@@ -1,223 +1,304 @@
-"""Quantisation-aware port of JEDI-linear, with or without the jet moments, to HGQ2.
+"""Quantisation-aware port of the published JEDI-linear to HGQ2, trained from scratch.
 
-The port reproduces ``JEDILinearNet`` (jedi_linear.py) on the rows [p_T GeV, etarel,
-phirel] sorted by decreasing p_T; the sort and the subtraction of the jet axis stay
-outside the block and hence are not counted in latency or resources.
+The network, its quantisers and its training are those of Table II of arXiv:2508.15468
+(``get_gnn`` and ``get_model`` of github.com/calad0i/JEDI-linear at 48032802, with
+``configs/sweep-n16-f3.yaml``): every layer a dense layer with batch normalisation
+folded in, no mask, no output quantiser, the two pools scaled by powers of two, and
+every datalane quantised per slot and feature. The one deviation is the floor
+``WEIGHT_I_MIN`` on the integer bits of every weight and bias, which keeps alkaid's
+emulation exact (the error found on 2026-10-10).
 
-The port reads the record's rows [p_T GeV, etarel, phirel] sorted by p_T, the angles
-measured outside the block from the axis of the kept constituents, as the published
-network reads them; ``_prepare_inputs`` de-normalises, sorts and clamps them in torch.
+Under ``inputs: standardised`` the port reads, as theirs does, the rows standardised by
+the mean and standard deviation of every jet and slot of the pooled training and
+validation splits, padded rows included; the first layer's trainable input quantiser is
+then the only input quantisation. Under ``inputs: words`` it reads the trigger's fixed
+p_T and angle words, p_T shifted to units of ``units`` GeV, as the vector-neuron port
+does. ``_prepare_inputs`` de-normalises the rows, sorts them by p_T and standardises or
+clamps them in torch, outside the block.
 """
 
-from math import log2
+import math
+from collections.abc import Iterable, Iterator
+from contextlib import ExitStack
 from typing import Any
 
 import torch
 
 from src.algorithms.components.geometry import _sort_by_pt
-from src.algorithms.components.hgq_port import KerasNetwork, _metric, _take
-from src.algorithms.components.moments import (
-    MOMENT_FEATURES,
-    MOMENT_SETS,
-    MOMENT_SUPPORT,
-    RANK_CUTS,
-)
-from src.algorithms.components.pooling import AGGREGATIONS, _check_choice
+from src.algorithms.components.hgq_port import WEIGHT_I_MIN, KerasNetwork, word_range
+from src.algorithms.components.pooling import _check_choice
 from src.algorithms.jedi_linear import JEDILinearNet
-from src.algorithms.keras_base import CALIBRATION_BATCH, KerasQuantisedModule
-from src.algorithms.utils.jedi_linear_port import (
-    architecture,
-    copy_float_weights,
-    float_network,
-    load_float_network,
-)
+from src.algorithms.keras_base import CALIBRATION_BATCH, CHUNK, KerasQuantisedModule
+from src.utils.pylogger import RankedLogger
 
 # isort: split
 
 # After the component, which selects Keras's JAX backend before the first import.
 import keras
-from hgq.config import LayerConfigScope
-from hgq.layers import QAdd, QGlobalMaxPooling1D
+from hgq.config import LayerConfigScope, QuantizerConfigScope
+from hgq.constraints import Min, MinMax
+from hgq.layers import QAdd, QEinsumDenseBatchnorm, QSum
+from hgq.quantizer.internal import FixedPointQuantizerKBI, FixedPointQuantizerKIF
+from hgq.regularizers import MonoL1
 from keras import ops
 
+log = RankedLogger(__name__)
 
-def _support(cut: int | None) -> int:
-    """How many of the five moments the cut leaves nonzero; they are the leading ones,
-    since ``MOMENT_SUPPORT`` does not decrease."""
-    return sum(cut is None or need <= cut for need in MOMENT_SUPPORT)
+# The columns the port reads: the angles from the jet's axis, or absolute.
+COLUMNS = (["pt", "etarel", "phirel"], ["pt", "eta", "phi"])
+INPUTS = ("standardised", "words")
+# get_model at Table II: the initial bits of every weight (b0) and the initial fraction
+# bits of every datalane (f0), and the L1 weight of every bit count.
+INITIAL_BITS = 7
+BITS_L1 = 1e-8
+# The readout pool's scale, a constant of the published code at every N.
+READOUT_SCALE = 1 / 16
+
+
+def _quantiser_scopes(per_slot: bool) -> list:
+    """HGQ2's defaults as ``get_model`` and then ``get_gnn`` set them, followed by the
+    floor on the integer bits of every weight and bias.
+
+    :param per_slot: one width per slot and feature of every datalane; False shares the
+        widths across the slots, their ``gnn_uq1``.
+    """
+    l1 = MonoL1(BITS_L1)
+    kbi = dict(default_q_type="kbi", b0=INITIAL_BITS, i0=0, fr=l1, ir=l1)
+    kif = dict(default_q_type="kif", place="datalane", f0=INITIAL_BITS, fr=l1)
+    return [
+        QuantizerConfigScope(overflow_mode="wrap", **kbi),
+        QuantizerConfigScope(overflow_mode="wrap", ic=MinMax(0, 12), **kif),
+        LayerConfigScope(beta0=0),
+        QuantizerConfigScope(place=("weight", "bias"), overflow_mode="SAT_SYM"),
+        QuantizerConfigScope(
+            place="datalane", heterogeneous_axis=None if per_slot else (-1,)
+        ),
+        QuantizerConfigScope("kbi", ("weight", "bias"), ic=Min(WEIGHT_I_MIN)),
+    ]
+
+
+def _dense(equation: str, shape, name: str, activation: str | None = "relu"):
+    """A dense layer with its batch normalisation folded in, as every layer of
+    ``get_gnn``; its quantisers take the scopes' defaults."""
+    return QEinsumDenseBatchnorm(
+        equation, shape, bias_axes="C", activation=activation, name=name
+    )
+
+
+def _column_moments(
+    batches: Iterable[torch.Tensor],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The mean and standard deviation of each column over every jet and slot of the
+    (jets, N, F) *batches*, in float64, as numpy's mean and std over axes (0, 1)."""
+    total = squares = count = 0
+    for rows in batches:
+        rows = rows.double().flatten(0, 1)
+        total, squares = total + rows.sum(0), squares + rows.square().sum(0)
+        count += len(rows)
+    mean = total / count
+    return mean, (squares / count - mean.square()).sqrt()
+
+
+def _check_columns(features: list[str], inputs: str, angle_kif) -> None:
+    """Refuse columns other than those of ``COLUMNS``, and absolute angles that the
+    angle words cannot hold.
+
+    :raises ValueError: on other columns, or under ``words`` on [pt, eta, phi] with an
+        angle word that does not span [-pi, pi].
+    """
+    if features not in COLUMNS:
+        raise ValueError(
+            f"jedi_linear_hgq reads {COLUMNS[0]} or {COLUMNS[1]}, but data.features is "
+            f"{features}."
+        )
+    low, high = word_range(angle_kif)
+    narrow = low > -math.pi or high < math.pi
+    if inputs == "words" and features == COLUMNS[1] and narrow:
+        raise ValueError(
+            f"The angle word {list(angle_kif)} spans [{low}, {high}], which cannot hold "
+            "an absolute phi: set algorithm.quantisation.angle_kif to [1,2,8]."
+        )
+
+
+def _round_mode(model: keras.Model) -> str:
+    """The rounding of every fixed-point quantiser of *model*, '/'-joined if several."""
+    quantisers = (FixedPointQuantizerKBI, FixedPointQuantizerKIF)
+    layers = model._flatten_layers()
+    return "/".join(sorted({q.round_mode for q in layers if isinstance(q, quantisers)}))
 
 
 class JEDILinearHGQ(KerasQuantisedModule):
-    """JEDI-linear trained quantisation-aware with HGQ2, for synthesis by alkaid.
+    """JEDI-linear as published, trained quantisation-aware with HGQ2 for synthesis by
+    alkaid.
 
-    Its head reads the jet moments under ``moments`` uniform or rankcut; under none it
-    is the control without them.
+    It reads whichever of [pt, etarel, phirel] and [pt, eta, phi] ``data.features``
+    names; the first is the default before ``setup``.
     """
 
-    required_features = list(MOMENT_FEATURES)
+    required_features = COLUMNS[0]
 
     def build_net(
         self,
         hidden: int,
         head_layers: list[int],
-        aggregation: str = "sum",
-        moments: str = "uniform",
+        inputs: str = "standardised",
+        per_slot: bool = True,
         units: float = 16.0,
         quantisation: dict[str, Any] | None = None,
-        beta: float = 1e-7,
+        beta: float | None = None,
         beta_schedule: list[list] | None = None,
-        init_from: str | None = None,
-        calibration_jets: int = 100_000,
         floatx: str = "float64",
         jax_platform: str = "cpu",
         jax_devices: int | list[int] = 1,
         warmup_fraction: float = 0.0,
     ) -> KerasNetwork:
-        """Build the port; the arguments after ``units`` are described in
+        """Build the port; the arguments after ``head_layers`` are described in
         configs/algorithm/jedi_linear_hgq.yaml, and the training ones are read from the
         hyperparameters when they are needed."""
+        # In the checkpoint; set from the pooled training and validation splits at
+        # setup("fit").
+        width = self.hparams.nbr_feats
+        self.register_buffer("input_mean", torch.zeros(width, dtype=torch.float64))
+        self.register_buffer("input_std", torch.ones(width, dtype=torch.float64))
         return self._keras_net(quantisation, floatx, jax_platform, jax_devices)
 
-    def _pool(self, name: str, x, keepdims: bool = False):
-        """Pool the (jets, N, hidden) *x*, its padded slots zero, over the slots: the
-        maximum, or the sum under sum and sum_over_n."""
-        if self.hparams.aggregation != "max":
-            return self._sum(name, x, keepdims=keepdims)
-        pool = QGlobalMaxPooling1D(
-            keepdims=keepdims, iq_conf=self.q.datalane(), name=name
-        )
-        return pool(x)
+    def setup(self, stage: str) -> None:
+        """Take the columns ``data.features`` names, then set up as every quantised row.
 
-    def _constituents(self, p, angles, keep):
-        """The per-constituent network from the embedding to the second pool, (jets,
-        hidden)."""
-        q, width = self.q, self.hparams.hidden
-        rows = ops.concatenate([ops.expand_dims(p, -1), angles], axis=-1)
-        h = self._dense(width, "embed", activation="relu")(rows)
-        h = self._keep_multiply("keep0", h, keep)
-        pooled = self._pool("pool0", h, keepdims=True)
-        context = self._dense(width, "context", activation="relu")(pooled)
-        local = self._dense(width, "local", activation="relu")(h)
-        g = QAdd(iq_confs=q.datalane(), name="context_add")([local, context])
-        g = self._dense(width, "shared", activation="relu")(g)
-        return self._pool("pool1", self._keep_multiply("keep1", g, keep))
+        :raises ValueError: as ``_check_columns`` does.
+        """
+        datamodule = getattr(self._trainer, "datamodule", None)
+        if datamodule is not None:
+            features = list(datamodule.features)
+            _check_columns(features, self.hparams.inputs, self.quantisation.angle_kif)
+            self.required_features = features
+        super().setup(stage)
 
-    def _matrices(self, c: int, u, tail):
-        """U = sum_i u_i, (jets, 4), and M = sum_i u_i (1, tail_i)^T, (jets, 4, 4), of the
-        lifts u and tails of the slots of cut *c*."""
-        big_u = self._sum(f"moments{c}_u", u)
-        outer = self._einsum("bni,bnj->bij", f"moments{c}_m", u, tail)
-        return big_u, ops.concatenate([ops.expand_dims(big_u, -1), outer], axis=-1)
+    def _initialise(self, datamodule) -> None:
+        """Set the standardisation under ``standardised``.
 
-    def _triangle(self, c: int, gm):
-        """The triangle tr(GM GM GM), (jets,), of the (jets, 4, 4) GM of cut *c*."""
-        gm2 = self._einsum("bij,bjl->bil", f"moments{c}_gm2", gm, gm)
-        return self._einsum("bil,bli->b", f"moments{c}_triangle", gm2, gm)
+        Nothing is copied and no bit seeded: the weights start at ``b0`` bits, the
+        datalanes at ``f0`` fraction bits, and HGQ2 traces their integer bits in
+        training.
+        """
+        if self.hparams.inputs != "standardised":
+            return
+        mean, std = _column_moments(self._pooled_rows(datamodule))
+        self.input_mean.copy_(mean)
+        self.input_std.copy_(std)
+        names = self.required_features
+        log.info(f"Standardising {names}: mean {mean.tolist()}, std {std.tolist()}")
 
-    def _forms(self, c: int, big_u, m, kept: int) -> list:
-        """The moments pair, chain, pair4 and, when the cut keeps all five, triangle,
-        (jets,) each, as ``_weighted_moments`` computes them."""
-        gu, gm = _metric(big_u, 1), _metric(m, 1)
-        pair = self._einsum("bm,bm->b", f"moments{c}_pair", big_u, gu)
-        mgu = self._einsum("bij,bj->bi", f"moments{c}_mgu", m, gu)
-        chain = self._einsum("bi,bi->b", f"moments{c}_chain", gu, mgu)
-        pair4 = self._einsum("bij,bji->b", f"moments{c}_pair4", gm, gm)
-        forms = [pair, chain, pair4]
-        if kept == len(MOMENT_SUPPORT):
-            forms.append(self._triangle(c, gm))
-        return forms
+    def _pooled_rows(self, datamodule) -> Iterator[torch.Tensor]:
+        """The rows of the training and validation splits, padded rows included."""
+        for split in ("train", "validation"):
+            jets, _ = datamodule.load_split(split)
+            for chunk in jets.split(CHUNK):
+                yield self._rows(chunk[..., self.model_feature_indices])
 
-    def _cut_moments(self, c: int, cut: int | None, p, tail, u) -> list:
-        """The moments that cut *c* leaves nonzero, (jets, 1) each: those of the leading
-        *cut* slots, or of every slot under None."""
-        kept = _support(cut)
-        if kept == 1:
-            # sum_p of the leading constituent alone: its p, with no layer.
-            return [p[:, :1]]
-        if cut is not None:
-            u, tail = _take(u, 1, 0, cut), _take(tail, 1, 0, cut)
-        big_u, m = self._matrices(c, u, tail)
-        forms = self._forms(c, big_u, m, kept)
-        return [big_u[:, :1], *(ops.expand_dims(form, -1) for form in forms)]
+    def _rows(self, x: torch.Tensor) -> torch.Tensor:
+        """Return (jets, N, 3) rows [p_T GeV, angle, angle], the angles in radians,
+        sorted by decreasing p_T."""
+        return _sort_by_pt(super()._prepare_inputs(x))
 
-    def _moments(self, p, angles, cuts: tuple[int | None, ...]) -> list:
-        """The moments the rank cuts leave nonzero, (jets, 1) each, in the order of the
-        flattened ``JetMoments.support``; none without moments."""
-        if not cuts:
-            return []
-        tail, u = self._lifts(p, angles)
-        return [
-            m
-            for c, cut in enumerate(cuts)
-            for m in self._cut_moments(c, cut, p, tail, u)
-        ]
-
-    def _head(self, columns: list):
-        """The head's MLP on the pooled vector and the moments; no softmax."""
-        q, n_class = self.q, self.hparams.output_dim
-        x = ops.concatenate(columns, axis=-1) if len(columns) > 1 else columns[0]
-        for j, width in enumerate(self.hparams.head_layers):
-            x = self._dense(width, f"head{j}", activation="relu")(x)
-        oq = q.fixed(q.output_kif)
-        return self._dense(n_class, "head_last", enable_oq=True, oq_conf=oq)(x)
+    def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """Return the rows the port reads, (jets, N, 3): standardised, or each column
+        clamped to the range of its word."""
+        x = self._rows(x)
+        if self.hparams.inputs == "words":
+            return self._clamp_words(x[..., :1], x[..., 1:])
+        return (x - self.input_mean) / self.input_std
 
     def _check_options(self) -> None:
-        if not self.q.fold_norm:
-            raise ValueError(
-                "The JEDI-linear port has no batch normalisation: the copy folds the "
-                "moments' into the head's first layer. Set quantisation.fold_norm true."
-            )
-        _check_choice("aggregation", self.hparams.aggregation, AGGREGATIONS)
-        _check_choice("moments", self.hparams.moments, MOMENT_SETS)
-        if not log2(self.units).is_integer():
+        _check_choice("inputs", self.hparams.inputs, INPUTS)
+        if not math.log2(self.units).is_integer():
             raise ValueError(f"units must be a power of two, got {self.units}.")
 
-    def _input_stage(self) -> tuple:
-        """The input rows, their words, p and keep."""
-        x = keras.Input((self.nconstituents, 3), name="constituents")
+    def _input_stage(self, x) -> tuple:
+        """The first layer's input and the words it is read from, None under
+        ``standardised``."""
+        if self.hparams.inputs == "standardised":
+            return x, None
         pt, angles = self._words(x)
-        p, keep = self._p_keep(pt)
-        return x, pt, angles, p, keep
+        # A division rather than the product by 1 / units, as in _p_keep.
+        p = ops.expand_dims(pt / self.units, -1)
+        return ops.concatenate([p, angles], axis=-1), self._word_rows(pt, angles, None)
+
+    def _constituents(self, h):
+        """``get_gnn`` from the embedding *h*, (jets, N, hidden), to the readout pool,
+        (jets, hidden)."""
+        n, width = self.nconstituents, self.hparams.hidden
+        local = _dense("bnc,cC->bnC", (n, width), "local")(h)
+        scale = 2.0 ** -round(math.log2(n))
+        pooled = QSum(axes=1, scale=scale, keepdims=True, name="pool0")(h)
+        context = _dense("bnc,cC->bnC", (1, width), "context")(pooled)
+        h = QAdd(name="context_add")([local, context])
+        h = _dense("bnc,cC->bnC", (n, width), "shared")(h)
+        return QSum(axes=1, scale=READOUT_SCALE, name="pool1")(h)
+
+    def _head(self, x):
+        """The head's MLP; the logits have no softmax and no output quantiser."""
+        for j, width in enumerate(self.hparams.head_layers):
+            x = _dense("bc,cC->bC", width, f"head{j}")(x)
+        n_class = self.hparams.output_dim
+        return _dense("bc,cC->bC", n_class, "head_last", activation=None)(x)
 
     def _build_port(self) -> tuple[keras.Model, keras.Model]:
-        """Build the port and the model of its input words, wiring the stages in the
-        order of ``JEDILinearNet.forward``.
+        """Build the port, wired as ``get_gnn`` wires it, and the model of its inputs.
 
         Call ``configure_jax`` first: the layers take Keras's floatx at construction.
 
         :return: the network, (jets, N, 3) rows to (jets, n_class) logits, and the model
-            of its inputs, the same rows to the quantised words it reads, of their
-            shape.
-        :raises ValueError: unless ``fold_norm`` is true, on an unknown pooling or
-            moment set, or when *units* is not a power of two.
+            of its inputs, the same rows to the words under ``words`` or, under
+            ``standardised``, to the output of the first layer's input quantiser.
+        :raises ValueError: on an unknown ``inputs``, or when *units* is not a power of
+            two.
         """
         self._check_options()
-        moments = self.hparams.moments
-        cuts = () if moments == "none" else RANK_CUTS[moments]
-        with LayerConfigScope(beta0=0.0, enable_ebops=True):
-            x, pt, angles, p, keep = self._input_stage()
-            pooled = self._constituents(p, angles, keep)
-            logits = self._head([pooled, *self._moments(p, angles, cuts)])
-        words = self._word_rows(pt, angles, None)
+        n = self.nconstituents
+        x = keras.Input((n, self.hparams.nbr_feats), name="constituents")
+        rows, words = self._input_stage(x)
+        with ExitStack() as scopes:
+            for scope in _quantiser_scopes(self.hparams.per_slot):
+                scopes.enter_context(scope)
+            embed = _dense("bnc,cC->bnC", (n, self.hparams.hidden), "embed")
+            logits = self._head(self._constituents(embed(rows)))
+        # Under standardised the stored inputs are the first quantiser's fixed-point
+        # output, on which alkaid's trace of the same quantiser is the identity.
+        words = embed.iq(x) if words is None else words
         model = keras.Model(x, logits, name="jedi_linear_hgq")
         return model, keras.Model(x, words, name="words")
 
     def _float_twin(self) -> JEDILinearNet:
-        """The float JEDI-linear of this architecture, as its float row is priced."""
-        return float_network(architecture(self.hparams), self.hparams.output_dim)
-
-    def _copy_float_network(self, model: keras.Model) -> None:
-        """Copy the float JEDI-linear of ``init_from``, read on the record's scales."""
-        net = load_float_network(self.hparams.init_from, like=self.hparams)
-        copy_float_weights(model, net, self.hparams.units, self.denorm_scales)
-
-    def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
-        """Return the rows the port reads, (jets, N, 3) [p_T GeV, etarel, phirel],
-        sorted by decreasing p_T, each column clamped to the range of its word."""
-        x = _sort_by_pt(super()._prepare_inputs(x))
-        return self._clamp_words(x[..., :1], x[..., 1:])
+        """The float JEDI-linear of this architecture, sum pooling and no moments."""
+        hp = self.hparams
+        return JEDILinearNet(
+            hp.nbr_feats,
+            hp.hidden,
+            hp.head_layers,
+            hp.output_dim,
+            aggregation="sum",
+            moments="none",
+        )
 
     def _calibration_batch(self) -> int:
         """Fewer jets per trace batch at larger N."""
         # The trace holds (jets, N, hidden) float64 intermediates.
         return max(1024, CALIBRATION_BATCH * 16 // self.hparams.nconstituents)
+
+    def _export_meta(self, n_test: int) -> dict[str, Any]:
+        """The base's record, with the columns, the input mode, whether the datalane
+        widths are per slot, the standardisation and the rounding of the port's
+        quantisers."""
+        meta, q = super()._export_meta(n_test), self.quantisation
+        standardised = self.hparams.inputs == "standardised"
+        words = {"pt_kif": list(q.pt_kif), "angle_kif": list(q.angle_kif)}
+        moments = {"mean": self.input_mean.tolist(), "std": self.input_std.tolist()}
+        return meta | {
+            "features": list(self.required_features),
+            "inputs": self.hparams.inputs,
+            "per_slot": self.hparams.per_slot,
+            "quantisation": None if standardised else words,
+            "standardisation": moments if standardised else None,
+            "round_mode": _round_mode(self.net.keras_model),
+        }
