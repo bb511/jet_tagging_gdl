@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,14 @@ QUANTISED_EPOCHS = {
     18: (90_000, 0.69, 0.50, 91_000, 0.69),
 }
 UNEVALUATED, DELETED = 14, 17
+# The calibrated front's epochs: (estimated latency in ns, LUTs, DSPs). Epoch 10 is over
+# 100 ns; epoch 13 holds 5.8 % of the LUTs but 10 % of the DSPs, which bind.
+HARDWARE = {
+    10: (110.0, 200_000, 0),
+    11: (95.0, 140_000, 0),
+    13: (80.0, 100_000, 1229),
+    15: (70.0, 60_000, 0),
+}
 LOG_PREFIX = "[2026-10-13 00:00:00,000][src.algorithms.keras_base][INFO] - [rank: 0] "
 N_JETS, N_CLASSES = 100, 5
 
@@ -57,6 +66,10 @@ def _quantised_run(root: Path, fold: int | None = None) -> Path:
         if epoch not in (DELETED, UNEVALUATED):
             outputs = run / "evaluations" / f"epoch_{epoch:03d}" / "outputs"
             _evaluation(outputs, traced, calibrated)
+        if epoch in HARDWARE:
+            latency, lut, dsp = HARDWARE[epoch]
+            estimate = {"latency_ns": latency, "lut": lut, "dsp": dsp}
+            (outputs.parent / "estimate.json").write_text(json.dumps(estimate))
     (run / "train.log").write_text("\n".join(lines) + "\n")
     label = "main" if fold is None else f"fold_{fold}"
     entry = ManifestRun(label, fold, str(run / "checkpoints" / "epoch_016.ckpt"), 0.7)
@@ -93,3 +106,22 @@ def test_the_quantised_picks_follow_the_calibrated_front(tmp_path: Path) -> None
     (empty / "train.log").write_text("")
     with pytest.raises(SystemExit, match="no epoch on the front"):
         picks.pick(empty, empty / "evaluations", 1.0)
+
+
+def test_the_hardware_picks_keep_the_budget_and_the_binding_resource(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run = _quantised_run(tmp_path / "run")
+    evaluations, out = run / "evaluations", tmp_path / "picks"
+    reference = tmp_path / "reference.json"
+    reference.write_text(json.dumps({"lut": 95_040, "dsp": 0}))  # 5.5 % of the LUTs
+    picks.main(["front", str(run), str(evaluations)])
+    picks.main(["pick-hw", str(run), str(evaluations), "100", str(out)])
+
+    assert capsys.readouterr().out.split()[:4] == ["15", "13", "11", "10"]
+    # Epoch 10 is the most accurate but over budget.
+    assert Path(merge_manifests(out).runs[0].checkpoint_path).name == "epoch_011.ckpt"
+    # By its LUTs epoch 13 would be nearest; its DSPs leave 15 nearest.
+    assert picks.pick_hardware(run, evaluations, 100.0, reference)[0] == 15
+    with pytest.raises(SystemExit, match="within 50.0 ns"):
+        picks.pick_hardware(run, evaluations, 50.0)

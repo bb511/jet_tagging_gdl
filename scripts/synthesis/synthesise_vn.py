@@ -43,10 +43,19 @@ run in ``<dir>/prj``::
     python scripts/synthesis/synthesise_vn.py --export-dir <eval dir>/outputs/main_hgq \\
         --outputs-npz <eval dir>/outputs/main.npz --out <dir> --no-cosim --no-vivado
     python scripts/synthesis/synthesise_vn.py --out <dir> --report-only
+
+``--estimate-only`` needs ``--export-dir`` alone and runs neither Keras nor a tool: it
+traces the model under every CMVM method of ``METHODS`` at every hard_dc of
+``SCAN_HARD_DC``, keeps the setting of fewest pipeline stages at ``--latency-cutoff``
+(of equal stages, the shortest delay) and writes ``<out>/estimate.json``: the setting,
+its cycles and their nominal latency at ``--clock``, and the DSPs and LUTs Vivado would
+use (``DSP_MIN_BITS``, ``LUTS_PER_COST``), so that a checkpoint is chosen on hardware
+before any implementation.
 """
 
 import argparse
 import csv
+import itertools
 import json
 import logging
 import math
@@ -105,6 +114,14 @@ VIVADO_DONE = {"LUT", "WNS(ns)"}
 METHODS = ("wmc", "mc", "wmc-pdc", "mc-pdc")
 # The ternary-adder fusion: alkaid's (RTLModel's default), none, or fuse_aware's.
 TERNARY = ("fused", "off", "aware")
+# --estimate-only traces under every method of METHODS at each of these hard_dc.
+SCAN_HARD_DC = (0, 1)
+# Vivado's mapping at 5 ns, fitted on the 13 designs implemented by 2026-10-14
+# (JEDI-linear and the vector neurons): a product of two variables whose narrower
+# operand has more than DSP_MIN_BITS bits lands in a DSP (counts within 2 %), and the
+# LUTs are LUTS_PER_COST of alkaid's cost without those products (0.89 to 0.95).
+DSP_MIN_BITS = 5
+LUTS_PER_COST = 0.92
 
 CSV_FIELDS = (
     "model",
@@ -178,6 +195,10 @@ OPTIONS: tuple[tuple[str, dict[str, Any]], ...] = (
         "--report-only",
         {"action": "store_true", "help": "only <out>/prj and check.json to a row"},
     ),
+    (
+        "--estimate-only",
+        {"action": "store_true", "help": "scan alkaid, write <out>/estimate.json"},
+    ),
 )
 
 
@@ -210,7 +231,8 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 def missing_tools(args: argparse.Namespace) -> list[str]:
     """The external tools that the requested steps need and PATH lacks."""
     skipped = {args.vivado: args.no_vivado, "verilator": args.no_cosim}
-    needed = [tool for tool, skip in skipped.items() if not (skip or args.report_only)]
+    alone = args.report_only or args.estimate_only
+    needed = [tool for tool, skip in skipped.items() if not (skip or alone)]
     return [tool for tool in needed if shutil.which(tool) is None]
 
 
@@ -220,7 +242,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     for flag, options in OPTIONS:
         parser.add_argument(flag, **options)
     args = parser.parse_args(argv)
-    if not args.report_only and None in (args.export_dir, args.outputs_npz):
+    if args.estimate_only and args.export_dir is None:
+        parser.error("--export-dir is needed under --estimate-only")
+    needs_both = not (args.report_only or args.estimate_only)
+    if needs_both and None in (args.export_dir, args.outputs_npz):
         parser.error("--export-dir and --outputs-npz are needed without --report-only")
     if missing := missing_tools(args):
         parser.error(f"not on PATH: {', '.join(missing)}; see --no-cosim, --no-vivado")
@@ -567,6 +592,68 @@ def build(args: argparse.Namespace) -> None:
     generate(args, comb, flatten(parts), y_alkaid, check)
 
 
+def _bits(qint: Any) -> int:
+    """The bits of a fixed-point interval (min, max, step), its sign bit included."""
+    low, high, step = qint
+    if step == 0 or low == high == 0:
+        return 0
+    return math.ceil(math.log2(max(-low, high + step) / step)) + int(low < 0)
+
+
+def dsp_products(comb: Any) -> tuple[int, float]:
+    """The products of two variables (opcode 7) that Vivado maps to DSPs, and their
+    alkaid cost."""
+    ops = comb.ops
+    wide = [
+        op
+        for op in ops
+        if op.opcode == 7 and min(_bits(ops[i].qint) for i in op.addr) > DSP_MIN_BITS
+    ]
+    return len(wide), sum(op.cost for op in wide)
+
+
+def _pipelined(args: argparse.Namespace, model: Any, method0: str, hard_dc: int):
+    """Trace under one setting and pipeline at --latency-cutoff, writing nothing."""
+    import tempfile
+
+    from alkaid.codegen import RTLModel
+
+    comb = trace_comb(model, {"hard_dc": hard_dc, "method0": method0}, args.ternary)
+    kwargs = {name: getattr(args, key) for key, name in RTL_OPTIONS.items()}
+    with tempfile.TemporaryDirectory() as unused:
+        rtl = RTLModel(
+            comb, unused, args.project, ternary_fuse=args.ternary == "fused", **kwargs
+        )
+    return rtl.latency, rtl._comb
+
+
+def scan(args: argparse.Namespace, model: Any) -> tuple[dict[str, Any], Any]:
+    """The setting of fewest pipeline stages, of equal stages the shortest delay, as the
+    implementations were chosen from 2026-10-12, and its pipelined logic."""
+    results = []
+    for method0, hard_dc in itertools.product(METHODS, SCAN_HARD_DC):
+        cycles, comb = _pipelined(args, model, method0, hard_dc)
+        setting = {"method0": method0, "hard_dc": hard_dc, "cycles": cycles}
+        setting |= {"delay_ns": comb.latency[1], "cost": comb.cost}
+        results.append((setting, comb))
+    return min(results, key=lambda result: (result[0]["cycles"], result[0]["delay_ns"]))
+
+
+def estimate(args: argparse.Namespace) -> None:
+    """Write ``<out>/estimate.json``: the scan's setting, its cycles and nominal latency
+    at --clock, and the LUTs and DSPs Vivado would use, without running Vivado."""
+    export = read_json(args.export_dir / "export.json")
+    args.project = project_name(args, export)
+    model = _timed("loading", load_model, args.export_dir, export["floatx"])
+    setting, comb = _timed("alkaid scan", scan, args, model)
+    n_dsp, dsp_cost = dsp_products(comb)
+    hardware = {"latency_ns": setting["cycles"] * args.clock, "dsp": n_dsp}
+    hardware["lut"] = round(LUTS_PER_COST * (setting["cost"] - dsp_cost))
+    write_json(
+        args.out / "estimate.json", setting | hardware | {"ebops": export["ebops"]}
+    )
+
+
 def run_vivado(vivado: str, prj: Path) -> None:
     """Implement the project out of context; Vivado's own log is ``prj/vivado.log``."""
     subprocess.run(
@@ -660,6 +747,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the steps the command line asks for; return the exit status."""
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    if args.estimate_only:
+        estimate(args)
+        return 0
     check_header(args.csv)
     if not args.report_only:
         build(args)

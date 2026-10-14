@@ -32,6 +32,20 @@ pick's, to ``<picks dir>`` for the main run and to ``<picks dir>/fold_<i>`` for 
 the layout in which ``src/eval.py`` merges a main run with its folds, so that
 ``checkpoint_manifest_path=<picks dir>`` evaluates the picks of every fold into one
 results row. The test split enters no step.
+
+A pick on hardware rather than on EBOPs, the rule for the vector neurons, whose products
+of two variables Vivado maps to DSPs that EBOPs do not price::
+
+    python scripts/experiments/quantised_picks.py front <run dir> <evaluations>
+    python scripts/experiments/quantised_picks.py pick-hw <run dir> <evaluations> \\
+        <budget ns> <picks dir> [--match <estimate.json>]
+
+``front`` prints the calibrated front's epochs, into each of whose evaluations
+``scripts/synthesis/synthesise_vn.py --estimate-only --out <evaluations>/epoch_<k>``
+writes the estimated cycles, latency, LUTs and DSPs. ``pick-hw`` keeps the front epochs
+estimated within the latency budget and picks the most accurate, or under ``--match``
+the one whose utilisation (the larger of its LUT and DSP fractions of the VU13P) lies
+nearest that of another design's estimate.
 """
 
 import argparse
@@ -65,6 +79,10 @@ ACC_MIN = 0.5
 # not wrap, has by then fallen below this fraction of the run's best, which no JEDI-linear
 # pick at N = 16 does (2026-10-14).
 TRAIN_FRACTION = 0.95
+# The VU13P's resources, the Available column of Vivado's utilisation reports.
+DEVICE_LUTS, DEVICE_DSPS = 1_728_000, 12_288
+# What scripts/synthesis/synthesise_vn.py --estimate-only writes into an evaluation.
+ESTIMATE = "estimate.json"
 
 
 def logged(log: Path) -> dict[int, tuple[float, float, float]]:
@@ -121,18 +139,52 @@ def calibrated(evaluations: Path, epoch: int) -> tuple[float, float]:
     return accuracy, float(ebops)
 
 
-def pick(run_dir: Path, evaluations: Path, target: float) -> tuple[int, float, float]:
-    """The calibrated front's epoch whose EBOPs lie nearest *target*, the earlier on a
-    tie, with its accuracy and EBOPs.
+def calibrated_front(
+    run_dir: Path, evaluations: Path
+) -> dict[int, tuple[float, float]]:
+    """The calibrated front's epochs with their (accuracy, EBOPs).
 
     :raises FileNotFoundError: when a candidate lacks its evaluation.
     """
     points = {e: calibrated(evaluations, e) for e in candidates(run_dir)}
-    epochs = front(points)
-    if not epochs:
+    on_front = {e: points[e] for e in front(points)}
+    if not on_front:
         raise SystemExit(f"{run_dir}: no epoch on the front")
-    epoch = min(epochs, key=lambda e: (abs(points[e][1] - target), e))
+    return on_front
+
+
+def pick(run_dir: Path, evaluations: Path, target: float) -> tuple[int, float, float]:
+    """The calibrated front's epoch whose EBOPs lie nearest *target*, the earlier on a
+    tie, with its accuracy and EBOPs."""
+    points = calibrated_front(run_dir, evaluations)
+    epoch = min(points, key=lambda e: (abs(points[e][1] - target), e))
     return epoch, *points[epoch]
+
+
+def utilisation(estimate: dict[str, float]) -> float:
+    """The binding fraction of the device: the larger of the LUT and DSP fractions."""
+    return max(estimate["lut"] / DEVICE_LUTS, estimate["dsp"] / DEVICE_DSPS)
+
+
+def pick_hardware(
+    run_dir: Path, evaluations: Path, budget_ns: float, match: Path | None = None
+) -> tuple[int, float, dict[str, float]]:
+    """Of the calibrated front's epochs estimated within *budget_ns*, the most accurate,
+    or with *match* (an ``estimate.json``) the nearest its utilisation, the earlier on a
+    tie; with its accuracy and estimate."""
+    points = calibrated_front(run_dir, evaluations)
+    hardware = {
+        e: json.loads((evaluations / _stem(e) / ESTIMATE).read_text()) for e in points
+    }
+    feasible = [e for e in points if hardware[e]["latency_ns"] <= budget_ns]
+    if not feasible:
+        raise SystemExit(f"{run_dir}: no front epoch within {budget_ns} ns")
+    if match is None:
+        epoch = max(feasible, key=lambda e: points[e][0])
+    else:
+        target = utilisation(json.loads(match.read_text()))
+        epoch = min(feasible, key=lambda e: (abs(utilisation(hardware[e]) - target), e))
+    return epoch, points[epoch][0], hardware[epoch]
 
 
 def write_pick(run_dir: Path, epoch: int, picks_dir: Path) -> Path:
@@ -148,26 +200,46 @@ def write_pick(run_dir: Path, epoch: int, picks_dir: Path) -> Path:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """Parse the ``candidates`` and ``pick`` subcommands."""
+    """Parse the ``candidates``, ``front``, ``pick`` and ``pick-hw`` subcommands."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("candidates").add_argument("run_dir", type=Path)
+    listed = commands.add_parser("front")
     chosen = commands.add_parser("pick")
-    for name, kind in (("run_dir", Path), ("evaluations", Path), ("target", float)):
-        chosen.add_argument(name, type=kind)
-    chosen.add_argument("picks_dir", type=Path)
+    hardware = commands.add_parser("pick-hw")
+    for command in (listed, chosen, hardware):
+        command.add_argument("run_dir", type=Path)
+        command.add_argument("evaluations", type=Path)
+    chosen.add_argument("target", type=float)
+    hardware.add_argument("budget_ns", type=float)
+    for command in (chosen, hardware):
+        command.add_argument("picks_dir", type=Path)
+    hardware.add_argument("--match", type=Path, help="the estimate.json to match")
     return parser.parse_args(argv)
 
 
+def _chosen(args: argparse.Namespace) -> tuple[int, str]:
+    """The epoch ``pick`` or ``pick-hw`` chooses, and what it achieves."""
+    if args.command == "pick":
+        epoch, accuracy, ebops = pick(args.run_dir, args.evaluations, args.target)
+        return epoch, f"{accuracy:.4f} at {ebops:.0f} EBOPs"
+    found = pick_hardware(args.run_dir, args.evaluations, args.budget_ns, args.match)
+    epoch, accuracy, estimate = found
+    share, latency = utilisation(estimate), estimate["latency_ns"]
+    return epoch, f"{accuracy:.4f} at {share:.4f} of the device, {latency:.0f} ns"
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Print a run's candidates, or write its pick's manifest."""
+    """Print a run's candidates or calibrated front, or write a pick's manifest."""
     args = _parse_args(argv)
     if args.command == "candidates":
         print(*candidates(args.run_dir), sep="\n")
-        return
-    epoch, accuracy, ebops = pick(args.run_dir, args.evaluations, args.target)
-    path = write_pick(args.run_dir, epoch, args.picks_dir)
-    print(f"{_stem(epoch)}: {accuracy:.4f} at {ebops:.0f} EBOPs -> {path}")
+    elif args.command == "front":
+        print(*calibrated_front(args.run_dir, args.evaluations), sep="\n")
+    else:
+        epoch, chosen = _chosen(args)
+        path = write_pick(args.run_dir, epoch, args.picks_dir)
+        print(f"{_stem(epoch)}: {chosen} -> {path}")
 
 
 if __name__ == "__main__":

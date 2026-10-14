@@ -434,6 +434,27 @@ def test_synthesise_vn_emulates_the_export_bit_for_bit(
         synth.main(["--out", str(out), "--report-only", "--csv", str(old)])
 
 
+def test_the_estimate_predicts_the_project_of_its_setting(
+    synth, evaluated: SimpleNamespace, tmp_path: Path
+) -> None:
+    flow = ("--latency-cutoff", "4.2", "--ternary", "aware")
+    estimated = tmp_path / "estimate"
+    argv = ["--export-dir", str(evaluated.export), "--out", str(estimated)]
+    assert synth.main([*argv, "--estimate-only", *flow]) == 0
+    estimate = synth.read_json(estimated / "estimate.json")
+    setting = ("--method0", estimate["method0"], "--hard-dc", str(estimate["hard_dc"]))
+    options = ("--no-cosim", "--no-vivado", *flow, *setting)
+    _synthesise(synth, evaluated, tmp_path / "synth", *options)
+    metadata = synth.read_json(tmp_path / "synth" / "prj" / "metadata.json")
+
+    # The cycles and the cost of the project the scan's setting writes.
+    assert estimate["cycles"] == metadata["latency"]
+    assert estimate["cost"] == pytest.approx(metadata["cost"])
+    assert estimate["latency_ns"] == 5.0 * estimate["cycles"]
+    assert estimate["dsp"] >= 0 and 0 < estimate["lut"] < estimate["cost"]
+    assert not (estimated / "prj").exists()
+
+
 @pytest.fixture(scope="module")
 def axis_evaluated(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
     # A port reading the leader's offset from the full jet's axis, its bits seeded as a
