@@ -72,8 +72,8 @@
 # Blocks 40 to 43 evaluate the designs of blocks 40 to 43 of runvn_hgq_train.sh,
 # D2 and A2 with fixed and with trained input words under JEDI-linear's recipe
 # and a checkpoint every epoch, picked as the published JEDI-linear picks its
-# own: the point of the front of logged validation accuracy against EBOPs
-# nearest 57 237 EBOPs, through the manifests that
+# own: the point of the front of calibrated validation accuracy against traced
+# EBOPs nearest 57 237 EBOPs, through the manifests that
 # scripts/experiments/quantised_picks.py writes to <run dir>/picks/target57237
 # for the main run and each fold; rows vn_hgq_<tag>, the probe off for A2.
 #

@@ -8,7 +8,14 @@ from mlflow import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.algorithms.bdt import BoostedTrees
-from src.utils.checkpoints import MANIFEST_FILENAME, merge_manifests, read_manifest
+from src.utils.checkpoints import (
+    MANIFEST_FILENAME,
+    Manifest,
+    ManifestRun,
+    merge_manifests,
+    read_manifest,
+    write_manifest,
+)
 from tests.conftest import (
     CPU_ROWS,
     JET_LEVEL_SIZES,
@@ -150,6 +157,28 @@ def test_the_entry_points_refuse_what_they_cannot_run(
 
     with pytest.raises(ValueError, match=match):
         run(cfg)
+
+
+def test_the_evaluation_selects_on_validation_jets_one_checkpoint_at_a_time(
+    cfg_eval: DictConfig, tmp_path: Path
+) -> None:
+    from src.eval import evaluate
+
+    # A main run and its fold validated on different jets, so no one datamodule serves both.
+    picks = tmp_path / "picks"
+    for run, out in (
+        (ManifestRun("main", None, "main.ckpt"), picks),
+        (ManifestRun("fold_1", 1, "fold.ckpt"), picks / "fold_1"),
+    ):
+        write_manifest(
+            Manifest(int(run.fold_idx is not None), str(out), "x", [run]), out
+        )
+    HydraConfig().set_config(cfg_eval)
+    OmegaConf.update(cfg_eval, "checkpoint_manifest_path", str(picks))
+    OmegaConf.update(cfg_eval, "data.test_split", "validation")
+
+    with pytest.raises(ValueError, match="one checkpoint"):
+        evaluate(cfg_eval)
 
 
 def _row_config(config_name: str, row: str, shards: Path, run_dir: Path) -> DictConfig:

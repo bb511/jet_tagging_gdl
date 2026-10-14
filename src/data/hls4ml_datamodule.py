@@ -93,9 +93,12 @@ class HLS4MLDataModule(LightningDataModule):
     :param n_folds: setting this to 1 uses the record's own train and validation splits;
         k >= 2 pools them and splits them again, with `fold_idx` choosing which fold is served.
     :param kfold_seed: fixes the kfold splitting so its reproducible.
-    :param fold_idx: the fold served, counted from zero, which train.py derives from its
-        `fold` knob; ignored at n_folds 1.
+    :param fold_idx: the fold served, counted from zero, which train.py and eval.py derive
+        from their `fold` knob; ignored at n_folds 1.
     :param full_axis: keep the record's axis columns rather than rebasing them.
+    :param test_split: ``validation`` serves at test time the validation jets that fit
+        validates on, those of fold `fold_idx` under folds, so that a checkpoint is
+        selected without the test split.
     """
 
     # Test batches keep all 16 record columns whatever the model reads, so that the
@@ -119,11 +122,14 @@ class HLS4MLDataModule(LightningDataModule):
         kfold_seed: int = 42,
         fold_idx: int = 0,
         full_axis: bool = False,
+        test_split: str = "test",
     ) -> None:
         super().__init__()
         _validate_run(method, augmentation_scheme)
         if full_axis and (method, augmentation_scheme) != ("augmentation", "none"):
             raise ValueError("full_axis runs in the baseline regime alone")
+        if test_split not in ("test", "validation"):
+            raise ValueError(f"test_split must be test or validation, not {test_split}")
 
         self.revision = revision
         self.cache_dir = cache_dir
@@ -136,6 +142,7 @@ class HLS4MLDataModule(LightningDataModule):
         self.nconstituents = nconstituents
         self.features = list(features)
         self.full_axis = full_axis
+        self.test_split = test_split
 
         # dataloader hyperparameters
         self.batch_size = batch_size
@@ -277,7 +284,10 @@ class HLS4MLDataModule(LightningDataModule):
     def _setup_test(self) -> None:
         """Build the test dataset at the record's full width, as
         `keep_full_features_at_test` states."""
-        x_test, y_test = self._load("test")
+        if self.test_split == "validation":
+            _, _, x_test, y_test = self._fit_arrays()
+        else:
+            x_test, y_test = self._load("test")
         # Every test jet is scored, so that each row of the results counts the same jets.
         self.data_test = self._dataset(x_test, y_test, drop_last=False)
         log.info(f"Test: x_test {tuple(x_test.shape)}, y_test {tuple(y_test.shape)}")

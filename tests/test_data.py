@@ -162,6 +162,28 @@ def test_the_datamodule_serves_fold_indices_of_the_pooled_splits(
     assert len({(c.revision, c.kfold_seed) for c in data_configs}) == 1
 
 
+@pytest.mark.parametrize("n_folds, fold_idx", [(1, 0), (3, 2)])
+def test_the_validation_jets_are_served_at_test_time_to_select(
+    record: FakeRecord, n_folds: int, fold_idx: int
+) -> None:
+    folds = {"n_folds": n_folds, "kfold_seed": 7, "fold_idx": fold_idx}
+    fitted = _datamodule(**folds, features=["pt", "eta", "phi"])
+    selecting = _datamodule(
+        **folds, features=["pt", "eta", "phi"], test_split="validation"
+    )
+    fitted.setup()
+    selecting.setup(stage="test")
+    tested = selecting.data_test.X
+
+    # The jets fit validates on, at the record's full width as every test batch.
+    assert tested.shape[-1] == len(RECORD_COLUMNS)
+    assert torch.equal(tested[..., fitted.feature_indices()], fitted.data_val.X)
+    assert torch.equal(selecting.data_test.y, fitted.data_val.y)
+    assert selecting.data_train is None
+    with pytest.raises(ValueError, match="test_split"):
+        _datamodule(test_split="train")
+
+
 @pytest.mark.parametrize(
     "method, scheme, fit_width",
     [

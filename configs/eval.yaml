@@ -17,6 +17,10 @@ defaults:
 
 task_name: "eval"
 
+# The fold a checkpoint was trained on, counted from one, null for a main run: read by
+# data.test_split=validation alone, which serves that fold's validation jets.
+fold: null
+
 tags: ["dev"]
 
 experiment_name: jet_tagging_gdl_dev

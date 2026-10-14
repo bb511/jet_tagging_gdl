@@ -967,17 +967,25 @@ invariance figures would mean nothing, since a transform rebases `etarel` and `p
 constituents.
 
 Their `src/train.py` keeps every epoch on HGQ2's `ParetoFront` of validation accuracy (above 0.5)
-against EBOPs, so Table II was selected on validation. The row takes the same rule, which replaced
-a pick on the training plateau on 2026-10-12: the front of each epoch's validation accuracy against
-the EBOPs of its last step, as `train.log` logs them, then the front point whose EBOPs, traced on
-the training split by its evaluation, lie nearest a target, 57 237 for Table II. The test accuracy
-plays no part. `scripts/experiments/quantised_picks.py` implements it: `front <run dir>` prints
-the front epochs read off `<run dir>/train.log`, and
-`pick <run dir> <evaluations> <target> <picks dir>` reads each front epoch's traced EBOPs from
-`<evaluations>/epoch_<k>/outputs/main_hgq/export.json` and writes the picked checkpoint's manifest
-to `<picks dir>`, or `<picks dir>/fold_<i>` for a fold, the layout `src/eval.py` merges; the eval
-blocks point `checkpoint_manifest_path` at `<run dir>/picks/<tag>`, `target57237` for Table II's
-EBOPs and `matched_a2_trained` and `matched_d2` for the points at the vector neurons' EBOPs below.
+against EBOPs, so Table II was selected on validation. The row takes the same rule on calibrated
+figures (2026-10-14; a pick on the training plateau preceded it until 2026-10-12, and one on the
+logged figures until 2026-10-14). An epoch's validation accuracy is that of its port tested on the
+validation jets of its own training once its integer bits are traced on the training split, as at
+the test, and its EBOPs are those of the trace; the design is the front point whose EBOPs lie
+nearest a target, 57 237 for Table II. The validation accuracy that `train.log` logs runs on the
+integer bits traced on an epoch's last batch, past which the vector neurons' inputs wrap (see
+`vn_hgq`), whereas JEDI-linear's tracks the calibrated one within 0.002. The test accuracy plays
+no part. `scripts/experiments/quantised_picks.py` implements the rule: `candidates <run dir>`
+prints the epochs worth evaluating, those with a checkpoint on the front of the logged validation
+accuracy or on that of the logged training accuracy, which does not wrap, against the logged
+EBOPs. Each is tested by `src/eval.py` with `data.test_split=validation` and `fold=<i>` (null for a
+main run), which serve the validation jets of that run's training and write no results row. Then
+`pick <run dir> <evaluations> <target> <picks dir>` reads each candidate's micro accuracy off
+`<evaluations>/epoch_<k>/outputs/main.npz` and its traced EBOPs off `main_hgq/export.json`, takes
+their front, and writes the picked checkpoint's manifest to `<picks dir>`, or `<picks dir>/fold_<i>`
+for a fold, the layout `src/eval.py` merges; the eval blocks point `checkpoint_manifest_path` at
+`<run dir>/picks/<tag>`, `target57237` for Table II's EBOPs and `matched_a2_trained` and
+`matched_d2` for the points at the vector neurons' EBOPs below.
 A training that `chain.sh` of the campaign stopped after its collapse wrote no manifest, since
 `train.py` writes it last; it was written afterwards with the last checkpoint and the run's MLflow
 run, as `train.py` would have. Checkpoints are kept every
@@ -1056,8 +1064,8 @@ in the checkpoint. The evaluation of that checkpoint, and that of an untrained p
 words shared by the slots, export a model that predicts `logits_clean` from the stored inputs,
 which `synthesise_vn.py` emulates bit for bit and, where Verilator exists, co-simulates exactly.
 `tests/test_configs.py` holds the three experiments to layout digests, and
-`tests/test_quantised_picks.py` checks the front on a synthetic `train.log` and that the picks of a
-main run and a fold, chosen on traced rather than logged EBOPs, merge as `src/eval.py` merges them.
+`tests/test_quantised_picks.py` checks the candidates on a synthetic `train.log` and that the picks
+of a main run and a fold, chosen on the calibrated front, merge as `src/eval.py` merges them.
 
 ## JEDI-linear
 

@@ -22,6 +22,7 @@ register_resolvers()
 from src.utils import (
     RankedLogger,
     extras,
+    fold_kwargs,
     get_metric_value,
     instantiate_callbacks,
     instantiate_loggers,
@@ -37,22 +38,6 @@ from src.utils.checkpoints import (
 )
 
 log = RankedLogger(__name__)
-
-
-def _fold_kwargs(cfg: DictConfig) -> dict[str, int]:
-    """Configure the data fold to train on (or the splits if k-folding not used).
-
-    :raises ValueError: when ``fold`` is set with no folds to pick from, or is oob.
-    """
-    n_folds, fold = int(cfg.data.get("n_folds") or 1), cfg.get("fold")
-    if fold is None:
-        return {"n_folds": 1, "fold_idx": 0}
-    if n_folds < 2 or not 1 <= int(fold) <= n_folds:
-        raise ValueError(
-            f"fold={fold} needs data.n_folds >= 2 and 1 <= fold <= data.n_folds, "
-            f"but data.n_folds={n_folds}."
-        )
-    return {"n_folds": n_folds, "fold_idx": int(fold) - 1}
 
 
 def _checkpoint_path(trainer: Trainer) -> str | None:
@@ -116,12 +101,12 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     :return: the run's metrics, and the objects it was built from.
     """
-    fold_kwargs = _fold_kwargs(cfg)
+    data_kwargs = fold_kwargs(cfg)
     if cfg.get("seed") is not None:
         L.seed_everything(cfg.seed, workers=True)
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data, **fold_kwargs)
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data, **data_kwargs)
 
     log.info(f"Instantiating algorithm <{cfg.algorithm._target_}>")
     algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)

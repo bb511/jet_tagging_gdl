@@ -22,6 +22,7 @@ from src.callbacks.plotting import PlottingCallback
 from src.utils import (
     RankedLogger,
     extras,
+    fold_kwargs,
     instantiate_callbacks,
     instantiate_loggers,
     log_hyperparameters,
@@ -56,6 +57,23 @@ def _runs_to_evaluate(cfg: DictConfig) -> list[ManifestRun]:
     raise ValueError(
         "Nothing to evaluate: set checkpoint_manifest_path=... or ckpt_path=..."
     )
+
+
+def _selects(cfg: DictConfig, runs: list[ManifestRun]) -> bool:
+    """Whether the run tests validation jets to select a checkpoint, which writes no
+    results row.
+
+    :raises ValueError: when it would test several checkpoints, which validated on
+        different jets.
+    """
+    if cfg.data.get("test_split", "test") != "validation":
+        return False
+    if len(runs) != 1:
+        raise ValueError(
+            "data.test_split=validation tests one checkpoint (ckpt_path=...) with the "
+            "fold it trained on (fold=...)."
+        )
+    return True
 
 
 def _aggregated_labels(runs: list[ManifestRun]) -> set[str]:
@@ -124,7 +142,8 @@ def _with_costs(metrics: dict[str, Any], algorithm: LightningModule) -> dict[str
 
 @task_wrapper
 def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Test every checkpoint of one training on the held-out test split.
+    """Test every checkpoint of one training on the held-out test split, or one
+    checkpoint on its own validation jets under ``data.test_split=validation``.
 
     The folds are summarised into one results row once the last of them has been tested;
     the main run is left out of it whenever folds exist. Each MLflow run nests under the
@@ -135,10 +154,12 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     :return: every checkpoint's metrics, keyed ``<fold_label>/<metric>``.
     """
     runs = _runs_to_evaluate(cfg)
-    aggregated = _aggregated_labels(runs)
+    aggregated, selects = _aggregated_labels(runs), _selects(cfg, runs)
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
+    datamodule: LightningDataModule = hydra.utils.instantiate(
+        cfg.data, **fold_kwargs(cfg)
+    )
 
     metric_dict: dict[str, Any] = {}
     folds: list[dict[str, Any]] = []
@@ -148,7 +169,10 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         if run.fold_label in aggregated:
             folds.append(_with_costs(metrics, algorithm))
 
-    write_results_row(cfg, folds)
+    if selects:
+        log.info("Validation jets tested: no results row written")
+    else:
+        write_results_row(cfg, folds)
     return metric_dict, {"cfg": cfg, "datamodule": datamodule}
 
 

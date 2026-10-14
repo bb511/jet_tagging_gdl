@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from src.utils.checkpoints import Manifest, ManifestRun, merge_manifests, write_manifest
@@ -7,35 +8,53 @@ from tests.conftest import load_script
 
 picks = load_script("scripts/experiments/quantised_picks.py")
 
-# epoch: (logged EBOPs, logged validation accuracy, traced EBOPs). Epoch 13 is below the
-# front's 0.5, 14 is dominated by 11, and 12 ties 16's EBOPs with the higher accuracy.
+# epoch: (logged EBOPs, logged validation accuracy, logged training accuracy, traced
+# EBOPs, calibrated validation accuracy). Epoch 13's logged validation wrapped and its
+# training accuracy keeps it a candidate; 14 is on neither logged front; 17's checkpoint
+# was deleted; 12 ties 11's calibrated accuracy at higher EBOPs.
 QUANTISED_EPOCHS = {
-    10: (300_000, 0.74, 301_000),
-    11: (200_000, 0.73, 203_000),
-    12: (210_000, 0.735, 211_000),
-    13: (150_000, 0.40, 151_000),
-    14: (250_000, 0.72, 252_000),
-    15: (100_000, 0.70, 104_000),
-    16: (210_000, 0.731, 212_000),
+    10: (300_000, 0.74, 0.80, 301_000, 0.75),
+    11: (200_000, 0.73, 0.79, 203_000, 0.74),
+    12: (210_000, 0.735, 0.79, 211_000, 0.74),
+    13: (150_000, 0.40, 0.78, 151_000, 0.72),
+    14: (250_000, 0.72, 0.76, 252_000, 0.73),
+    15: (100_000, 0.70, 0.75, 104_000, 0.70),
+    17: (120_000, 0.65, 0.77, 121_000, 0.71),
 }
+UNEVALUATED, DELETED = 14, 17
 LOG_PREFIX = "[2026-10-13 00:00:00,000][src.algorithms.keras_base][INFO] - [rank: 0] "
+N_JETS, N_CLASSES = 100, 5
+
+
+def _evaluation(outputs: Path, traced: float, accuracy: float) -> None:
+    # What src/eval.py leaves: the labels by class index, logits right on the first
+    # round(accuracy * N_JETS) jets, and the export with the traced EBOPs.
+    (outputs / "main_hgq").mkdir(parents=True)
+    labels = np.arange(N_JETS) % N_CLASSES
+    shown = np.where(np.arange(N_JETS) < round(accuracy * N_JETS), labels, labels + 1)
+    logits = np.eye(N_CLASSES)[shown % N_CLASSES]
+    np.savez(outputs / "main.npz", logits_clean=logits, labels=labels.astype(np.int8))
+    (outputs / "main_hgq" / "export.json").write_text(f'{{"ebops": {traced}}}')
 
 
 def _quantised_run(root: Path, fold: int | None = None) -> Path:
-    # A training as train.py leaves it, each epoch's checkpoint, both of its INFO lines
-    # and a sanity-check validation line before epoch 15's own, and the evaluation of
-    # every epoch under <root>/evaluations.
+    # A training as train.py leaves it, with both INFO lines of every epoch and a
+    # sanity-check validation line before epoch 15's own, and the evaluation of every
+    # candidate under <run>/evaluations.
     run = root if fold is None else root / f"fold_{fold}"
     (run / "checkpoints").mkdir(parents=True)
     lines = [f"{LOG_PREFIX}[epoch  15]   val | loss nan acc 0.2000 best 0.2000"]
-    for epoch, (ebops, acc, traced) in QUANTISED_EPOCHS.items():
-        step = f"[epoch {epoch:>4d}] EBOPs {ebops}, beta 1e-07, lr 0.003"
+    for epoch, (ebops, val, acc, traced, calibrated) in QUANTISED_EPOCHS.items():
+        lines.append(f"{LOG_PREFIX}[epoch {epoch:>3d}]   val | loss 0.8 acc {val:.4f}")
+        step = (
+            f"[epoch {epoch:>4d}] EBOPs {ebops}, beta 1e-07, lr 0.003, train acc {acc}"
+        )
         lines.append(LOG_PREFIX + step)
-        lines.append(f"{LOG_PREFIX}[epoch {epoch:>3d}]   val | loss 0.8 acc {acc:.4f}")
-        (run / "checkpoints" / f"epoch_{epoch:03d}.ckpt").touch()
-        export = run / "evaluations" / f"epoch_{epoch:03d}" / "outputs" / "main_hgq"
-        export.mkdir(parents=True)
-        (export / "export.json").write_text(f'{{"ebops": {traced}}}')
+        if epoch != DELETED:
+            (run / "checkpoints" / f"epoch_{epoch:03d}.ckpt").touch()
+        if epoch not in (DELETED, UNEVALUATED):
+            outputs = run / "evaluations" / f"epoch_{epoch:03d}" / "outputs"
+            _evaluation(outputs, traced, calibrated)
     (run / "train.log").write_text("\n".join(lines) + "\n")
     label = "main" if fold is None else f"fold_{fold}"
     entry = ManifestRun(label, fold, str(run / "checkpoints" / "epoch_016.ckpt"), 0.7)
@@ -43,25 +62,27 @@ def _quantised_run(root: Path, fold: int | None = None) -> Path:
     return run
 
 
-def test_the_quantised_front_is_their_pareto_front_of_validation_and_ebops(
+def test_the_candidates_lie_on_either_logged_front_with_a_checkpoint(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     run = _quantised_run(tmp_path)
-    picks.main(["front", str(run)])
+    picks.main(["candidates", str(run)])
 
-    assert capsys.readouterr().out.split() == ["15", "11", "12", "10"]
+    assert capsys.readouterr().out.split() == ["10", "11", "12", "13", "15"]
 
 
-def test_the_quantised_picks_write_manifests_eval_merges(tmp_path: Path) -> None:
+def test_the_quantised_picks_follow_the_calibrated_front(tmp_path: Path) -> None:
     main, fold = _quantised_run(tmp_path), _quantised_run(tmp_path, fold=1)
     out = tmp_path / "picks" / "target"
     for run in (main, fold):
-        picks.main(["pick", str(run), str(run / "evaluations"), "206000", str(out)])
+        picks.main(["pick", str(run), str(run / "evaluations"), "160000", str(out)])
     merged = merge_manifests(out)
     nearest = [Path(run.checkpoint_path).name for run in merged.runs]
 
-    # Traced, 203 000 lies nearer 206 000 than 211 000; the logged EBOPs would pick 12.
-    assert nearest == ["epoch_011.ckpt", "epoch_011.ckpt"]
+    # Epoch 13 at 151 000 is nearest; the logged validation would have dropped it and
+    # picked 11.
+    assert nearest == ["epoch_013.ckpt", "epoch_013.ckpt"]
+    assert picks.pick(main, main / "evaluations", 210_000) == (11, 0.74, 203_000.0)
     assert [run.fold_label for run in merged.runs] == ["main", "fold_1"]
     assert merged.n_folds == 1 and merged.experiment_name == "x"
     empty = _quantised_run(tmp_path / "empty")

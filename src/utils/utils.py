@@ -61,6 +61,22 @@ def task_wrapper(task_func: Callable) -> Callable:
     return wrap
 
 
+def fold_kwargs(cfg: DictConfig) -> dict[str, int]:
+    """Configure the data fold to train on (or the splits if k-folding not used).
+
+    :raises ValueError: when ``fold`` is set with no folds to pick from, or is oob.
+    """
+    n_folds, fold = int(cfg.data.get("n_folds") or 1), cfg.get("fold")
+    if fold is None:
+        return {"n_folds": 1, "fold_idx": 0}
+    if n_folds < 2 or not 1 <= int(fold) <= n_folds:
+        raise ValueError(
+            f"fold={fold} needs data.n_folds >= 2 and 1 <= fold <= data.n_folds, "
+            f"but data.n_folds={n_folds}."
+        )
+    return {"n_folds": n_folds, "fold_idx": int(fold) - 1}
+
+
 def get_metric_value(metric_dict: dict[str, Any], metric_name: str) -> float:
     """Read one scalar metric out of a finished run's metrics.
 
