@@ -20,7 +20,9 @@ wrap. A training therefore keeps a checkpoint every epoch
 ``candidates`` prints, one per line, the epochs with a checkpoint on the front of the
 logged validation accuracy or on that of the logged training accuracy, each against the
 logged EBOPs, read off ``<run dir>/train.log``: the training accuracy does not wrap, so
-its front keeps the epochs a wrapped validation hides. Each is evaluated by
+its front keeps the epochs a wrapped validation hides. An epoch whose logged training
+accuracy lies below ``TRAIN_FRACTION`` of the run's best is collapsing and is left out,
+a guard their selection lacks. Each is evaluated by
 ``src/eval.py`` with ``ckpt_path=<run dir>/checkpoints/epoch_<k>.ckpt
 data.test_split=validation fold=<i, or null for the main run>
 hydra.run.dir=<evaluations>/epoch_<k>``. ``pick`` reads each candidate's micro accuracy
@@ -59,6 +61,10 @@ STEP = re.compile(r"\[epoch\s+(\d+)\] EBOPs ([0-9.eE+-]+),.*train acc ([0-9.]+)"
 VAL = re.compile(r"\[epoch\s+(\d+)\]\s+val \| loss \S+ acc ([0-9.]+)")
 # ParetoFront's enable_if in their train.py: a collapsed network enters no front.
 ACC_MIN = 0.5
+# A collapsing network can still validate above ACC_MIN; its training accuracy, which does
+# not wrap, has by then fallen below this fraction of the run's best, which no JEDI-linear
+# pick at N = 16 does (2026-10-14).
+TRAIN_FRACTION = 0.95
 
 
 def logged(log: Path) -> dict[int, tuple[float, float, float]]:
@@ -90,12 +96,18 @@ def _stem(epoch: int) -> str:
 
 
 def candidates(run_dir: Path) -> list[int]:
-    """The epochs to evaluate: on either logged front, with a checkpoint kept."""
+    """The epochs to evaluate: on either logged front, not collapsing, with a checkpoint
+    kept."""
     points = logged(run_dir / "train.log")
     on_fronts = set(front({e: (val, ebops) for e, (val, _, ebops) in points.items()}))
     on_fronts |= set(front({e: (acc, ebops) for e, (_, acc, ebops) in points.items()}))
+    floor = TRAIN_FRACTION * max((acc for _, acc, _ in points.values()), default=0.0)
     kept = run_dir / "checkpoints"
-    return sorted(e for e in on_fronts if (kept / f"{_stem(e)}.ckpt").is_file())
+    return sorted(
+        e
+        for e in on_fronts
+        if points[e][1] >= floor and (kept / f"{_stem(e)}.ckpt").is_file()
+    )
 
 
 def calibrated(evaluations: Path, epoch: int) -> tuple[float, float]:
@@ -136,6 +148,7 @@ def write_pick(run_dir: Path, epoch: int, picks_dir: Path) -> Path:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Parse the ``candidates`` and ``pick`` subcommands."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("candidates").add_argument("run_dir", type=Path)
@@ -147,6 +160,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Print a run's candidates, or write its pick's manifest."""
     args = _parse_args(argv)
     if args.command == "candidates":
         print(*candidates(args.run_dir), sep="\n")

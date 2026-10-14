@@ -978,7 +978,12 @@ integer bits traced on an epoch's last batch, past which the vector neurons' inp
 no part. `scripts/experiments/quantised_picks.py` implements the rule: `candidates <run dir>`
 prints the epochs worth evaluating, those with a checkpoint on the front of the logged validation
 accuracy or on that of the logged training accuracy, which does not wrap, against the logged
-EBOPs. Each is tested by `src/eval.py` with `data.test_split=validation` and `fold=<i>` (null for a
+EBOPs. A guard their selection lacks leaves out every epoch whose logged training accuracy lies
+below 95 % of the run's best (`TRAIN_FRACTION`, 2026-10-14): a vector-neuron run collapsing under
+the recipe still validates above 0.5 for an epoch or two, and its front's cheapest point, the pick
+when no front point reaches the target, then sat inside the collapse (A2 with trained words, folds
+1 and 5 at N = 16: training accuracy 0.52, calibrated validation 0.71 and 0.55, against 0.73 two
+epochs earlier). No JEDI-linear pick at N = 16 changes under it. Each is tested by `src/eval.py` with `data.test_split=validation` and `fold=<i>` (null for a
 main run), which serve the validation jets of that run's training and write no results row. Then
 `pick <run dir> <evaluations> <target> <picks dir>` reads each candidate's micro accuracy off
 `<evaluations>/epoch_<k>/outputs/main.npz` and its traced EBOPs off `main_hgq/export.json`, takes

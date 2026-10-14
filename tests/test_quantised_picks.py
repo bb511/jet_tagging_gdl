@@ -11,15 +11,17 @@ picks = load_script("scripts/experiments/quantised_picks.py")
 # epoch: (logged EBOPs, logged validation accuracy, logged training accuracy, traced
 # EBOPs, calibrated validation accuracy). Epoch 13's logged validation wrapped and its
 # training accuracy keeps it a candidate; 14 is on neither logged front; 17's checkpoint
-# was deleted; 12 ties 11's calibrated accuracy at higher EBOPs.
+# was deleted; 12 ties 11's calibrated accuracy at higher EBOPs; 18 is the cheapest point
+# of the validation fronts but collapsing, its training accuracy under 0.95 x 0.80.
 QUANTISED_EPOCHS = {
     10: (300_000, 0.74, 0.80, 301_000, 0.75),
     11: (200_000, 0.73, 0.79, 203_000, 0.74),
     12: (210_000, 0.735, 0.79, 211_000, 0.74),
     13: (150_000, 0.40, 0.78, 151_000, 0.72),
     14: (250_000, 0.72, 0.76, 252_000, 0.73),
-    15: (100_000, 0.70, 0.75, 104_000, 0.70),
-    17: (120_000, 0.65, 0.77, 121_000, 0.71),
+    15: (100_000, 0.70, 0.77, 104_000, 0.70),
+    17: (120_000, 0.65, 0.775, 121_000, 0.71),
+    18: (90_000, 0.69, 0.50, 91_000, 0.69),
 }
 UNEVALUATED, DELETED = 14, 17
 LOG_PREFIX = "[2026-10-13 00:00:00,000][src.algorithms.keras_base][INFO] - [rank: 0] "
@@ -83,6 +85,8 @@ def test_the_quantised_picks_follow_the_calibrated_front(tmp_path: Path) -> None
     # picked 11.
     assert nearest == ["epoch_013.ckpt", "epoch_013.ckpt"]
     assert picks.pick(main, main / "evaluations", 210_000) == (11, 0.74, 203_000.0)
+    # Collapsing, epoch 18 would be the front's cheapest point and nearest 80 000.
+    assert picks.pick(main, main / "evaluations", 80_000) == (15, 0.70, 104_000.0)
     assert [run.fold_label for run in merged.runs] == ["main", "fold_1"]
     assert merged.n_folds == 1 and merged.experiment_name == "x"
     empty = _quantised_run(tmp_path / "empty")
