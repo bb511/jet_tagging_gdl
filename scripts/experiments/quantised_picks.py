@@ -38,14 +38,12 @@ of two variables Vivado maps to DSPs that EBOPs do not price::
 
     python scripts/experiments/quantised_picks.py front <run dir> <evaluations>
     python scripts/experiments/quantised_picks.py pick-hw <run dir> <evaluations> \\
-        <budget ns> <picks dir> [--match <estimate.json>]
+        <budget ns> <picks dir>
 
 ``front`` prints the calibrated front's epochs, into each of whose evaluations
 ``scripts/synthesis/synthesise_vn.py --estimate-only --out <evaluations>/epoch_<k>``
 writes the estimated cycles, latency, LUTs and DSPs. ``pick-hw`` keeps the front epochs
-estimated within the latency budget and picks the most accurate, or under ``--match``
-the one whose utilisation (the larger of its LUT and DSP fractions of the VU13P) lies
-nearest that of another design's estimate.
+estimated within the latency budget and picks the most accurate.
 """
 
 import argparse
@@ -167,11 +165,10 @@ def utilisation(estimate: dict[str, float]) -> float:
 
 
 def pick_hardware(
-    run_dir: Path, evaluations: Path, budget_ns: float, match: Path | None = None
+    run_dir: Path, evaluations: Path, budget_ns: float
 ) -> tuple[int, float, dict[str, float]]:
     """Of the calibrated front's epochs estimated within *budget_ns*, the most accurate,
-    or with *match* (an ``estimate.json``) the nearest its utilisation, the earlier on a
-    tie; with its accuracy and estimate."""
+    with its accuracy and estimate."""
     points = calibrated_front(run_dir, evaluations)
     hardware = {
         e: json.loads((evaluations / _stem(e) / ESTIMATE).read_text()) for e in points
@@ -179,11 +176,7 @@ def pick_hardware(
     feasible = [e for e in points if hardware[e]["latency_ns"] <= budget_ns]
     if not feasible:
         raise SystemExit(f"{run_dir}: no front epoch within {budget_ns} ns")
-    if match is None:
-        epoch = max(feasible, key=lambda e: points[e][0])
-    else:
-        target = utilisation(json.loads(match.read_text()))
-        epoch = min(feasible, key=lambda e: (abs(utilisation(hardware[e]) - target), e))
+    epoch = max(feasible, key=lambda e: points[e][0])
     return epoch, points[epoch][0], hardware[epoch]
 
 
@@ -214,7 +207,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     hardware.add_argument("budget_ns", type=float)
     for command in (chosen, hardware):
         command.add_argument("picks_dir", type=Path)
-    hardware.add_argument("--match", type=Path, help="the estimate.json to match")
     return parser.parse_args(argv)
 
 
@@ -223,7 +215,7 @@ def _chosen(args: argparse.Namespace) -> tuple[int, str]:
     if args.command == "pick":
         epoch, accuracy, ebops = pick(args.run_dir, args.evaluations, args.target)
         return epoch, f"{accuracy:.4f} at {ebops:.0f} EBOPs"
-    found = pick_hardware(args.run_dir, args.evaluations, args.budget_ns, args.match)
+    found = pick_hardware(args.run_dir, args.evaluations, args.budget_ns)
     epoch, accuracy, estimate = found
     share, latency = utilisation(estimate), estimate["latency_ns"]
     return epoch, f"{accuracy:.4f} at {share:.4f} of the device, {latency:.0f} ns"

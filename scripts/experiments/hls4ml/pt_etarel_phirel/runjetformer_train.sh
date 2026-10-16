@@ -10,7 +10,7 @@
 # a block whose study is missing carries none and says so (transferred ablation).
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
-# file to scripts/experiments/submit_train.sh, which queues them on a GPU or slurm.
+# file to scripts/experiments/submit_train.sh, which runs them under nohup.
 
 # ========================================================================
 # jetformer  nconst=16

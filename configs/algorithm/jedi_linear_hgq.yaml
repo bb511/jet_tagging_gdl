@@ -38,7 +38,7 @@ optimizer:
   _target_: keras.optimizers.Adam
   _partial_: true
 
-# Stepped per batch by Keras; configure_optimizers injects decay_steps and warmup_steps.
+# Stepped per batch by Keras; configure_optimizers injects decay_steps.
 scheduler:
   _target_: src.algorithms.utils.keras_schedules.CosineRestarts
   _partial_: true
@@ -46,6 +46,5 @@ scheduler:
   alpha: 3.3333e-4 # the floor, 1e-6
   cycles: 70 # one per 100 epochs of the published 7000
   flat_fraction: 0.1 # the last 10 epochs of each cycle at the floor
-warmup_fraction: 0.0 # CosineRestarts has no warm-up
 
 compile: false

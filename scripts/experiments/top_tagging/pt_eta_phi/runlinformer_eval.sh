@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# ========================================================================
+# LINFORMER EVALUATION COMMANDS
+# ========================================================================
+# One block per (constituent count, regime): 1 x 7 = 7 eval runs. Generated
+# by scripts/experiments/make_train_catalogues.py; regenerate rather than edit by hand.
+# Feature set [pt, eta, phi]: studies from logs/optuna/top_tagging/pt_eta_phi/, runs under logs/{train,eval}/top_tagging/pt_eta_phi/.
+# Each block carries the best of the first 100 completed trials, by trial
+# number, of its own study under logs/optuna/top_tagging/pt_eta_phi/;
+# a block whose study is missing carries none and says so (transferred ablation).
+#
+# Every command is commented out: copy one to run it by hand, or feed the whole
+# file to scripts/experiments/submit_eval.sh, which runs them under nohup.
+
+# ========================================================================
+# linformer  nconst=100
+# ========================================================================
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  baseline  (method=augmentation, group=none)
+# best trial 64 of top_tagging_linformer_nconst100_augmentation_none, val/acc_best=0.923152
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=none \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=48 \
+#     algorithm.ff_dim=256 \
+#     algorithm.head_layers='[64,64,32]' \
+#     algorithm.kv_proj_dim=8 \
+#     algorithm.optimizer.lr=0.001128413990866935 \
+#     algorithm.optimizer.weight_decay=1e-07 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/baseline \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/baseline
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  aug_so2  (method=augmentation, group=so2)
+# best trial 90 of top_tagging_linformer_nconst100_augmentation_so2, val/acc_best=0.924136
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum_over_n \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=48 \
+#     algorithm.ff_dim=256 \
+#     algorithm.head_layers='[64,64,32]' \
+#     algorithm.kv_proj_dim=4 \
+#     algorithm.optimizer.lr=0.003079653088335144 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/aug_so2 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/aug_so2
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  aug_so3  (method=augmentation, group=so3)
+# best trial 92 of top_tagging_linformer_nconst100_augmentation_so3, val/acc_best=0.921392
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum_over_n \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=64 \
+#     algorithm.ff_dim=256 \
+#     algorithm.head_layers='[64,64,32]' \
+#     algorithm.kv_proj_dim=16 \
+#     algorithm.optimizer.lr=0.00182493992911225 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/aug_so3 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/aug_so3
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  aug_lorentz  (method=augmentation, group=lorentz)
+# best trial 23 of top_tagging_linformer_nconst100_augmentation_lorentz, val/acc_best=0.924602
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=augmentation \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=48 \
+#     algorithm.ff_dim=256 \
+#     algorithm.head_layers='[64,64,32]' \
+#     algorithm.kv_proj_dim=4 \
+#     algorithm.optimizer.lr=0.0022136732919623534 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/aug_lorentz \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/aug_lorentz
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  symm_so2  (method=symm_loss, group=so2)
+# best trial 81 of top_tagging_linformer_nconst100_symm_loss_so2, val/acc_best=0.923061
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so2 \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=64 \
+#     algorithm.ff_dim=128 \
+#     algorithm.head_layers='[32,32,32]' \
+#     algorithm.kv_proj_dim=8 \
+#     algorithm.optimizer.lr=0.002241644774586967 \
+#     algorithm.optimizer.weight_decay=1e-07 \
+#     algorithm.symm_loss_weight=0.0014990292819255138 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/symm_so2 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/symm_so2
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  symm_so3  (method=symm_loss, group=so3)
+# best trial 72 of top_tagging_linformer_nconst100_symm_loss_so3, val/acc_best=0.923012
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=so3 \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=48 \
+#     algorithm.ff_dim=256 \
+#     algorithm.head_layers='[64,32]' \
+#     algorithm.kv_proj_dim=16 \
+#     algorithm.optimizer.lr=0.002301964150877113 \
+#     algorithm.optimizer.weight_decay=1e-07 \
+#     algorithm.symm_loss_weight=0.02807415987858454 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/symm_so3 \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/symm_so3
+
+# ------------------------------------------------------------------------
+# linformer  nconst=100  symm_lorentz  (method=symm_loss, group=lorentz)
+# best trial 98 of top_tagging_linformer_nconst100_symm_loss_lorentz, val/acc_best=0.923380
+# ------------------------------------------------------------------------
+# python3 src/eval.py \
+#     experiment=top_tagging/linformer_100 \
+#     data.method=symm_loss \
+#     data.augmentation_scheme=lorentz \
+#     data.n_folds=5 \
+#     data.features='[pt,eta,phi]' \
+#     algorithm.aggregation=sum \
+#     algorithm.batchnorm=True \
+#     algorithm.embed_dim=48 \
+#     algorithm.ff_dim=128 \
+#     algorithm.head_layers='[64,64,32]' \
+#     algorithm.kv_proj_dim=16 \
+#     algorithm.optimizer.lr=0.0016001388429202601 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.symm_loss_weight=0.07718144539764375 \
+#     checkpoint_manifest_path=logs/train/top_tagging/pt_eta_phi/linformer/nconst100/symm_lorentz \
+#     results_table.invariance_metric=tv \
+#     trainer=gpu \
+#     trainer.devices=[0] \
+#     hydra.run.dir=logs/eval/top_tagging/pt_eta_phi/linformer/nconst100/symm_lorentz

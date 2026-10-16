@@ -430,9 +430,10 @@ def test_a_top_tagging_feature_set_adds_its_columns_and_its_database(
     # Block for block the default set's catalogue, with the two overrides that send the
     # trials to a database of the feature set's own.
     directory = ROOT / TOP_TAGGING_ROOT / label
+    tasks = ("search", "train", "eval")
 
     assert {path.name for path in directory.iterdir()} == {
-        f"run{row}_search.sh" for row in TOP_TAGGING_GRID
+        f"run{row}_{task}.sh" for row in TOP_TAGGING_GRID for task in tasks
     }
     for row in TOP_TAGGING_GRID:
         storage = f"'sqlite:///logs/optuna/top_tagging/{label}/{row}.db?timeout=600'"

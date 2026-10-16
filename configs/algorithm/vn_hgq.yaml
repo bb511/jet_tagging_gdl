@@ -53,13 +53,11 @@ optimizer:
   epsilon: 1.0e-8
   global_clipnorm: 1.0 # manual optimisation refuses the trainer's clipping
 
-# Stepped per batch by Keras; configure_optimizers injects decay_steps and warmup_steps.
+# Stepped per batch by Keras; configure_optimizers injects decay_steps.
 scheduler:
   _target_: keras.optimizers.schedules.CosineDecay
   _partial_: true
   initial_learning_rate: 1.0e-3
   alpha: 1.0e-2 # the rate ends at 1e-5
-  warmup_target: null # a rate reached from initial_learning_rate over warmup_fraction
-warmup_fraction: 0.0 # of the steps
 
 compile: false

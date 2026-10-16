@@ -1,15 +1,15 @@
-# Removed architectures
+# Architectures
 
 This repository carried eight architecture modules before the refactor to the `adl1t` layout and
-carries eight now: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since 2026-09-13 as a clean
-rewrite), L-GATr-slim, LLoCa and the vector neurons. The last three were added on 2026-09-28 and
-2026-09-29: L-GATr-slim runs in two rows, `lgatr_slim` with the spurion tokens and
-`lgatr_slim_lorentz` without, LLoCa in four, one per frames class (`lloca_lorentz`, `lloca_z`,
-`lloca_so2` and `lloca_so3`), and the vector neurons in one, `vn`, on the lifts of (p_T, η, φ),
-which on 2026-10-03 replaced their two rows on the four-momentum, `vn_z` and `vn_so2`. A ninth
-architecture, JEDI-linear, joined on 2026-09-30 as a second class in the DeepSets module; it runs in
-one row, `jedi_linear`, the comparator from the FPGA literature, which since 2026-10-02 also runs
-the seven regimes of the grid. A tenth architecture, the Linformer, joined on 2026-10-01 in a module
+carried eight again by 2026-09-29: DeepSets, MLP, JetFormer, LorentzNet, PELICAN (back since
+2026-09-13 as a clean rewrite), L-GATr-slim, LLoCa and the vector neurons. The last three were
+added on 2026-09-28 and 2026-09-29: L-GATr-slim runs in two rows, `lgatr_slim` with the spurion
+tokens and `lgatr_slim_lorentz` without, LLoCa in four, one per frames class (`lloca_lorentz`,
+`lloca_z`, `lloca_so2` and `lloca_so3`), and the vector neurons in one, `vn`, on the lifts of
+(p_T, η, φ), which on 2026-10-03 replaced their two rows on the four-momentum, `vn_z` and
+`vn_so2`. A ninth architecture, JEDI-linear, joined on 2026-09-30 as a second class in the
+DeepSets module; it runs in one row, `jedi_linear`, the comparator from the FPGA literature, which
+since 2026-10-02 also runs the seven regimes of the grid. A tenth architecture, the Linformer, joined on 2026-10-01 in a module
 of its own, the ninth, and runs in one row, `linformer`, over the seven regimes. Three rows joined
 on 2026-10-05 in the DeepSets module, with no architecture or module of their own: DeepSets and
 JEDI-linear reading the jet moments of the vector neurons, `deepsets_moments` and
@@ -142,9 +142,9 @@ beam four-vectors are appended inside the network, so the exact symmetry is SO(2
 the other groups are measured by the probe. It is the second symmetry-embedded architecture
 beside LorentzNet, run in the baseline regime alone. Since 2026-09-27 it is run twice, with the
 beams as `pelican` and without them as `pelican_lorentz`: the same module and network, switched by
-`configs/algorithm/pelican_lorentz.yaml` (a standalone copy of `pelican.yaml` with `add_beams:
-false`, kept in step by `tests/test_configs.py`), with its own experiment configs, search config
-and catalogues; the 150-constituent row is not searched (to spare the H100 week) and its
+`configs/algorithm/pelican_lorentz.yaml` (a standalone copy of `pelican.yaml` with
+`add_beams: false`, kept in step by `tests/test_configs.py`), with its own experiment configs,
+search config and catalogues; the 150-constituent row is not searched (to spare the H100 week) and its
 experiment config carries the beams-on optimum, at the corner of the space where that study's top
 eight trials all sit, so a search of the beams-off twin would land there too.
 
@@ -432,7 +432,8 @@ accuracy 0.709), the flip rates were 0.000 % under `so2`, 0.01 % under the beam 
 and 40.8 % on 2026-10-01. The experiments run in
 fp32, since the forms of the learned channels cancel to a small fraction of their terms, which fp16
 cannot resolve, and the tensor invariants, cubic in p_T, widen the range further; fixed point on an
-FPGA will need range handling for the same reason, which is open. They also leave
+FPGA needs range handling for the same reason, which `vn_hgq` takes from integer bits traced on the
+training split (see below). They also leave
 `extras.matmul_precision` unset, which `tests/test_configs.py` checks: TF32 rounds the inputs of
 every float32 matmul to about 5e-4, and the linear layers here act on the vector components
 themselves, so a transformed jet would be rounded differently and the embedded group would hold to
@@ -442,13 +443,12 @@ The optimiser is AdamW with OneCycleLR, the block of L-GATr-slim and LLoCa, at a
 rate of 2e-3 and a weight decay of 1e-2, and the experiments train for 200 epochs on batches of 2048
 with 5 folds. The search, `vn_optuna.yaml`, runs one study per constituent count,
 `vn_nconst<N>_augmentation_none`, in `logs/optuna/hls4ml/vn.db`, each of 200 trials of 50 epochs,
-none of them launched yet (2026-10-03). It draws the blocks from {1, 2, 3}, the vector channels from
+run on 2026-10-04. It draws the blocks from {1, 2, 3}, the vector channels from
 {8, 16, 32}, the scalar channels from {32, 64, 128}, the forms from {8, 16, 32}, the tensor
 invariants of each kind from {1, 2, 4}, the stream width from {8, 16, 32}, the head from {[32],
 [64, 32], [128, 64]}, the dropout from {0, 0.1, 0.2}, the learning rate log-uniformly from 1e-4 to
 5e-3 and the weight decay from {0, 1e-4, 1e-3, 1e-2, 5e-2}, so the default lies inside the space;
-`units` is never searched. The train and eval catalogues hold three blocks each, all still
-"transferred from experiment config (no study yet)".
+`units` is never searched. The train and eval catalogues hold three blocks each, one per study.
 
 The design was measured on olgpu between 2026-09-30 and 2026-10-02 with a scratch copy of the
 network whose switches, set to this row's choices, compute the committed network (to 9e-16 with
@@ -611,8 +611,8 @@ components first, so that every channel mixing is a dense layer on the last axis
 | head                     | `QBatchNormalization`, `QDense` layers, `head_last`           | logits fixed kif (1, 6, 8)    |
 
 The p_T word is the trigger's `pt_t` (CMSSW `DataFormats/L1TParticleFlow/interface/datatypes.h`),
-`ap_ufixed<14,12>` or kif (0, 12, 2): [0, 4096) GeV at an LSB of 0.25 GeV. The angle words, kif
-(1, 1, 8), hold [−2, 2) rad at 2⁻⁸ rad in 10 bits, the width of the trigger's local angles, whose
+`ap_ufixed<14,12>` or kif (0, 12, 2): \[0, 4096) GeV at an LSB of 0.25 GeV. The angle words, kif
+(1, 1, 8), hold \[−2, 2) rad at 2⁻⁸ rad in 10 bits, the width of the trigger's local angles, whose
 LSB of π/720 they approximate with a power of two. The dry run of 2026-10-07 found p_T up to
 1634 GeV and |Δη| and |Δφ| up to 1.77 and 0.83 on the record. The word rounds to nearest, so a
 constituent below 0.125 GeV becomes a zero word and is read as padding. p is counted in units of
@@ -622,7 +622,7 @@ normalisations. The metric G is a slice, a factor −2 and a concatenation, (x�
 exact in Keras and in alkaid. The keep flag is min(4 p_T, 1), exact because a real p_T is a
 multiple of the LSB; the float network's flag is a cast of p ≠ 0, and alkaid has no handler for a
 cast of a boolean. The gate is HGQ2's `HardSigmoidConfig` quantiser applied to (2/3) z. It returns
-q/4 + 1/2, q being the rounded input saturated on [−2, 2), which equals torch's relu6(z + 3)/6 to
+q/4 + 1/2, q being the rounded input saturated on \[−2, 2), which equals torch's relu6(z + 3)/6 to
 within 2^−(f+2) for the gate's f = 8 fraction bits and costs a clamp, a shift and an add; Keras's
 `hard_sigmoid` would become a lookup table in alkaid. The gates start at exactly 1/2, as in torch.
 Each batch normalisation is a `QBatchNormalization` followed by a `QDense`, built with torch's
@@ -709,12 +709,12 @@ the probe's `outputs/<label>.npz`: `model.keras`, the traced port; `inputs.npz`,
 `export.json`, the run behind the export (row, N, β, EBOPs, units, quantisation, float type, test
 count, checkpoint, test accuracy and versions).
 
-The protocol fine-tunes a float reference at one constant β per run and takes the last epoch as
-the model. The reference is a one-block `vn` main run (`fold=null`) at the settings of the N = 16
-study's best (16 vector and 32 scalar channels, 8 forms, 4 tensor invariants of each kind, a stream
-of 8, head [64, 32], learning rate 4.99e-3, weight decay 0.05), trained by block 1 of
-`runvn_hgq_train.sh` into `logs/train/hls4ml/vn/nconst16/baseline_1block`, which
-`algorithm.init_from` of blocks 2 to 5 names. One block replaced the two of the finals on
+The first protocol, that of blocks 2 to 36, fine-tunes a float reference at one constant β per run
+and takes the last epoch as the model. The reference is a one-block `vn` main run (`fold=null`)
+at the settings of the N = 16 study's best (16 vector and 32 scalar channels, 8 forms, 4 tensor
+invariants of each kind, a stream of 8, head [64, 32], learning rate 4.99e-3, weight decay 0.05),
+trained by block 1 of `runvn_hgq_train.sh` into `logs/train/hls4ml/vn/nconst16/baseline_1block`,
+which `algorithm.init_from` of blocks 2 to 5 names. One block replaced the two of the finals on
 2026-10-07, when Patrick decided that the paper shows the one-block scan alone: it comes within
 0.1 points of the two-block best at about half the depth and cost. Blocks 2 to 5 run β ∈ {1e-8,
 3e-8, 1e-7, 3e-7} for 100 epochs on batches of 2048 under `callbacks=quantised`, whose
@@ -724,13 +724,13 @@ last and the manifest points at the last epoch; nothing stops a run early, and n
 two-block finals, where β·E₀ over the initial cross entropy (E₀ = 2.85 M EBOPs, cross entropy
 0.761) ran from 0.037 to 1.1; 1e-6 was dropped. The four β blocks share the label
 `vn_hgq_nconst16_baseline`, so `--only` selects them by index. The first epoch, at a learning rate
-of 1e-3, takes the copied solution from 0.72 to 0.66 in accuracy before it recovers; a lower rate
-for the fine-tuning is untried. `val/acc` during training does not measure the model: validation
+of 1e-3, takes the copied solution from 0.72 to 0.66 in accuracy before it recovers; block 28
+tries a third of that rate. `val/acc` during training does not measure the model: validation
 runs in eval mode on the integer bits that training re-traced on its last batch, so some
 validation jets wrap, and in the scan `val/acc` swung between 0.45 and 0.71 while `train/acc`
 stayed at 0.723. The `val_acc_best` of these runs' manifests is therefore meaningless, and the
 calibrated evaluation is the measure. The experiment configs at N = 50 and 150 carry the
-three-block architectures of the float finals; nothing has been trained at those counts.
+three-block architectures of the float finals, which the blocks at those counts override.
 
 Blocks 37 and 38 train D2 and A2 (blocks 19 and 24) with the recipe of the published JEDI-linear,
 read in `configs/sweep-n16-f3.yaml` and `src/train.py` of its code, so that both can stand beside
@@ -766,7 +766,7 @@ on near-constant logits. Whether trained words make a collapse likelier cannot b
 run each. The picks of A2 with fixed words (epoch 1900, 100 k EBOPs, 71.96 %; 73.8 ns and 53.0 k
 LUTs at 5 ns, 79.7 ns and 73.4 k at 2 ns) and of D2 with trained words (epoch 293, 249 k, 71.43 %;
 89.4 ns and 100.6 k, 85.5 ns and 118.4 k) stand outside the head-to-head with JEDI-linear, whose
-table in the next section holds the other two.
+table in the next section holds the designs retrained at 1e-3.
 
 `scripts/synthesis/synthesise_vn.py` takes the `outputs/<label>_hgq/` directory and the probe's
 `.npz` of one evaluation. It imports nothing from `src` and runs wherever
@@ -825,10 +825,10 @@ of 0. Every design accepts a jet per clock (an initiation interval of 1). Agains
 of 1e-8 and 3e-8 keep the three macro working points within 0.5 % (relative), while 1e-7 loses
 2.1 % of the rejection and 3e-7 loses 6.3 %, with 2.4 % of the TPR at 1 %. The untrained two-block
 port at the seeded 12 and 10 bits had taken 60 cycles (300 ns) and a cost of 803 317 in the dry
-run. Vivado has not yet run, so no LUT, FF or timing figure exists: alkaid's cost is its own
-estimate, and the latencies assume that the 5 ns clock is met. At N = 16 the comparators are
-JEDI-linear, 136 k LUT at 75 ns and 73.6 % (on the untruncated jet's axis, see "JEDI-linear"), and
-the DeepSets of Odagiu et al. 2024, 747 k LUT and 555 DSPs at 115 ns.
+run. Vivado had not run on these designs, so the table holds no LUT, FF or timing figure: alkaid's
+cost is its own estimate, and the latencies assume that the 5 ns clock is met. At N = 16 the
+comparators are JEDI-linear, 136 k LUT at 75 ns and 73.6 % (on the untruncated jet's axis, see
+"JEDI-linear"), and the DeepSets of Odagiu et al. 2024, 747 k LUT and 555 DSPs at 115 ns.
 
 `tests/test_quantised.py` checks the port and the module on the CPU on a stub datamodule. A float
 `vn` of random weights, saved as a run, is copied through `init_from` into a port in float mode,
@@ -957,10 +957,11 @@ accuracy, where the paper quotes the micro, as the figures below do. Their Table
 a NaN at epoch 5120, and Table II is its epoch 4350, where our first run of the reproduction read a
 training accuracy of 0.7205 at 64.7 k logged EBOPs against their 0.7190 at 60.4 k.
 
-Blocks 1 to 4 of each catalogue train one variant each, with a checkpoint every epoch, in
-`logs/train/hls4ml/jedi_linear_hgq/nconst16/baseline_<variant>_allepochs`; they differ in their
-inputs alone. `axis_trained`, the reproduction, reads `etarel` and `phirel` from the full jet's
-axis (`data.full_axis=true`) as standardised rows. `kept_words` reads them from the kept
+Blocks 1 to 4 of the training catalogue train one variant each, with a checkpoint every epoch, in
+`logs/train/hls4ml/jedi_linear_hgq/nconst16/baseline_<variant>_allepochs`, and blocks 5 to 8 the
+first two at N = 50 and 150 (`nconst<N>`); they differ in their inputs alone. `axis_trained`,
+the reproduction, reads `etarel` and `phirel` from the full jet's axis (`data.full_axis=true`) as
+standardised rows. `kept_words` reads them from the kept
 constituents' axis as fixed trigger words, the like-for-like row against the vector neurons.
 `abs_words` reads the absolute `[pt, eta, phi]` as fixed words, the paper's text taken literally
 ("only pT, eta, and phi are used"). `kept_trained` reads the kept axis as standardised rows, so
@@ -993,8 +994,9 @@ main run), which serve the validation jets of that run's training and write no r
 `<evaluations>/epoch_<k>/outputs/main.npz` and its traced EBOPs off `main_hgq/export.json`, takes
 their front, and writes the picked checkpoint's manifest to `<picks dir>`, or `<picks dir>/fold_<i>`
 for a fold, the layout `src/eval.py` merges; the eval blocks point `checkpoint_manifest_path` at
-`<run dir>/picks/<tag>`, `target57237` for Table II's EBOPs and `matched_a2_trained` and
-`matched_d2` for the points at the vector neurons' EBOPs below.
+`<run dir>/picks/<tag>`: `target57237`, `target102664` and `target144427` for the published
+designs' EBOPs, `best100ns` for the pick under 100 ns below, and, in the superseded blocks 5 and 6,
+`matched_a2_trained` and `matched_d2` for the points at the EBOPs of the vector neurons at 3e-3.
 A training that `chain.sh` of the campaign stopped after its collapse wrote no manifest, since
 `train.py` writes it last; it was written afterwards with the last checkpoint and the run's MLflow
 run, as `train.py` would have. Checkpoints are kept every
@@ -1003,24 +1005,18 @@ epoch because the cadence matters: a first run that kept one every 50 epochs put
 and of that run coincide within 0.001 (the best validation accuracy at no more than 57.2 k logged
 EBOPs is 0.7166 and 0.7174); on every 50th epoch alone ours read 0.7098, about 0.75 points lower.
 
-The runs ended on 2026-10-12, `abs_words` stopped once its EBOPs fell below 1000 near epoch 5160.
-`scripts/synthesis/synthesise_vn.py` implemented each pick, its top module and its Vivado reports'
-directory named after the export's `port` (or `--project`), in both flows of blocks 37 and 38 of
-`vn_hgq`: 5 ns with a latency cutoff of 4.2 ns, and the published pipelining, 2 ns with a cutoff
-of 2.7 ns. The picks at N = 16 (main runs, micro test accuracy):
-
-| design         | epoch | EBOPs  | test acc | 5 ns: latency, LUTs | 2 ns: latency, LUTs |
-| -------------- | ----- | ------ | -------- | ------------------- | ------------------- |
-| Table II       | 4350  | 57 237 | 71.95 %  |                     | 53.6 ns, 43.8 k     |
-| `axis_trained` | 4498  | 55 363 | 71.48 %  | 56.3 ns, 31.1 k     | 48.1 ns, 38.6 k     |
-| `kept_trained` | 3336  | 57 976 | 70.93 %  | 57.0 ns, 33.7 k     | 55.4 ns, 40.6 k     |
-| `kept_words`   | 3576  | 55 798 | 70.83 %  | 57.9 ns, 30.5 k     | 51.7 ns, 38.6 k     |
-| `abs_words`    | 3279  | 57 574 | 53.25 %  | 56.2 ns, 30.0 k     | 48.2 ns, 37.5 k     |
-
-The reproduction lies 0.47 points under Table II (71.40 % macro), and two runs of the recipe
-differ by about 0.3 points of validation accuracy at fixed EBOPs. It takes 12 cycles at 5 ns and
-18 stages at the published pipelining, against Table II's 19, and is faster and smaller there than
-the published design. The kept axis costs about 0.55 points and the fixed words about 0.1.
+The runs at N = 16 ended on 2026-10-12, `abs_words` stopped once its EBOPs fell below 1000 near
+epoch 5160. `scripts/synthesis/synthesise_vn.py` implemented each pick, its top module and its
+Vivado reports' directory named after the export's `port` (or `--project`), at 5 ns with a
+latency cutoff of 4.2 ns and, at N = 16, also at the published pipelining, 2 ns with a cutoff of
+2.7 ns. Nearest Table II's EBOPs the two ablations reached a micro test accuracy of 70.93 %
+(`kept_trained`, epoch 3336, 57 976 EBOPs) and 53.25 % (`abs_words`, epoch 3279, 57 574); the
+reproduction and `kept_words` stand in the table of the comparison below. The reproduction lies
+0.47 points under Table II (71.40 % macro), and two runs of the recipe differ by about 0.3 points
+of validation accuracy at fixed EBOPs. It takes 12 cycles at 5 ns and 18 stages at the published
+pipelining (48.1 ns and 38.6 k LUTs at 2 ns), against Table II's 19, and is faster and smaller
+there than the published design. The kept axis costs about 0.55 points and the fixed words less
+than 0.1.
 `abs_words` reflects the network on absolute coordinates, not the port: the searched float
 `jedi_linear` reaches 62.7 % on `[pt, eta, phi]` at N = 16 against 71.6 % on
 `[pt, etarel, phirel]`.
@@ -1032,24 +1028,32 @@ shift of +1 to +3, so that the op read its source's MSB, and the emulation diffe
 same op count and cost, so every design is traced without it; da4ml 0.3, which built the published
 designs, emits no shift on a quantise op. Every design here was exact and co-simulated exactly.
 
-Blocks 40 to 43 of `runvn_hgq_train.sh` fine-tune D2 and A2 under the same recipe and checkpoints
-(see `vn_hgq`). The agreed pairs read the same information: the full axis with trained words,
-`axis_trained` against A2 with trained words (one width per slot for both angles, unstandardised,
-where JEDI-linear's are per element on standardised rows); and trigger information with fixed
-words, `kept_words` against D2, which reads no axis. The five folds of these four designs at
-N = 16, and of both pairs' designs at N = 50 and 150, trained on NGT on 2026-10-13 and 14. Under
-the recipe's peak learning rate of 3e-3 every VN run collapses, between about 100 k and 250 k
-EBOPs at N = 16 and from about 200 k at N = 50, so that no VN front reaches JEDI-linear's 57 237
-EBOPs and the pick nearest it is each run's cheapest front point, on D2 inside its degradation.
+The vector neurons are fine-tuned under the same recipe and checkpoints (see `vn_hgq`). The agreed
+pairs read the same information: the full axis with trained words, `axis_trained` against A2 with
+trained words (one width per slot for both angles, unstandardised, where JEDI-linear's are per
+element on standardised rows); and trigger information with fixed words, `kept_words` against D2,
+which reads no axis. At N = 50 and 150 the two variants meet the designs of blocks 29 to 32 of
+`runvn_hgq_train.sh`, with and without the offset. Under the recipe's peak learning rate of 3e-3
+every VN run collapsed (blocks 40 to 47), between about 100 k and 250 k EBOPs at N = 16 and from
+about 200 k at N = 50, so that no VN front reached JEDI-linear's 57 237 EBOPs.
 
-Each architecture is therefore reported under its own protocol (decided 2026-10-14). JEDI-linear
-is picked as its paper picks it, nearest the EBOPs of its published design at the nearest
-constituent count, read off its repository's result reports: 57 237 at N = 16, 102 664 at
-N = 64 for our 50 and 144 427 at N = 128 for our 150. The vector neurons are picked on hardware,
-since EBOPs price their products of two variables as bit operations, whereas Vivado maps them to
-DSPs and JEDI-linear has none: the most accurate front point whose latency at 5 ns stays under
-100 ns. JEDI-linear's most accurate design under 100 ns is kept for a referee; at N = 16 it is
-the more accurate on the full axis and ties on trigger information.
+A pilot at N = 50 (D2's analogue, `cheap_h32`, main runs) tested the learning rate. The cheapest
+epoch whose training accuracy stayed at 0.78 or above lay at about 206 k EBOPs at 3e-3, at 97 k
+at 1e-3 and at 106 k at 3e-4, each run collapsing below it: lowering the peak from 3e-3 to 1e-3
+halves the cheapest healthy cost, and lowering it further gains nothing. The vector neurons are
+therefore retrained at a peak of 1e-3, JEDI-linear's recipe otherwise unchanged, for both designs
+at N = 16, 50 and 150 with their five folds (blocks 48 to 53, run directories
+`..._jedirecipe_lr1e-3_everyepoch`), which replace the runs at 3e-3.
+
+Two protocols are reported (decided 2026-10-14 and 15). Under its paper's, JEDI-linear's design is
+the calibrated front's point nearest the EBOPs of its published design at the nearest constituent
+count, read off its repository's result reports: 57 237 at N = 16, 102 664 at N = 64 for our 50
+and 144 427 at N = 128 for our 150. Under one budget, either architecture's design is the most
+accurate calibrated front point whose estimated latency at 5 ns is at most 100 ns, the rule of the
+vector neurons, since EBOPs price their products of two variables as bit operations, whereas
+Vivado maps them to DSPs and JEDI-linear has none. The main run and each of the five folds are
+picked by the rule on their own training, and Vivado implements the main picks alone (VU13P, 5 ns,
+cutoff 4.2 ns).
 
 `scripts/synthesis/synthesise_vn.py --estimate-only` estimates a checkpoint's hardware without
 Vivado: it traces the export under every CMVM method at hard_dc 0 and 1, keeps the setting of
@@ -1060,18 +1064,49 @@ LUTs are 0.92 of alkaid's cost without those products. On the 13 designs impleme
 2026-10-14 the DSPs came within 2 % and the LUTs within 0.89 to 0.95 of that cost, for both
 architectures; at 2 ns Vivado maps fewer products to DSPs, which the estimate does not model.
 `quantised_picks.py front` lists a run's calibrated front, each of whose epochs is estimated, and
-`pick-hw <run dir> <evaluations> 100 <picks dir>` writes the pick (`picks/best100ns`). Its
-`--match` instead picks the point nearest another design's utilisation, the larger of its LUT and
-DSP fractions of the VU13P; it is unused, since the VN's cheapest healthy designs take 2.3 to 5 %
-of the device, set by their DSPs, against 1.8 % for JEDI-linear's 57 k picks.
+`pick-hw <run dir> <evaluations> 100 <picks dir>` writes the pick (`picks/best100ns`).
 
-A pilot at N = 50 (D2's analogue, `cheap_h32`, main runs) tested the learning rate. The cheapest
-epoch whose training accuracy stayed at 0.78 or above lay at about 206 k EBOPs at 3e-3, at 97 k
-at 1e-3 and at 106 k at 3e-4, each run collapsing below it: lowering the peak from 3e-3 to 1e-3
-halves the cheapest healthy cost, and lowering it further gains nothing. The vector neurons are
-therefore retrained at a peak of 1e-3, JEDI-linear's recipe otherwise unchanged, for both designs
-at N = 16, 50 and 150 with their five folds (run directories `..._jedirecipe_lr1e-3_everyepoch`),
-which replace the runs at 3e-3.
+In the table the test accuracy is alkaid's micro accuracy of the main pick on the 260 000 test
+jets, bit-exact against Keras and Verilator in every row, and the k-fold figures are the mean ±
+sample standard deviation of the folds' micro test accuracy and traced EBOPs; latency and
+resources are Vivado's at 5 ns, and those of the published designs at their 2 ns clock. The
+evaluations are blocks 1 to 16 of `runjedi_linear_hgq_eval.sh` and 44 to 49 of
+`runvn_hgq_eval.sh`, their rows in `results/quantised/`, and the Vivado rows behind the table are
+in `results/fpga/`.
+
+| N   | design                      | pick           | test acc | k-fold acc     | latency       | LUTs    | DSPs | EBOPs           |
+| --- | --------------------------- | -------------- | -------- | -------------- | ------------- | ------- | ---- | --------------- |
+| 16  | Table II                    | published      | 71.95 %  |                | 53.6 ns, 2 ns | 43.8 k  | 0    | 57.2 k          |
+| 16  | `axis_trained`              | paper's EBOPs  | 71.48 %  | 71.38 ± 0.58 % | 56.3 ns       | 31.1 k  | 0    | 57.2 ± 0.8 k    |
+| 16  | `axis_trained`              | < 100 ns       | 73.90 %  | 73.87 ± 0.04 % | 79.9 ns       | 149.0 k | 0    | 389.8 ± 113.8 k |
+| 16  | VN A2, trained words        | < 100 ns       | 72.89 %  | 72.91 ± 0.04 % | 89.6 ns       | 136.6 k | 517  | 397.6 ± 87.5 k  |
+| 16  | `kept_words`                | paper's EBOPs  | 70.87 %  | 70.66 ± 0.20 % | 55.4 ns       | 30.8 k  | 0    | 57.5 ± 2.3 k    |
+| 16  | `kept_words`                | < 100 ns       | 71.44 %  | 71.45 ± 0.06 % | 86.4 ns       | 173.8 k | 0    | 137.6 ± 36.8 k  |
+| 16  | VN D2, fixed words          | < 100 ns       | 71.64 %  | 71.61 ± 0.07 % | 88.2 ns       | 100.1 k | 796  | 323.6 ± 81.8 k  |
+| 50  | published N = 64            | published      | 80.92 %  |                | 60.9 ns, 2 ns | 70.7 k  | 0    | 102.7 k         |
+| 50  | `axis_trained`              | paper's EBOPs  | 80.66 %  | 80.52 ± 0.32 % | 63.6 ns       | 51.5 k  | 0    | 104.7 ± 2.0 k   |
+| 50  | `axis_trained`              | < 100 ns       | 81.44 %  | 81.60 ± 0.09 % | 92.4 ns       | 220.8 k | 0    | 485.8 ± 88.5 k  |
+| 50  | VN full axis, trained words | < 100 ns       | 81.74 %  | 81.80 ± 0.03 % | 95.1 ns       | 195.1 k | 1547 | 524.0 ± 100.6 k |
+| 50  | `kept_words`                | paper's EBOPs  | 79.18 %  | 79.74 ± 0.81 % | 58.0 ns       | 49.7 k  | 0    | 105.4 ± 4.6 k   |
+| 50  | `kept_words`                | < 100 ns       | 81.31 %  | 81.36 ± 0.11 % | 81.0 ns       | 196.6 k | 0    | 314.7 ± 82.8 k  |
+| 50  | VN no axis, fixed words     | < 100 ns       | 81.73 %  | 81.79 ± 0.05 % | 97.1 ns       | 211.6 k | 1617 | 547.8 ± 135.5 k |
+| 150 | published N = 128           | published      | 80.91 %  |                | 81.5 ns, 2 ns | 97.8 k  | 0    | 144.4 k         |
+| 150 | `axis_trained`              | paper's EBOPs  | 81.09 %  | 81.00 ± 0.17 % | 73.6 ns       | 88.9 k  | 0    | 145.9 ± 10.2 k  |
+| 150 | `axis_trained`              | < 100 ns       | 81.72 %  | 81.99 ± 0.06 % | 81.9 ns       | 154.0 k | 0    | 494.6 ± 82.2 k  |
+| 150 | VN full axis, trained words | < 100 ns, est. | 82.14 %  | 82.21 ± 0.05 % | 126.9 ns      | 354.0 k | 2493 | 884.7 ± 39.4 k  |
+| 150 | `kept_words`                | paper's EBOPs  | 80.49 %  | 80.36 ± 0.43 % | 67.0 ns       | 70.5 k  | 0    | 144.7 ± 2.0 k   |
+| 150 | `kept_words`                | < 100 ns       | 81.50 %  | 81.64 ± 0.17 % | 78.8 ns       | 164.5 k | 0    | 513.5 ± 194.9 k |
+| 150 | VN no axis, fixed words     | < 100 ns, est. | 82.27 %  | 82.19 ± 0.04 % | 132.4 ns      | 358.8 k | 2393 | 711.0 ± 36.9 k  |
+
+Under the paper's protocol the port comes within 0.5 points of the published designs (71.48
+against 71.95 % at N = 16, 80.66 against 80.92 % at 50 against 64, 81.09 against 80.91 % at 150
+against 128), with fewer LUTs at a comparable latency. Under one 100 ns budget JEDI-linear on the
+full axis beats the vector neurons by 1.0 point at N = 16; on trigger information the vector
+neurons lead by 0.16 points of k-fold accuracy at N = 16 and 0.43 at 50, and on the full axis by
+0.2 at 50, each lead at a cost of 800 to 1600 DSPs, where JEDI-linear uses none. At N = 150 the
+vector neurons' picks miss the 5 ns clock (WNS −1.35 and −1.62 ns): the estimate assumes timing
+closure, which designs above about 15 % of the device at 20 cycles miss by 0.3 to 1.6 ns.
+JEDI-linear meets the budget at every count.
 
 `tests/test_quantised.py` checks, on the CPU and the record stub of the vn tests, that the port
 builds the published layers and quantisers under both `inputs` and both `per_slot`, that it refuses
@@ -1085,7 +1120,7 @@ the estimate's cycles and cost equal those of the project its chosen setting wri
 `tests/test_configs.py` holds the three experiments to layout digests, and
 `tests/test_quantised_picks.py` checks the candidates on a synthetic `train.log`, that the picks
 of a main run and a fold, chosen on the calibrated front, merge as `src/eval.py` merges them, and
-that the hardware pick keeps the latency budget and lets the DSP fraction bind.
+that the hardware pick keeps the latency budget.
 
 ## JEDI-linear
 
@@ -1103,7 +1138,7 @@ configs `configs/experiment/hls4ml/jedi_linear_{16,50,150}.yaml`, the search con
 `configs/hparams_search/hls4ml/jedi_linear_optuna.yaml` with its companion
 `jedi_linear_scl_optuna.yaml`, the three search catalogues
 `scripts/experiments/hls4ml/{px_py_pz_e,pt_eta_phi,pt_etarel_phirel}/runjedi_linear_search.sh` and
-the generated `scripts/experiments/hls4ml/px_py_pz_e/runjedi_linear_{train,eval}.sh`.
+the generated `runjedi_linear_{train,eval}.sh` beside each.
 
 The reference is the paper and `src/model.py::get_gnn` of its code, github.com/calad0i/JEDI-linear,
 both read on 2026-09-30. In float it is one network for every number of constituents and every
@@ -1166,7 +1201,7 @@ and JetFormer do. As a row of the grid that reads `data.features`
 `scripts/experiments/make_train_catalogues.py` and `tests/conftest.py` but in neither `EMBEDDED` nor
 `BASELINE_ONLY`, so its results land in `results/<label>/results_table_<regime>.csv` and
 `results_table.subdir` stays null. Until 2026-10-02 it ran the baseline alone and was the one row
-of `BASELINE_ONLY` outside `EMBEDDED`; the set now equals the embedded class.
+of `BASELINE_ONLY` outside `EMBEDDED`; the set now holds the embedded and the jet-level rows.
 
 The search, `jedi_linear_optuna.yaml`, runs one study per constituent count and regime,
 `jedi_linear_nconst<N>_<method>_<scheme>`, in `logs/optuna/hls4ml/jedi_linear.db` on the
@@ -1226,15 +1261,14 @@ Added on 2026-10-01 as the fourth row of the acquired-symmetry class, beside Dee
 JetFormer, and as a further candidate for an FPGA beside `jedi_linear` and the vector neurons. The
 row, `linformer`, is the single-head Linformer transformer of Laatu et al. (arXiv:2510.24784),
 trained in float on this repository's preparation. Unlike `jedi_linear`, it runs all seven regimes
-on the three feature sets, 21 studies per set and 63 in all, none of them launched yet
-(2026-10-01); Patrick took the decisions recorded below that day. The network, `LinformerNet`, and
+on the three feature sets, 21 studies per set and 63 in all, run from 2026-10-02 to 2026-10-04;
+Patrick took the decisions recorded below on 2026-10-01. The network, `LinformerNet`, and
 its attention, `LinformerAttention`, are in `src/algorithms/linformer.py`, as is the subclass
 `Linformer`, which supplies `build_net` alone. The
 configs (`linformer.yaml`, `linformer_{16,50,150}.yaml`, `linformer_optuna.yaml` and
 `linformer_scl_optuna.yaml`) and the catalogues `runlinformer_{search,train,eval}.sh` sit where
 those of the other grid rows do, with a search catalogue under every feature-set directory. Each
-catalogue holds 21 blocks, and every train and eval block is still "transferred from experiment
-config (no study yet)".
+catalogue holds 21 blocks, every train and eval block carrying the best trial of its study.
 
 The reference is Laatu, Sun, Cox, Gandrakota, Maier, Ngadiuba, Que, Luk, Spiropulu and Tapper,
 "Sub-microsecond Transformers for Jet Tagging on FPGAs" (arXiv:2510.24784, NeurIPS 2025 ML4PS
@@ -1485,10 +1519,9 @@ batches of 2048 with five folds at the algorithm defaults and set
 `algorithm.moments: choice(uniform, rankcut)`, the control's being the DeepSets space without
 `phi_layers` and `aggregation`, so every space holds only the FPGA-cheap pools and ReLU. They run
 one study per constituent count, `<row>_nconst<N>_augmentation_none` in
-`logs/optuna/hls4ml/<row>.db`: nine studies of 200 trials of 50 epochs, none launched yet
-(2026-10-05). The scratch runs took 1.9 to 3.1 minutes each on a V100, which puts a study at 6 to
-10 V100-hours. The train and eval catalogues hold three blocks each, all "transferred from
-experiment config (no study yet)".
+`logs/optuna/hls4ml/<row>.db`: nine studies of 200 trials of 50 epochs, all completed. The
+scratch runs took 1.9 to 3.1 minutes each on a V100, which puts a study at 6 to 10 V100-hours.
+The train and eval catalogues hold three blocks each, one per study.
 
 The experiments keep the `16-mixed` precision of the parents and leave `extras.matmul_precision`
 unset. `JetMoments.raw` leaves autocast and computes the moments in float32: they are cubic in p,
@@ -1621,14 +1654,13 @@ set `results_table.subdir: jet_level` and `callbacks.invariance_metric.probe: fa
 `jet_level_noeta52_150` sets `data.exclude: [j_eta]`. Each search config is the MLP's space, its 200
 trials of 50 epochs and its sampler (TPE, seed 1234, 20 start-up trials), which
 `tests/test_configs.py` keeps equal, with the study `<row>_nconst150_augmentation_none` in
-`logs/optuna/hls4ml/<row>.db`: two studies, none launched yet (2026-10-06). The space's widest
+`logs/optuna/hls4ml/<row>.db`: two studies, both completed. The space's widest
 point, [256, 128, 64], is the one the scratch run selected. In
 `scripts/experiments/make_train_catalogues.py` and `tests/conftest.py` the rows form `JET_LEVEL`,
 inside
 `BASELINE_ONLY` and outside `MODELS`, which `tests/test_algorithms.py` builds on constituent
 batches; the generator gives them the constituent count 150 alone, a header note of their own and
-catalogues in the default layout alone, one block each, "transferred from experiment config (no
-study yet)".
+catalogues in the default layout alone, one block each, from its study.
 
 No group acts on the observables, so the invariance probe would report a perfect invariance that is
 never tested. Under `probe: false` `InvarianceMetricCallback` transforms nothing: it keeps the clean
@@ -1754,8 +1786,9 @@ Added on 2026-10-09: 18 of the rows on a second data set, the top-quark tagging 
 arXiv:1902.09914 (Zenodo 2603256), on which LorentzNet, PELICAN, L-GATr-slim and LLoCa published
 their figures. The nine rows of those four architectures train on the published recipes, so that
 their figures test the ports against the papers'; `vn`, the five grid rows and the three moment rows
-are searched around their hls4ml optimum. Every row runs at N = 100 in the baseline regime with two
-classes, `qcd` and `top`. CLAUDE.md ("Top-tagging replica") describes the record, its conversion,
+are searched around their hls4ml optimum. Every row runs at N = 100 with two classes, `qcd` and
+`top`, the five grid rows in the seven regimes on the three feature sets and the others in the
+baseline regime. CLAUDE.md ("Top-tagging replica") describes the record, its conversion,
 the datamodule, the configs and the catalogues; this section holds the recipes and their sources,
 where the ports depart from the references, the measured costs and the published figures. The
 literature verification behind the recipes and the figures (2026-10-08), with verbatim quotes, is

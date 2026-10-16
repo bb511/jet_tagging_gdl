@@ -12,7 +12,7 @@ Divergences from the reference:
   attention-score matrix that is never actually used. We leave it out.
 * The network returns logits, where the reference returns log-probabilities; the
   cross-entropy loss applies the same log-softmax, so the objective is the same.
-* The config picks layer norm where the reference's search fixed batch norm, and the
+* Every norm is a layer norm where the reference's search fixed batch norm, and the
   search space differs.
 """
 
@@ -20,7 +20,7 @@ import torch
 from torch import nn
 
 from src.algorithms import JetTaggingModule
-from src.algorithms.components.norm import SeqNorm, _norm_layer
+from src.algorithms.components.norm import SeqNorm
 
 
 def _qkv_projections(dim: int) -> tuple[nn.Linear, ...]:
@@ -30,7 +30,7 @@ def _qkv_projections(dim: int) -> tuple[nn.Linear, ...]:
 class JetFormerAttention(nn.Module):
     """Pre-norm multi-head self-attention, no padding mask."""
 
-    def __init__(self, dim: int, num_heads: int, normalization: str = "batch") -> None:
+    def __init__(self, dim: int, num_heads: int) -> None:
         super().__init__()
         if dim % num_heads != 0:
             raise ValueError(
@@ -39,7 +39,7 @@ class JetFormerAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.norm = SeqNorm(dim, normalization)
+        self.norm = SeqNorm(dim, "layer")
         self.q, self.k, self.v = _qkv_projections(dim)
         self.out = nn.Linear(dim, dim, bias=True)
 
@@ -61,23 +61,15 @@ class JetFormerAttention(nn.Module):
 class JetFormerBlock(nn.Module):
     """Self-attention sub-layer followed by a x2-expansion pre-activation FFN."""
 
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int,
-        dropout: float = 0.0,
-        activation: str = "relu",
-        normalization: str = "batch",
-    ) -> None:
+    def __init__(self, dim: int, num_heads: int, dropout: float = 0.0) -> None:
         super().__init__()
-        self.attn = JetFormerAttention(dim, num_heads, normalization)
+        self.attn = JetFormerAttention(dim, num_heads)
 
-        act_cls = nn.ReLU if activation == "relu" else nn.SiLU
-        self.norm_0 = SeqNorm(dim, normalization)
-        self.activ_0 = act_cls()
+        self.norm_0 = SeqNorm(dim, "layer")
+        self.activ_0 = nn.ReLU()
         self.linear_0 = nn.Linear(dim, dim * 2, bias=False)
-        self.norm_1 = SeqNorm(dim * 2, normalization)
-        self.activ_1 = act_cls()
+        self.norm_1 = SeqNorm(dim * 2, "layer")
+        self.activ_1 = nn.ReLU()
         self.linear_1 = nn.Linear(dim * 2, dim, bias=False)
         self.dropout = nn.Dropout(dropout)
 
@@ -94,8 +86,6 @@ class JetFormerNet(nn.Module):
     """Embed the constituents, prepend a CLS token, run the blocks, read token 0.
 
     :param num_heads: attention heads per block, which must divide ``embed_dim``.
-    :param normalization: either ``batch`` or ``layer``, used by every norm here.
-    :param activation: either ``relu`` or ``silu``, used in the feed-forward sub-layers.
     """
 
     def __init__(
@@ -105,18 +95,16 @@ class JetFormerNet(nn.Module):
         num_heads: int,
         num_transformers: int,
         out_dim: int,
-        normalization: str = "batch",
-        activation: str = "relu",
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.embedding = nn.Linear(in_dim, embed_dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
-        block_args = (embed_dim, num_heads, dropout, activation, normalization)
+        block_args = (embed_dim, num_heads, dropout)
         self.blocks = nn.ModuleList(
             [JetFormerBlock(*block_args) for _ in range(num_transformers)]
         )
-        self.norm = _norm_layer(embed_dim, normalization)
+        self.norm = nn.LayerNorm(embed_dim)
         self.classifier = nn.Linear(embed_dim, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -138,18 +126,22 @@ class JetFormer(JetTaggingModule):
         embed_dim: int,
         num_heads: int,
         num_transformers: int,
-        normalization: str = "batch",
+        normalization: str = "layer",
         activation: str = "relu",
         dropout: float = 0.0,
     ) -> nn.Module:
-        """Build the network; the arguments are documented on :class:`JetFormerNet`."""
+        """Build the network; the arguments are documented on :class:`JetFormerNet`.
+
+        ``normalization`` must be ``layer`` and ``activation`` ``relu``; the arguments
+        stay because the checkpoints save them as hyperparameters.
+        """
+        if (normalization, activation) != ("layer", "relu"):
+            raise ValueError(f"Unsupported options: {normalization}, {activation}")
         return JetFormerNet(
             in_dim=self.hparams.nbr_feats,
             embed_dim=embed_dim,
             num_heads=num_heads,
             num_transformers=num_transformers,
             out_dim=self.hparams.output_dim,
-            normalization=normalization,
-            activation=activation,
             dropout=dropout,
         )

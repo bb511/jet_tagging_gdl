@@ -4,13 +4,13 @@
 # ========================================================================
 # One block per (constituent count, regime): 1 x 1 = 1 train runs. Generated
 # by scripts/experiments/make_train_catalogues.py; regenerate rather than edit by hand.
-# Baseline only: the top-tagging replica (Zenodo 2603256) runs every row in the
-# unaugmented regime, the embedded and the grid rows alike.
+# Baseline only: this architecture embeds the symmetry rather than acquiring it,
+# so the augmentation and SCL regimes are not run on it.
 # The block follows the published recipe its experiment config holds; no study
 # tunes it.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
-# file to scripts/experiments/submit_train.sh, which queues them on a GPU or slurm.
+# file to scripts/experiments/submit_train.sh, which runs them under nohup.
 
 # ========================================================================
 # lloca_z  nconst=100

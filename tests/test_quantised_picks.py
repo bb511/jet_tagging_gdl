@@ -26,7 +26,7 @@ QUANTISED_EPOCHS = {
 }
 UNEVALUATED, DELETED = 14, 17
 # The calibrated front's epochs: (estimated latency in ns, LUTs, DSPs). Epoch 10 is over
-# 100 ns; epoch 13 holds 5.8 % of the LUTs but 10 % of the DSPs, which bind.
+# 100 ns.
 HARDWARE = {
     10: (110.0, 200_000, 0),
     11: (95.0, 140_000, 0),
@@ -108,20 +108,16 @@ def test_the_quantised_picks_follow_the_calibrated_front(tmp_path: Path) -> None
         picks.pick(empty, empty / "evaluations", 1.0)
 
 
-def test_the_hardware_picks_keep_the_budget_and_the_binding_resource(
+def test_the_hardware_picks_keep_the_budget(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     run = _quantised_run(tmp_path / "run")
     evaluations, out = run / "evaluations", tmp_path / "picks"
-    reference = tmp_path / "reference.json"
-    reference.write_text(json.dumps({"lut": 95_040, "dsp": 0}))  # 5.5 % of the LUTs
     picks.main(["front", str(run), str(evaluations)])
     picks.main(["pick-hw", str(run), str(evaluations), "100", str(out)])
 
     assert capsys.readouterr().out.split()[:4] == ["15", "13", "11", "10"]
     # Epoch 10 is the most accurate but over budget.
     assert Path(merge_manifests(out).runs[0].checkpoint_path).name == "epoch_011.ckpt"
-    # By its LUTs epoch 13 would be nearest; its DSPs leave 15 nearest.
-    assert picks.pick_hardware(run, evaluations, 100.0, reference)[0] == 15
     with pytest.raises(SystemExit, match="within 50.0 ns"):
         picks.pick_hardware(run, evaluations, 50.0)

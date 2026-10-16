@@ -268,8 +268,7 @@ class KerasQuantisedModule(DenormalisedModule):
         :return: None, for which Lightning substitutes its mock optimiser.
         """
         total = int(self.trainer.estimated_stepping_batches)
-        warm = int(self.hparams.warmup_fraction * total)
-        schedule = self._scheduler(decay_steps=max(total - warm, 1), warmup_steps=warm)
+        schedule = self._scheduler(decay_steps=max(total, 1))
         optimizer = self._optimizer(learning_rate=schedule)
         model = self.net.keras_model
         optimizer.exclude_from_weight_decay(var_list=quantiser_variables(model))

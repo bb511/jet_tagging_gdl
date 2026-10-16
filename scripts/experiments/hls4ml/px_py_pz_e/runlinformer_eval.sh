@@ -9,7 +9,7 @@
 # a block whose study is missing carries none and says so (transferred ablation).
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
-# file to scripts/experiments/submit_eval.sh, which queues them on a GPU or slurm.
+# file to scripts/experiments/submit_eval.sh, which runs them under nohup.
 
 # ========================================================================
 # linformer  nconst=16

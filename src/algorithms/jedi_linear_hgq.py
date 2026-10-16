@@ -150,7 +150,6 @@ class JEDILinearHGQ(KerasQuantisedModule):
         floatx: str = "float64",
         jax_platform: str = "cpu",
         jax_devices: int | list[int] = 1,
-        warmup_fraction: float = 0.0,
     ) -> KerasNetwork:
         """Build the port; the arguments after ``head_layers`` are described in
         configs/algorithm/jedi_linear_hgq.yaml, and the training ones are read from the

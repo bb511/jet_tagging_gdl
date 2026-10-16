@@ -7,7 +7,9 @@
 # evaluate each variant's design nearest the EBOPs of Table II of
 # arXiv:2508.15468 (57 237), blocks 5 and 6 the designs of the reproduction and
 # of the kept-axis trigger-word variant nearest the EBOPs of the vector-neuron
-# designs they are compared with (blocks 42 and 40 of runvn_hgq_train.sh).
+# designs of blocks 43 and 40 of runvn_hgq_train.sh. Blocks 5 and 6 are
+# superseded, as those designs are by blocks 49 and 48: the comparison picks
+# under 100 ns (blocks 11 to 16) and leaves them as the record.
 # Blocks 7 to 10 evaluate the two variants of the comparison at 50 and 150
 # constituents, each design nearest the EBOPs of the published design at the
 # nearest count of arXiv:2508.15468, read off its repository's result reports:
@@ -40,7 +42,7 @@
 # them with --only <index>.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
-# file to scripts/experiments/submit_eval.sh, which queues them on a GPU or slurm.
+# file to scripts/experiments/submit_eval.sh, which runs them under nohup.
 
 # ========================================================================
 # jedi_linear_hgq  nconst=16  (JEDI-linear as published)
@@ -132,7 +134,7 @@
 
 # ------------------------------------------------------------------------
 # jedi_linear_hgq  nconst=16  baseline  (method=augmentation, group=none)  axis_trained
-# the reproduction at the EBOPs of A2 with trained words (block 42 of
+# the reproduction at the EBOPs of A2 with trained words (block 43 of
 # runvn_hgq_train.sh), the full-axis pair of the comparison
 # hand-written, no study
 # ------------------------------------------------------------------------

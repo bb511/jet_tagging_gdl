@@ -25,8 +25,6 @@ class CosineRestarts(keras.optimizers.schedules.LearningRateSchedule):
     ``configure_optimizers`` builds it as it builds ``CosineDecay``: ``decay_steps`` are
     the steps of the whole run and ``alpha`` is the floor as a fraction of
     ``initial_learning_rate``.
-
-    :raises ValueError: on a warm-up, which the schedule does not have.
     """
 
     KEYS = ("initial_learning_rate", "decay_steps", "alpha", "cycles", "flat_fraction")
@@ -38,11 +36,7 @@ class CosineRestarts(keras.optimizers.schedules.LearningRateSchedule):
         alpha: float = 0.0,
         cycles: int = 1,
         flat_fraction: float = 0.0,
-        warmup_target: float | None = None,
-        warmup_steps: int = 0,
     ) -> None:
-        if warmup_target is not None or warmup_steps:
-            raise ValueError("CosineRestarts has no warm-up: set warmup_fraction to 0")
         super().__init__()
         self.initial_learning_rate = initial_learning_rate
         self.decay_steps = decay_steps

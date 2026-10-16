@@ -454,8 +454,8 @@ def file_header(model: str, task: str, layout: Layout) -> list[str]:
         *tuned_note(model, layout),
         "#",
         "# Every command is commented out: copy one to run it by hand, or feed the whole",
-        f"# file to scripts/experiments/submit_{task}.sh, which queues them"
-        " on a GPU or slurm.",
+        f"# file to scripts/experiments/submit_{task}.sh, which runs them"
+        " under nohup.",
         "",
     ]
 

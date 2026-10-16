@@ -13,6 +13,9 @@
 # reference is a variant of a study's best, so
 # scripts/experiments/make_train_catalogues.py neither writes nor regenerates
 # this file.
+# The final comparison with JEDI-linear rests on blocks 48 to 53 and the float
+# runs they start from, blocks 16, 22 and 29 to 32; the other blocks are the
+# history of earlier designs, kept as the record.
 # Baseline only: the vector neurons embed the symmetry, so the augmentation
 # and SCL regimes are not run on them.
 # The first block trains the float reference that algorithm.init_from of
@@ -108,7 +111,7 @@
 # (baseline_<tag>_jedirecipe_lr1e-3_everyepoch).
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
-# file to scripts/experiments/submit_train.sh, which queues them on a GPU or slurm.
+# file to scripts/experiments/submit_train.sh, which runs them under nohup.
 
 # ========================================================================
 # vn  nconst=16  (the float reference)

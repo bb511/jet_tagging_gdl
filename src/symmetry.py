@@ -88,10 +88,9 @@ DIAGNOSTIC_FAMILIES = tuple(diagnostic_family(point) for point in WORKING_POINTS
 # The per-group families every results table carries, on the judged group and on each.
 TABULATED_FAMILIES = FLIP_FAMILIES + RETENTION_FAMILIES + DIAGNOSTIC_FAMILIES
 
-# Paired distances between the clean and the transformed softmax outputs; one of them
-# fills the selected and per-group columns of the results table.
+# The paired distance between the clean and the transformed softmax outputs, the default
+# family of the selected and per-group columns of the results table.
 TOTAL_VARIATION = "tv"
-DISTANCE_FAMILIES = (TOTAL_VARIATION,)
 
 # Groupless: the clean working points and the one-vs-rest AUC.
 AUC = "auc"

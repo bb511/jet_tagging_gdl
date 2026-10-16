@@ -661,8 +661,6 @@ def test_the_restarting_cosine_follows_jedi_linear_at_every_epoch_start() -> Non
     for epoch in (0, 45, 89, 90, 95, 99, 100, 145, 199):
         rate = float(schedule(epoch * steps))
         assert rate == pytest.approx(_jedi_linear_rate(epoch), rel=1e-6, abs=1e-9)
-    with pytest.raises(ValueError, match="warm-up"):
-        CosineRestarts(3e-3, 200 * steps, warmup_steps=10)
 
 
 def _last_epoch(root: Path) -> ModelCheckpoint:

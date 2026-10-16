@@ -1,6 +1,6 @@
 # @package callbacks
 
-# Callbacks of the quantised rows, whose last epoch is the model.
+# Callbacks of the quantised rows, which keep the last epoch unless a block keeps every epoch.
 defaults:
   - util@model_checkpoint: model_checkpoint
   - util@model_summary: model_summary

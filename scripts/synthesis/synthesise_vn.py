@@ -166,7 +166,10 @@ CSV_FIELDS = (
 )
 
 OPTIONS: tuple[tuple[str, dict[str, Any]], ...] = (
-    ("--export-dir", {"type": Path, "help": "outputs/<label>_hgq/ of a quantised eval"}),
+    (
+        "--export-dir",
+        {"type": Path, "help": "outputs/<label>_hgq/ of a quantised eval"},
+    ),
     ("--outputs-npz", {"type": Path, "help": "the probe's outputs/<label>.npz"}),
     ("--out", {"type": Path, "required": True, "help": "for check.json and prj/"}),
     ("--project", {"help": "top module; None: export.json's port, else vn_hgq"}),
@@ -258,8 +261,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def _float64_kept(name: str) -> Callable[[Any], Any]:
     """Keras's elementwise *name* on JAX, computed in float64 for a float64 tensor.
 
-    A copy of ``_float64_kept`` in src/algorithms/components/hgq_port.py,
-    since this script imports nothing from src.
+    A copy of ``_float64_kept`` in src/algorithms/components/hgq_port.py, since this
+    script imports nothing from src.
     """
     import jax
     import keras
@@ -390,9 +393,10 @@ def fuse_aware(comb: Any) -> Any:
     """Fuse the adder pairs alkaid would fuse, keeping a ternary adder only when it is
     no later than the binary root it replaces, so that no output is delayed.
 
-    A prototype of the latency study of 2026-10-09 on alkaid 0.8.1, not an alkaid
-    option: alkaid scores a pair by the adders it saves alone, and fusing a root with
-    one child of a balanced tree lengthens the path, the sibling staying binary.
+    From the latency study of 2026-10-09 on alkaid 0.8.1 and the fusion of every design
+    of the FPGA comparison (``--ternary aware``), but not an alkaid option: alkaid
+    scores a pair by the adders it saves alone, and fusing a root with one child of a
+    balanced tree lengthens the path, the sibling staying binary.
     """
     from alkaid.trace.passes import add_surrogate, dead_code_elimin
     from alkaid.trace.passes.surrogate import cost_lat_ternary_add

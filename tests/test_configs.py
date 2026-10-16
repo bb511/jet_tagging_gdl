@@ -128,14 +128,13 @@ COPIES = [
         "algorithm/vn",
         "algorithm/vn_hgq",
         "_target_ name units optimizer scheduler quantisation beta beta_schedule "
-        "init_from calibration_jets floatx jax_platform jax_devices warmup_fraction",
+        "init_from calibration_jets floatx jax_platform jax_devices",
     ),
     (
         "algorithm/jedi_linear",
         "algorithm/jedi_linear_hgq",
         "_target_ name aggregation inputs per_slot units quantisation beta "
-        "beta_schedule floatx jax_platform jax_devices optimizer scheduler "
-        "warmup_fraction",
+        "beta_schedule floatx jax_platform jax_devices optimizer scheduler",
     ),
     (
         "search/deepsets",

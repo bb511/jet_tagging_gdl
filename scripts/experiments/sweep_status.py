@@ -44,7 +44,6 @@ ROW_OF = {"hls4ml": "[a-z0-9]+", "top_tagging": "[a-z0-9_]+"}
 STEM_RE_OF = {
     dataset: re.compile(rf"run({row}?)_search") for dataset, row in ROW_OF.items()
 }
-STEM_RE = STEM_RE_OF["hls4ml"]
 ERR = re.compile(
     r"Traceback \(most recent call last\)"
     r"|HYDRA_FULL_ERROR"

@@ -2,13 +2,16 @@
 # ========================================================================
 # VN_HGQ EVALUATION COMMANDS
 # ========================================================================
-# Forty-nine eval runs, one per block of runvn_hgq_train.sh: twenty-eight at
-# 16 constituents (the float reference, one per beta, the latency ablation,
-# the full-axis designs and the beta scan of the chosen two), then eight at 50
-# and 150, then the two-block finals at 16 with the full-axis offset, then
-# one picked checkpoint of each of the chosen two trained with JEDI-linear's
-# recipe, then the picks of the four designs of blocks 40 to 43, then those of
-# the six designs of blocks 48 to 53.
+# Forty-nine eval runs, one per block of runvn_hgq_train.sh but 44 to 47:
+# twenty-eight at 16 constituents (the float reference, one per beta, the
+# latency ablation, the full-axis designs and the beta scan of the chosen two),
+# then eight at 50 and 150, then the two-block finals at 16 with the full-axis
+# offset, then one picked checkpoint of each of the chosen two trained with
+# JEDI-linear's recipe, then the picks of the four designs of blocks 40 to 43,
+# then those of the six designs of blocks 48 to 53.
+# The final comparison with JEDI-linear uses blocks 44 to 49 alone, the picks
+# of training blocks 48 to 53; the other blocks are the history of earlier
+# designs, kept as the record.
 # Hand-written: vn_hgq has no study and the reference is a variant of a
 # study's best, so scripts/experiments/make_train_catalogues.py neither writes
 # nor regenerates this file.
@@ -87,7 +90,7 @@
 # with the axis offset.
 #
 # Every command is commented out: copy one to run it by hand, or feed the whole
-# file to scripts/experiments/submit_eval.sh, which queues them on a GPU or slurm.
+# file to scripts/experiments/submit_eval.sh, which runs them under nohup.
 
 # ========================================================================
 # vn  nconst=16  (the float reference)
