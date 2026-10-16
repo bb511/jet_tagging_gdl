@@ -780,7 +780,11 @@ must match `logits_clean` exactly (`--max-mismatch` 0). The trace skips alkaid's
 `canonicalize_msb_wraps` (`_disable_msb_wrap_pass`), which in alkaid 0.8.1 zeroes the shift of a
 one-bit wrap whose output step equals its source's MSB weight, comparing a step measured after the
 shift with an MSB measured before it, so that the op reads another bit; the emulation and the RTL
-share the error, which only the check against Keras sees. alkaid's `RTLModel` writes the Verilog
+share the error, which only the check against Keras sees. The trace also computes directly the
+product of a matrix row whose elements meeting a nonzero weight are all constant
+(`_keep_constant_products`), on which alkaid 0.8.1 and 0.8.2 raise `StopIteration`; such a row
+arose in four checkpoints of A2 with trained words, in a dense layer that the EBOPs penalty had
+pruned to two weights. alkaid's `RTLModel` writes the Verilog
 project `prj/` for the VU13P at 5 ns, with a latency cutoff of 5 ns per stage. Verilator
 co-simulates 1000 jets, which must match the emulation exactly, and Vivado implements the project
 out of context through alkaid's `build_vivado_prj.tcl`, with its reports under
@@ -1028,37 +1032,46 @@ shift of +1 to +3, so that the op read its source's MSB, and the emulation diffe
 same op count and cost, so every design is traced without it; da4ml 0.3, which built the published
 designs, emits no shift on a quantise op. Every design here was exact and co-simulated exactly.
 
-Blocks 40 to 43 of `runvn_hgq_train.sh` fine-tune D2 and A2 under the same recipe, checkpoints and
-selection (see `vn_hgq`). The VN runs collapse before their EBOPs fall below about 100 k, so the
-pick nearest 57 237 is each VN run's cheapest front point. The agreed pairs read the same
-information: the full axis with trained words, `axis_trained` against A2 with trained words (one
-width per slot for both angles, unstandardised, where JEDI-linear's are per element on standardised
-rows); and trigger information with fixed words, `kept_words` against D2, which reads no axis.
-Under this protocol the VN picks are the more accurate, 72.63 against 71.48 % and 71.31 against
-70.83 %, at more than twice the EBOPs. The JEDI-linear points at equal cost are picked from the
-same fronts with each VN pick's traced EBOPs as the target (`kept_words` has no front point
-between 102 k and 156 k):
+Blocks 40 to 43 of `runvn_hgq_train.sh` fine-tune D2 and A2 under the same recipe and checkpoints
+(see `vn_hgq`). The agreed pairs read the same information: the full axis with trained words,
+`axis_trained` against A2 with trained words (one width per slot for both angles, unstandardised,
+where JEDI-linear's are per element on standardised rows); and trigger information with fixed
+words, `kept_words` against D2, which reads no axis. The five folds of these four designs at
+N = 16, and of both pairs' designs at N = 50 and 150, trained on NGT on 2026-10-13 and 14. Under
+the recipe's peak learning rate of 3e-3 every VN run collapses, between about 100 k and 250 k
+EBOPs at N = 16 and from about 200 k at N = 50, so that no VN front reaches JEDI-linear's 57 237
+EBOPs and the pick nearest it is each run's cheapest front point, on D2 inside its degradation.
 
-| pair                             | design            | epoch | EBOPs   | test acc | 5 ns: latency, LUTs | 2 ns: latency, LUTs |
-| -------------------------------- | ----------------- | ----- | ------- | -------- | ------------------- | ------------------- |
-| full axis, trained words         | `axis_trained`    | 1987  | 141 007 | 73.54 %  | 72.1 ns, 90.4 k     | 71.0 ns, 109.9 k    |
-|                                  | A2, trained words | 1300  | 142 419 | 72.63 %  | 83.5 ns, 76.0 k     | 85.2 ns, 93.4 k     |
-| trigger information, fixed words | `kept_words`      | 1780  | 101 841 | 71.22 %  | 68.7 ns, 63.5 k     | 68.0 ns, 72.1 k     |
-|                                  | D2                | 1091  | 124 656 | 71.31 %  | 76.0 ns, 54.4 k     | 77.9 ns, 72.1 k     |
+Each architecture is therefore reported under its own protocol (decided 2026-10-14). JEDI-linear
+is picked as its paper picks it, nearest the EBOPs of its published design at the nearest
+constituent count, read off its repository's result reports: 57 237 at N = 16, 102 664 at
+N = 64 for our 50 and 144 427 at N = 128 for our 150. The vector neurons are picked on hardware,
+since EBOPs price their products of two variables as bit operations, whereas Vivado maps them to
+DSPs and JEDI-linear has none: the most accurate front point whose latency at 5 ns stays under
+100 ns. JEDI-linear's most accurate design under 100 ns is kept for a referee; at N = 16 it is
+the more accurate on the full axis and ties on trigger information.
 
-At equal cost JEDI-linear leads by 0.9 points on the full axis and is 11 to 14 ns faster with 18
-to 19 % more LUTs. On trigger information the two tie: D2 leads by 0.1 points, within the scatter
-between runs, at 22 % more EBOPs; JEDI-linear is 7 to 10 ns faster; and D2 takes fewer LUTs at
-5 ns and as many at 2 ns. JEDI-linear is faster in every pairing; the vector neurons spend fewer
-LUTs per EBOP. Each configuration ran once. The VN fronts rest on a logged validation accuracy that
-wraps (see `vn_hgq`): D2's fell to 0.47 at epoch 700 and 0.35 at 1000 while its training accuracy
-stayed at 0.70 and its front points tested at 71.2 to 71.4 %, whereas JEDI-linear's tracked its
-test accuracy within 0.002. Patrick kept one protocol for both and reports this as a caveat.
+`scripts/synthesis/synthesise_vn.py --estimate-only` estimates a checkpoint's hardware without
+Vivado: it traces the export under every CMVM method at hard_dc 0 and 1, keeps the setting of
+fewest pipeline stages at the 4.2 ns cutoff, as the implementations were chosen, and writes
+`estimate.json` with its cycles, their latency at 5 ns, and the DSPs and LUTs Vivado would use.
+A product of two variables whose narrower operand has more than 5 bits lands in a DSP, and the
+LUTs are 0.92 of alkaid's cost without those products. On the 13 designs implemented at 5 ns by
+2026-10-14 the DSPs came within 2 % and the LUTs within 0.89 to 0.95 of that cost, for both
+architectures; at 2 ns Vivado maps fewer products to DSPs, which the estimate does not model.
+`quantised_picks.py front` lists a run's calibrated front, each of whose epochs is estimated, and
+`pick-hw <run dir> <evaluations> 100 <picks dir>` writes the pick (`picks/best100ns`). Its
+`--match` instead picks the point nearest another design's utilisation, the larger of its LUT and
+DSP fractions of the VU13P; it is unused, since the VN's cheapest healthy designs take 2.3 to 5 %
+of the device, set by their DSPs, against 1.8 % for JEDI-linear's 57 k picks.
 
-Nothing has run at N = 50 and 150, whose experiments carry the same recipe; Patrick kept the
-grid's counts over the published 32, 64 and 128, since the published accuracy saturates from
-N = 64. Both pairs of the table are to train there as main runs, and the five folds of the four
-pair designs at N = 16, then of those at 50 and 150, on NGT. No fold has been fitted.
+A pilot at N = 50 (D2's analogue, `cheap_h32`, main runs) tested the learning rate. The cheapest
+epoch whose training accuracy stayed at 0.78 or above lay at about 206 k EBOPs at 3e-3, at 97 k
+at 1e-3 and at 106 k at 3e-4, each run collapsing below it: lowering the peak from 3e-3 to 1e-3
+halves the cheapest healthy cost, and lowering it further gains nothing. The vector neurons are
+therefore retrained at a peak of 1e-3, JEDI-linear's recipe otherwise unchanged, for both designs
+at N = 16, 50 and 150 with their five folds (run directories `..._jedirecipe_lr1e-3_everyepoch`),
+which replace the runs at 3e-3.
 
 `tests/test_quantised.py` checks, on the CPU and the record stub of the vn tests, that the port
 builds the published layers and quantisers under both `inputs` and both `per_slot`, that it refuses
@@ -1067,10 +1080,12 @@ other columns, a narrow angle word for absolute angles and an unknown `inputs`, 
 from scratch set the standardisation of the pooled splits, padded rows included, and round-trip it
 in the checkpoint. The evaluation of that checkpoint, and that of an untrained port on absolute
 words shared by the slots, export a model that predicts `logits_clean` from the stored inputs,
-which `synthesise_vn.py` emulates bit for bit and, where Verilator exists, co-simulates exactly.
+which `synthesise_vn.py` emulates bit for bit and, where Verilator exists, co-simulates exactly;
+the estimate's cycles and cost equal those of the project its chosen setting writes.
 `tests/test_configs.py` holds the three experiments to layout digests, and
-`tests/test_quantised_picks.py` checks the candidates on a synthetic `train.log` and that the picks
-of a main run and a fold, chosen on the calibrated front, merge as `src/eval.py` merges them.
+`tests/test_quantised_picks.py` checks the candidates on a synthetic `train.log`, that the picks
+of a main run and a fold, chosen on the calibrated front, merge as `src/eval.py` merges them, and
+that the hardware pick keeps the latency budget and lets the DSP fraction bind.
 
 ## JEDI-linear
 

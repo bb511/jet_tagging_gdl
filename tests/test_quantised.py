@@ -455,6 +455,24 @@ def test_the_estimate_predicts_the_project_of_its_setting(
     assert not (estimated / "prj").exists()
 
 
+def test_the_trace_keeps_a_constant_product_of_a_matrix_row(synth) -> None:
+    from alkaid.trace import FVArrayInput, trace
+
+    synth._keep_constant_products()
+    inputs = FVArrayInput((2, 3))
+    # Row 1 keeps a variable that meets only zero weights beside two constants at zero
+    # bits, so that its product is constant: alkaid 0.8.1 raised StopIteration on it.
+    word = np.array([[1, 1, 1], [1, 0, 0]])
+    k, i, f = word, 3 * word, 4 * word
+    weights = np.array([[0.0, 0.0], [0.25, 3.0], [-1.0, 0.5]])
+    comb = trace(inputs, inputs.quantize(k=k, i=i, f=f) @ weights)
+    data = np.random.default_rng(0).uniform(-8, 8, size=(1000, 6))
+    words = np.floor(data * 16) / 16 * word.ravel()
+    expected = (words.reshape(-1, 2, 3) @ weights).reshape(-1, 4)
+
+    assert np.array_equal(np.asarray(comb.predict(data), np.float64), expected)
+
+
 @pytest.fixture(scope="module")
 def axis_evaluated(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
     # A port reading the leader's offset from the full jet's axis, its bits seeded as a

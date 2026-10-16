@@ -13,7 +13,8 @@ bit-exact reference. The top module is named by ``--project``, else by the ``por
 2. ``import hgq`` registers its layers and alkaid's plugin for them; the model loads;
 3. Keras predicts the exported words, and a drift from the probe's logits is logged;
 4. alkaid traces the model into combinational logic, as ``alkaid convert`` does but
-   without its pass ``canonicalize_msb_wraps`` (see ``_disable_msb_wrap_pass``), its
+   without its pass ``canonicalize_msb_wraps`` (see ``_disable_msb_wrap_pass``) and
+   with the constant products of its matrix rows kept (``_keep_constant_products``), its
    constant matrix-vector products solved by ``--method0`` at ``--hard-dc``; under
    ``--ternary aware`` its adder pairs are then fused latency-aware, so that the
    emulation of step 5 and the co-simulation of step 7 check the fused logic;
@@ -55,6 +56,7 @@ before any implementation.
 
 import argparse
 import csv
+import functools
 import itertools
 import json
 import logging
@@ -423,14 +425,47 @@ def _disable_msb_wrap_pass() -> None:
     canon.canonicalize_msb_wraps = lambda comb: comb
 
 
+def _keep_constant_products() -> None:
+    """Make alkaid's product of a traced and a constant matrix accept a row whose
+    product is constant.
+
+    In alkaid 0.8.1 and 0.8.2 a traced matrix that is not constant throughout passes
+    each row to ``cmvm``, which sums the solver's parts into an array whose hardware
+    configuration it takes from a traced variable among them. Where every element of the
+    row that meets a nonzero weight is constant, none is left and StopIteration is
+    raised. Such a row arose where the EBOPs penalty had pruned a dense layer to two
+    weights and coarsened its input quantiser until the elements they meet took single
+    values (2026-10-15). Its product is computed directly here, as alkaid computes a
+    constant matrix's.
+    """
+    # TODO(Patrick): remove once alkaid fixes cmvm upstream.
+    import alkaid.trace.fixed_variable_array as fva
+
+    if hasattr(fva.cmvm, "__wrapped__"):
+        return
+    cmvm = fva.cmvm
+
+    @functools.wraps(cmvm)
+    def constant_kept(cm: np.ndarray, v: Any, solver_options: Any) -> np.ndarray:
+        used = np.any(cm != 0, axis=1)
+        row = np.asarray(v)[used]
+        if any(x.low != x.high for x in row):
+            return cmvm(cm, v, solver_options)
+        return np.array([x.low for x in row], dtype=np.float64) @ cm[used]
+
+    fva.cmvm = constant_kept
+
+
 def trace_comb(model: Any, options: dict[str, Any], ternary: str) -> Any:
     """Trace the model into alkaid's combinational logic with the solver *options*, as
-    ``alkaid convert`` does but without ``canonicalize_msb_wraps``, and fuse its adders
-    latency-aware under *ternary* ``aware``."""
+    ``alkaid convert`` does but without ``canonicalize_msb_wraps`` and with the constant
+    products of its matrix rows kept, and fuse its adders latency-aware under *ternary*
+    ``aware``."""
     from alkaid.converter import trace_model
     from alkaid.trace import HWConfig, trace
 
     _disable_msb_wrap_pass()
+    _keep_constant_products()
     inputs, outputs = trace_model(model, HWConfig(1, 1, -1), options)
     comb = trace(inputs, outputs)
     return fuse_aware(comb) if ternary == "aware" else comb
