@@ -64,6 +64,18 @@ def _symm_loss(
     return SymmetryConsistencyLoss(group, weight) if method == "symm_loss" else None
 
 
+def _param_groups(module: nn.Module, decay_1d_params: bool) -> list[dict]:
+    """The optimiser's parameter groups, the 1-D parameters (biases, norm gains)
+    exempted from weight decay unless *decay_1d_params*, as the L-GATr and LLoCa
+    references train."""
+    params = list(module.parameters())
+    if decay_1d_params:
+        return [{"params": params}]
+    matrices = [p for p in params if p.ndim > 1]
+    vectors = [p for p in params if p.ndim <= 1]
+    return [{"params": matrices}, {"params": vectors, "weight_decay": 0.0}]
+
+
 class JetTaggingModule(LightningModule):
     """Classify jets into the datamodule's classes, under either training method.
 
@@ -97,6 +109,7 @@ class JetTaggingModule(LightningModule):
         transform_kwargs: dict[str, float | bool] | None = None,
         optimizer: Callable | None = None,
         scheduler: dict | None = None,
+        decay_1d_params: bool = True,
         compile: bool = False,
         **net_kwargs,
     ) -> None:
@@ -107,6 +120,8 @@ class JetTaggingModule(LightningModule):
             that is applied to the data.
         :param optimizer: optimiser used to train the network, Hydra object.
         :param scheduler: scheduler for the learning rate, Lightning object.
+        :param decay_1d_params: apply the optimiser's weight decay to the biases and
+            norm gains too; false exempts them.
         :param net_kwargs: additional arguments for the specific network that is being
             used, forwarded to the 'build_net' method of each network class.
         """
@@ -335,7 +350,8 @@ class JetTaggingModule(LightningModule):
 
     def configure_optimizers(self) -> dict:
         """Build the optimiser, and the scheduler dict Lightning expects beside it."""
-        optimizer = self._optimizer(params=self.parameters())
+        groups = _param_groups(self, self.hparams.decay_1d_params)
+        optimizer = self._optimizer(params=groups)
         return {
             "optimizer": optimizer,
             "lr_scheduler": self._set_up_scheduler(optimizer),

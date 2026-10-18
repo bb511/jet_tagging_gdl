@@ -1814,7 +1814,7 @@ The recipes, as the experiment configs set them:
 | ---------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------- | ------------- | -------- |
 | `lorentznet`                       | 6 blocks of width 72, c = 5e-3, dropout 0.2                                                         | AdamW, 1e-3, weight decay 0.01                 | `warmup_restarts_decay`       | 128, 35       | none     |
 | `pelican`, `pelican_lorentz`       | 5 blocks, `n_message` 60, `n_hidden` 35, dropout 0.01, `nbar` 51 and 49                             | AdamW, 2.5e-3, weight decay 0.005              | `warmup_restarts_decay`       | 100, 35       | norm 1   |
-| `lgatr_slim`, `lgatr_slim_lorentz` | the algorithm's 12 blocks, 32 vector and 96 scalar channels, 8 heads, `mlp_ratio` 4                 | Lion, 3e-5, weight decay 2, betas (0.9, 0.99)  | `cosine`                      | 128, 21       | norm 1   |
+| `lgatr_slim`, `lgatr_slim_lorentz` | the algorithm's 12 blocks, 32 vector and 96 scalar channels, 8 heads, `mlp_ratio` 4                 | Lion, 3e-5, weight decay 2, betas (0.9, 0.999) | `cosine`                      | 128, 21       | norm 1   |
 | the four `lloca_*`                 | 12 blocks, 8 heads of 12 scalars and 1 vector, `mlp_factor` 2, frames-net 128 wide with dropout 0.1 | Lion, 3e-5, weight decay 2, betas (0.9, 0.999) | `cosine_restarts`, two cycles | 128, 32       | norm 1   |
 
 The sources are arXiv:2201.08187 §3.3 and the LorentzNet-release script `top_tagging.py` for
@@ -1838,9 +1838,18 @@ caps the jets at 80 constituents and fills every batch with equal numbers of sig
 jets; the replica does neither. The port has 179 023 parameters with the beams and 179 027 without,
 against the reference's 48k, because the rewrite does not factorise the aggregation weights (see
 "PELICAN"); its `nbar` is the training jets' mean multiplicity at N = 100, 49.01, plus the two
-beams, 51 for `pelican` and 49 for `pelican_lorentz`. The L-GATr-slim paper states no Lion betas,
-so the experiments write out the package's default (0.9, 0.99); 200 000 steps at a batch of 128
-are 21 epochs of the training split. The LLoCa paper states its betas, (0.9, 0.999), and a dropout
+beams, 51 for `pelican` and 49 for `pelican_lorentz`. The L-GATr-slim paper states no Lion betas;
+its repository's training configuration (`tag_default.yaml` of tagger-quantization) sets
+(0.9, 0.999), which the experiments take. The repository also spares every parameter of fewer
+than two dimensions (biases and gains) the weight decay and multiplies in full float32
+(`float32_matmul_precision: highest`), which the experiments copy through `decay_1d_params: false`
+and `extras.matmul_precision: highest`; of the 18 rows, these two alone depart from the arithmetic
+of their hls4ml experiments. On Lion's default betas (0.9, 0.99), with every parameter decayed and
+under TF32, the `lgatr_slim` main run reached an accuracy of 0.9383 and a rejection of 1393 at
+ε_S = 30 %, against 0.9417 and 2125 on the reference's settings, both evaluated in fp32
+(2026-10-17). The optimiser closes that gap and the precision does not: the reference's optimiser
+under TF32 reached 0.9414 and 2195, the old optimiser in float32 0.9379 and 1374, one seed each.
+200 000 steps at a batch of 128 are 21 epochs of the training split. The LLoCa paper states its betas, (0.9, 0.999), and a dropout
 of 0.1 in the frames-net alone, which the wrapper's `framesnet_dropout` carries while the
 backbone's `dropout` stays 0. At 0, the default of every hls4ml row, the package builds no dropout
 layer; a nonzero value inserts layers that renumber the later linear layers of the frames-net in
@@ -1880,12 +1889,15 @@ port reads the constituents alone, with ψ(m²) as the one scalar and a tanh gat
 reference's per-component clamp of the coordinate update at ±100 GeV (see
 `src/algorithms/lorentznet.py`), so it embeds the whole Lorentz group, which the
 reference's beam particles reduce to rotations about the beam. The
-L-GATr-slim and LLoCa references boost every jet to its rest frame and give each constituent seven
-ParT-style scalar features (`boost_jet` and `tagging_features` in their configs); the ports read the
+L-GATr-slim and LLoCa references give each constituent seven ParT-style scalar features
+(`tagging_features` in their configs), and the LLoCa reference boosts every jet, its spurions
+included, to the jet's rest frame (`boost_jet`); the L-GATr-slim reference sets `boost_jet` too,
+but its experiment code switches it off for every Lorentz-equivariant network. The ports read the
 four-momenta in units of 20 GeV alone, L-GATr-slim with one scalar flag on its global token and
 LLoCa with no scalar in its frames-net. The LLoCa reference's frames-net also reads the beam and
-time spurions, so its exact group is SO(2) about the beam, an inference of the literature
-verification rather than a statement of the paper, where `lloca_lorentz` holds the Lorentz group.
+time spurions as three extra particles (`wrappers.py` of lloca-experiments at the tag
+`arxiv-hep-v1`), so its exact group is SO(2) about the beam, where `lloca_lorentz` holds the
+Lorentz group.
 PELICAN's beams (1, 0, 0, ±1) and L-GATr-slim's time and lightlike beam tokens are those of the
 references.
 

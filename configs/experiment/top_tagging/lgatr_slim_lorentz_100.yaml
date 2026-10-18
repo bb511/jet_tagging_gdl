@@ -28,7 +28,8 @@ algorithm:
     _target_: lion_pytorch.Lion
     lr: 3.0e-5
     weight_decay: 2.0
-    betas: [0.9, 0.99] # Lion's defaults, the paper stating none
+    betas: [0.9, 0.999] # the reference repository's, the paper stating none
+  decay_1d_params: false # the reference decays the matrices alone
   scheduler: ${scheduler}
 
 trainer:
@@ -36,7 +37,7 @@ trainer:
   max_epochs: 21 # the reference's 200k steps at batch 128
 
 extras:
-  matmul_precision: high
+  matmul_precision: highest # the reference's; TF32 raises the probe's TV from 1e-5 to 1e-2
 
 results_table:
   subdir: embedded

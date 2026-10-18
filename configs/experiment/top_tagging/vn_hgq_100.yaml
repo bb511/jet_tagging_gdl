@@ -1,0 +1,41 @@
+# @package _global_
+# Vector neurons quantised with HGQ2 at N = 100 of the top-tagging set, fine-tuned from algorithm.init_from.
+defaults:
+  - override /data: top_tagging
+  - override /algorithm: vn_hgq
+  - override /callbacks: quantised
+  - override /trainer: gpu
+  - override /results_table: top_tagging
+
+tags: ["top_tagging", "vn_hgq", "nconst-100"]
+
+experiment_name: top_tagging_vn_hgq_nconst100
+
+data:
+  nconstituents: 100
+  # The network's own columns; required_features makes setup() refuse any other list.
+  features: [pt, eta, phi]
+  # In the driver: forked loader workers do not mix with the threads JAX has started.
+  num_workers: 0
+  pin_memory: false
+
+# The architecture of top_tagging/vn_100.yaml, the hls4ml vn optimum at N = 150.
+algorithm:
+  output_dim: 2
+  num_blocks: 3
+  vector_channels: 32
+  scalar_channels: 32
+  invariants: 32
+  tensor_invariants: 2
+  stream_channels: 32
+  head_layers: [32]
+  dropout: 0.0
+
+# fp32: 16-mixed would put a gradient scaler on the mock step; Keras clips (global_clipnorm).
+trainer:
+  max_epochs: 100
+  precision: 32
+  gradient_clip_val: null
+
+results_table:
+  subdir: quantised

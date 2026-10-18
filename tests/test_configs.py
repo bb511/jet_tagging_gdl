@@ -179,6 +179,11 @@ ARITHMETIC = {
     **dict.fromkeys(MOMENT_ROWS, (None, None)),
     **dict.fromkeys(("vn", *CPU_ROWS, *QUANTISED), (32, None)),
 }
+# The top-tagging rows whose recipe sets its own: the L-GATr-slim reference multiplies in
+# full fp32.
+TOP_TAGGING_ARITHMETIC = dict.fromkeys(
+    ("lgatr_slim", "lgatr_slim_lorentz"), (32, "highest")
+)
 FPGA_POOLS = "choice(sum, max, sum_over_n)"
 
 
@@ -233,14 +238,16 @@ def test_the_configs_are_those_the_row_lists_name() -> None:
     assert set(EXPERIMENTS) == experiments | {f"{row}_150" for row in JET_LEVEL}
     assert set(SEARCHES) == searches | set(CHEAP_SEARCHES)
     assert set(TOP_EXPERIMENTS) == {
-        f"{row}_{n}" for row in TOP_TAGGING for n in TOP_TAGGING_NCONSTITUENTS
+        f"{row}_{n}"
+        for row in (*TOP_TAGGING, *QUANTISED)
+        for n in TOP_TAGGING_NCONSTITUENTS
     }
     assert set(TOP_SEARCHES) == {
         f"{row}{scl}_optuna"
         for row in set(TOP_TAGGING) - set(TOP_TAGGING_RECIPES)
         for scl in ("", "_scl")
         if not (row in BASELINE_ONLY and scl)
-    }
+    } | set(CHEAP_SEARCHES)
 
 
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
@@ -340,6 +347,30 @@ def test_the_cheap_vn_searches_differ_by_the_full_axis_alone(tmp_path: Path) -> 
     assert offset.flops_total > plain.flops_total > 0
 
 
+@pytest.mark.parametrize("search", CHEAP_SEARCHES)
+def test_the_top_tagging_cheap_searches_keep_the_hls4ml_space(
+    search: str, tmp_path: Path
+) -> None:
+    regime = ("data.method=augmentation", "data.augmentation_scheme=none")
+    overrides = ("experiment=top_tagging/vn_100", f"hparams_search=top_tagging/{search}")
+    cfg = compose_root("train.yaml", *overrides, *regime, "trainer=cpu", "logger=none")
+    HydraConfig().set_config(point_into(cfg, tmp_path))
+    found = OmegaConf.to_container(cfg.hydra.sweeper, resolve=True)
+    hls4ml = OmegaConf.load(SEARCH_DIR / f"{search}.yaml")
+    ours = OmegaConf.load(TOP_SEARCH_DIR / f"{search}.yaml")
+    stem = search.removesuffix("_optuna")
+    module = hydra.utils.instantiate(cfg.algorithm)
+    database = "logs/optuna/top_tagging/vn_cheap.db"
+
+    assert found["study_name"] == f"top_tagging_{stem}_nconst100_augmentation_none"
+    assert found["storage"] == f"sqlite:///{database}?timeout=600"
+    assert found["params"] == OmegaConf.to_container(hls4ml.hydra.sweeper.params)
+    assert ours.algorithm == hls4ml.algorithm
+    # The cache serves no untruncated axis, so the offset reads the kept one.
+    assert not hydra.utils.instantiate(cfg.data).full_axis
+    assert module.required_features == list(cfg.data.features)
+
+
 @pytest.mark.parametrize("original, copy, changed", COPIES)
 def test_each_standalone_copy_equals_its_original_but_for_its_own_keys(
     original: str, copy: str, changed: str
@@ -390,22 +421,28 @@ def test_every_top_tagging_experiment_builds_a_two_class_row(
     experiment: str, tmp_path: Path
 ) -> None:
     model, n = experiment.rsplit("_", 1)
+    if model in QUANTISED:
+        pytest.importorskip("hgq")
     overrides = (f"experiment=top_tagging/{experiment}", "trainer=cpu", "logger=none")
     cfg = compose_root("train.yaml", *overrides)
     HydraConfig().set_config(point_into(cfg, tmp_path))
     module = hydra.utils.instantiate(cfg.algorithm)
     datamodule = hydra.utils.instantiate(cfg.data)
 
-    assert model in TOP_TAGGING and int(n) in TOP_TAGGING_NCONSTITUENTS
+    assert model in (*TOP_TAGGING, *QUANTISED)
+    assert int(n) in TOP_TAGGING_NCONSTITUENTS
     assert (module.hparams.output_dim, datamodule.class_names) == (2, ("qcd", "top"))
     assert module.hparams.nconstituents == datamodule.nconstituents == int(n)
     assert cfg.results_table.output_path.endswith("top_tagging/results_table.csv")
-    assert cfg.results_table.subdir == ("embedded" if model in EMBEDDED else None)
+    assert cfg.results_table.subdir == SUBDIRS.get(model)
     assert "top_tagging" in cfg.tags
-    # The arithmetic of the row's hls4ml experiment at N = 150.
-    assert _arithmetic(TOP_EXPERIMENT_DIR / f"{experiment}.yaml") == _arithmetic(
+    # The arithmetic of the row's hls4ml experiment at N = 150, or its recipe's own.
+    expected = TOP_TAGGING_ARITHMETIC.get(model) or _arithmetic(
         EXPERIMENT_DIR / f"{model}_150.yaml"
     )
+    assert _arithmetic(TOP_EXPERIMENT_DIR / f"{experiment}.yaml") == expected
+    if model in QUANTISED:
+        return  # Keras compiles its own optimiser and schedule into the network
     # The optimiser and the scheduler are built once the trainer knows the run's length;
     # a recipe's schedule replaces the algorithm's whole, none of its keys surviving.
     module._trainer = SimpleNamespace(estimated_stepping_batches=100)
@@ -413,7 +450,7 @@ def test_every_top_tagging_experiment_builds_a_two_class_row(
     assert isinstance(scheduler, LambdaLR) == (model in TOP_TAGGING_RECIPES)
 
 
-@pytest.mark.parametrize("search", TOP_SEARCHES)
+@pytest.mark.parametrize("search", sorted(set(TOP_SEARCHES) - set(CHEAP_SEARCHES)))
 def test_every_top_tagging_search_holds_its_experiments_point(
     search: str, tmp_path: Path
 ) -> None:

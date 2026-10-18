@@ -1,0 +1,158 @@
+% CMS coordinate system, west perspective. Adapted from Izaak Neutelings,
+% https://tikz.net/axis3d_cms/ (CC BY-SA 4.0, (c) 2021 TikZ.net): the geometry is his,
+% the colours are Paul Tol's "vibrant" scheme and the fonts those of the paper (newtx).
+\documentclass[border=3pt,tikz]{standalone}
+\usepackage{newtxtext,newtxmath}
+\usepackage{physics}
+\usepackage{tikz}
+\usepackage{tikz-3dplot}
+\usetikzlibrary{arrows.meta}
+\usetikzlibrary{3d}
+\usepackage{xcolor}
+\usetikzlibrary{bending}
+\usetikzlibrary{angles,quotes}
+
+% Paul Tol, vibrant
+\definecolor{tolblue}{HTML}{0077BB}
+\definecolor{tolcyan}{HTML}{33BBEE}
+\definecolor{tolteal}{HTML}{009988}
+\definecolor{tolorange}{HTML}{EE7733}
+\definecolor{tolred}{HTML}{CC3311}
+\definecolor{tolmagenta}{HTML}{EE3377}
+\definecolor{tolgrey}{HTML}{BBBBBB}
+
+% The figure's roles; change these four lines to recolour the whole figure.
+\colorlet{detcol}{tolblue}   % detector outline, end faces and the eta labels
+\colorlet{veccol}{tolred}    % the constituent momentum and its projections
+\colorlet{pipecol}{black!50} % beam pipe
+\colorlet{geocol}{black!50}  % compass and LHC labels
+\colorlet{jetcol}{black}    % the jet on the barrel: cone, footprint, constituents
+
+\colorlet{mycontour}{detcol!3}
+\colorlet{mycontour2}{detcol!6}
+\tikzset{>=latex}
+\tikzstyle{axis}=[->,thick,line cap=round]
+\tikzstyle{detector}=[thick,draw=detcol,rotate around z=\ang]
+\tikzstyle{beam pipe}=[draw=pipecol,fill=black!10,rotate around z=\ang]
+\tikzstyle{detector surface}=[detcol!12,opacity=0.5,rotate around z=\ang]
+\renewcommand*{\vv}[1]{\vec{\mkern0mu#1}}
+
+\begin{document}
+\tdplotsetmaincoords{75}{50}
+\begin{tikzpicture}[scale=2.8,tdplot_main_coords,rotate around x=90]
+
+  % VARIABLES
+  \def\rvec{\L/2/cos(\thetavec)}
+  \def\thetavec{18}
+  \def\phivec{60}
+  \def\L{3.3}    % detector length
+  \def\R{0.75}   % detector cylinder radius
+  \def\l{4.3}    % beam pipe length
+  \def\r{0.04}   % beam pipe radius
+  \def\rt{0.042} % beam pipe radius + line thickness
+  \def\xmax{1}   % maximum x axis
+  \def\ymax{1}   % maximum y axis
+  \def\zmin{-\l/2-0.2} % minimum z axis
+  \def\zmax{\l/2+0.3}  % maximum z axis
+  \def\w{0.3}
+  \coordinate (O) at (0,0,0);
+  \coordinate (Z) at (0,0,\L/2);
+  \tdplotsetcoord{O'}{0.022}{\thetavec}{\phivec}
+  \tdplotsetcoord{O''}{0.018}{90}{\phivec}
+  \tdplotsetcoord{P}{\rvec}{\thetavec}{\phivec}
+
+  % CYLINDER behind
+  \def\ang{18}
+  \fill[detcol!5,rotate around z=\ang]
+    (0,\R,\L/2) --++ (0,0,-\L) arc(90:270:\R) --++ (0,0,\L) arc(270:90:\R) -- cycle;
+  \fill[detector surface]
+    (0,0,\L/2) --++ (0,\R,0) arc(90:270:\R) -- cycle;
+  \fill[detector surface]
+    (0,0,-\L/2) --++ (0,\R,0) arc(90:270:\R) -- cycle;
+  \tdplotdrawarc[detector]{(0,0,\L/2)}{\R}{0}{360}{}{}
+  \tdplotdrawarc[detector,thin]{(0,0,-\L/2)}{\R}{0}{360}{}{}
+  \draw[detector,thin]
+    (90:\R) arc (90:270:\R);
+  \draw[detector,very thin]
+    (90:\R) arc (90:90-\ang:\R);
+  \draw[detector] (0,0,-\L/2)++(90:\R) --++ (0,0,\L);
+  \draw[detector] (0,0,-\L/2)++(-90:\R) --++ (0,0,\L);
+
+  % BEAM PIPE
+  \tdplotdrawarc[beam pipe]{(0,0,\l/2)}{\r}{0}{360}{}{}
+  \draw[beam pipe]
+    (0,\r,-\l/2) -- (0,\r,-0.2*\l) -- (90:0.5*\r)
+    -- (0,\r,0.2*\l) -- (0,\r,0.5*\l) arc(90:-90:\r)
+    -- (0,-\r,0.2*\l) -- (-90:0.5*\r) --
+    (0,-\r,-0.2*\l) -- (0,-\r,-\l/2) arc(-90:90:\r);
+  \draw[beam pipe] (0,0,\l/2) circle(\r);
+
+  % AXES
+  \draw[axis,-] (0,0,\zmin) -- (0,0,0);
+  \fill[black] (O) circle(0.5pt) node[right=1,below=1] {IP};
+  \draw[axis] (0,0,0.020) -- (0,0,\zmax) node[right=3,below=1]{$z$};
+  \draw[axis] (0,0.019,0) -- (0,\ymax,0) node[below left]{$y$};
+  \draw[dashed,veccol] (O'')  -- (Pxy);
+  \draw[axis] (0.022,0,0) -- (\xmax,0,0) node[below=1,right=-2]{$x$};
+
+  % LABELS
+  \node[detcol,above] at (0,\ymax,0) {$\eta=0$};
+  \node[detcol,above=3] at (0,\R,0.3*\L) {$\eta>0$};
+  \node[detcol,above=3] at (0,\R,-0.2*\L) {$\eta<0$};
+  \node[detcol,below=1,left] at (0,0,\zmax) {$\eta=+\infty$};
+  \node[detcol,above=1,right] at (0,0,\zmin) {$\eta=-\infty$};
+
+  % JET: the chosen jet projected on the barrel (cone from the IP, footprint, constituents)
+  \input{@POINTS@}
+  % VECTORS
+  \draw[dashed,veccol] (Px) -- (Pxy);
+  \draw[->,veccol,line cap=round] (O'') -- (Pxy) node[anchor=170,inner sep=2pt] {$\vv{p}_\mathrm{T}$};
+  \draw[dashed,veccol,line join=round] (Py) -- (Pxy) -- (P);
+  \draw[->,veccol,line cap=round] (O') -- (P);
+
+  % CYLINDER front
+  \draw[beam pipe,fill=none] (0,\r,-\l/2) arc(90:-90:\r);
+  \fill[detector surface]
+    (0,\rt,\L/2) --++ (0,\R-\rt,0) arc(90:-90:\R) --++ (0,\R-\rt,0) arc(-90:90:\rt);
+  \fill[detector surface]
+    (0,\rt,-\L/2) --++ (0,\R-\rt,0) arc(90:-90:\R) --++ (0,\R-\rt,0) arc(-90:90:\rt);
+  \tdplotdrawarc[detector]{(0,0,\L/2)}{\R}{-90}{90}{}{}
+  \tdplotdrawarc[detector]{(0,0,-\L/2)}{\R}{-90}{90}{}{}
+  \draw[beam pipe,fill=none] (0,\r,\l/2) arc(90:-90:\r);
+  \draw[detector,very thin]
+    (90-\ang:\R) arc (90-\ang:-90:\R);
+  \node[veccol,anchor=-30,inner sep=2pt] at (P) {$\vv{p}$};
+  \draw[dashed,veccol] (Pz) -- (P);
+
+  % ANGLES
+  \tdplotdrawarc[thick,mycontour]
+    {(O)}{0.2}{4}{0.7*\phivec}{}{}
+  \tdplotdrawarc[->]{(O)}{0.2}{0}{\phivec}
+    {anchor=-150,inner sep=1pt}{$\phi$}
+  \tdplotdrawarc[->,rotate around z=\phivec-90,rotate around y=-90]
+    {(O)}{0.88}{0}{\thetavec}
+    {anchor=-20,inner sep=2pt}{$\theta$}
+  \tdplotdrawarc[thick,detcol!4,rotate around z=\phivec-90,rotate around y=-90]
+    {(O)}{0.3}{88}{0.5*(90+\thetavec)}{}{}
+  \tdplotdrawarc[-{>[flex'=1]},rotate around z=\phivec-90,rotate around y=-90,line cap=round]
+    {(O)}{0.3}{90}{\thetavec}
+    {anchor=-40,inner sep=1pt}{$\eta$}
+  \draw[detcol] (0,0,\L/2) --++ (\R,0,0);
+  \tdplotdrawarc[thick,mycontour2]
+    {(Z)}{0.2}{4}{0.7*\phivec}{}{}
+  \tdplotdrawarc[->]{(Z)}{0.2}{0}{\phivec}
+    {anchor=-150,inner sep=1pt}{$\phi$}
+
+  % COMPASS and LHC (CMS geography; delete in Illustrator if unwanted)
+  \begin{scope}[shift={(1.1*\R,-\R,0.2*\L)},rotate around y=12]
+    \draw[<->,geocol] (-\w,0,0) -- (\w,0,0);
+    \draw[<->,geocol] (0,0,-\w) -- (0,0,\w);
+    \node[above=1,left,geocol,scale=0.6] at (-\w,0,0) {N};
+    \node[below=3,left=-2,geocol,scale=0.6] at (0,0,\w) {Jura};
+    \node[below=1,right,geocol,scale=0.6] at (\w,0,0) {ATLAS};
+  \end{scope}
+  \draw[->,thick,geocol] (1.4*\w,-\R,-0.1*\L) --++ (2*\w,0,0)
+    node[below=1,right,scale=0.8,align=center] {center of\\[-1pt]the LHC};
+
+\end{tikzpicture}
+\end{document}

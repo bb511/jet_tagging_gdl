@@ -20,3 +20,6 @@ pin_memory: true
 
 n_folds: 5
 kfold_seed: 42
+
+# validation: test the validation jets of the run's own training, to select a checkpoint
+test_split: test

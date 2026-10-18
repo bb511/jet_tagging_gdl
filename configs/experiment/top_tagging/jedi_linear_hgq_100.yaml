@@ -1,0 +1,33 @@
+# @package _global_
+# JEDI-linear as published, quantised with HGQ2 at N = 100 of the top-tagging set on its recipe, from scratch.
+defaults:
+  - override /data: top_tagging
+  - override /algorithm: jedi_linear_hgq
+  - override /callbacks: quantised
+  - override /trainer: gpu
+  - override /results_table: top_tagging
+
+tags: ["top_tagging", "jedi_linear_hgq", "nconst-100"]
+
+experiment_name: top_tagging_jedi_linear_hgq_nconst100
+
+data:
+  nconstituents: 100
+  # Or [pt, eta, phi]; setup() refuses any other list.
+  features: [pt, etarel, phirel]
+  batch_size: 2790
+  # In the driver: forked loader workers do not mix with the threads JAX has started.
+  num_workers: 0
+  pin_memory: false
+
+algorithm:
+  output_dim: 2
+
+# fp32: 16-mixed would put a gradient scaler on the mock step; the recipe has no clipping.
+trainer:
+  max_epochs: 7000
+  precision: 32
+  gradient_clip_val: null
+
+results_table:
+  subdir: quantised

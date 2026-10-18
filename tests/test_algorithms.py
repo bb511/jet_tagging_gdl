@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from lightning import Callback, LightningModule, Trainer
 from torch import nn
 
+from src.algorithms import _param_groups
 from src.algorithms.bdt import BoostedTrees, BoostedTreesClassifier
 from src.algorithms.components.geometry import _form, _form_matrix, _unit_lift
 from src.algorithms.components.mlp import _dense
@@ -282,6 +283,25 @@ def test_compiling_keeps_the_eager_keys() -> None:
 
     assert compiled.net._compiled_call_impl is not None
     assert list(compiled.state_dict()) == list(eager.state_dict())
+
+
+@pytest.mark.parametrize("decay_1d_params", [True, False])
+def test_the_1d_parameters_are_exempted_from_weight_decay_on_request(
+    decay_1d_params: bool,
+) -> None:
+    module = algorithm("lgatr_slim", decay_1d_params=decay_1d_params)
+    decay = module._optimizer.keywords["weight_decay"]
+    optimizer = module._optimizer(params=_param_groups(module, decay_1d_params))
+    groups = optimizer.param_groups
+
+    assert sum(len(g["params"]) for g in groups) == len(list(module.parameters()))
+    if decay_1d_params:
+        assert len(groups) == 1 and groups[0]["weight_decay"] == decay
+    else:
+        matrices, vectors = groups
+        assert matrices["weight_decay"] == decay and vectors["weight_decay"] == 0.0
+        assert all(p.ndim > 1 for p in matrices["params"])
+        assert all(p.ndim <= 1 for p in vectors["params"])
 
 
 def test_lloca_standardises_its_frames_net_on_the_first_training_batch() -> None:
