@@ -1,0 +1,39 @@
+Notebook[{Cell["Section 5: what invariance buys", "Title"], 
+  Cell["Figures 3 and 4 of the paper and the numbers its section 5 quotes, \
+from the results tables under results/ (macro accuracies, fold means). All \
+methods live in lib/style.wl (the house style) and lib/section5.wl; this \
+notebook only drives them. Figures go to section5/ beside this notebook, at \
+their final size in points; the paper includes them unscaled from gfx/fig3/ \
+and gfx/fig4/. Run top to bottom (Evaluation > Evaluate Notebook).", "Text"], 
+  Cell[CellGroupData[{Cell["Setup", "Section"], Cell["SetDirectory[NotebookDi\
+rectory[]];\nresultsDir = FileNameJoin[{NotebookDirectory[], \"..\", \
+\"results\"}];\noutDir = FileNameJoin[{NotebookDirectory[], \
+\"section5\"}];\nQuiet[CreateDirectory[outDir]];\nGet[FileNameJoin[{NotebookD\
+irectory[], \"lib\", #}]] & /@ {\"style.wl\", \"section5.wl\"};", "Input"]}, 
+    Open]], Cell[CellGroupData[{Cell["Figure 3: learning a symmetry", 
+      "Section"], Cell["Every learned regime of the five architectures, \
+relative to its baseline: x the paired TV under the trained group divided by \
+the baseline's (log), y the accuracy moved in per cent; colour the group, \
+filled circles augmentation, open triangles SCL, the SO(3) control faded. SO(2) on the cylindrical-relative set is an \
+exact no-op and is left out; ratios below 10^-3.5 are drawn at the left \
+edge.", "Text"], Cell["fig3Figure = \
+fig3[];\nexportFigure[FileNameJoin[{outDir, \"fig3_regimes\"}], \
+fig3Figure];\nfig3Figure", "Input"]}, Open]], 
+  Cell[CellGroupData[{Cell["Figure 4: accuracy against cost", "Section"], 
+     Cell["Accuracy against EBOPs at a uniform 8 bits, one panel per N: the \
+five architectures on the cylindrical-relative set, the moment rows, the \
+vector neurons, the symmetry-embedded rows and, at N = 150, the MLP on the 53 \
+jet-level observables. Colour the largest group a row holds exactly, marker \
+its family.", "Text"], Cell["fig4Figure = \
+fig4[];\nexportFigure[FileNameJoin[{outDir, \"fig4_cost\"}], \
+fig4Figure];\nfig4Figure", "Input"]}, Open]], 
+  Cell[CellGroupData[{Cell["Readings quoted in the text", "Section"], 
+     Cell["Accuracy moved (points) and TV ratio per feature set, route and \
+trained group.", "Text"], Cell["regimeSummary[]", "Input"], 
+     Cell[
+      "Baseline accuracy (%) of each architecture on the three feature sets."\
+, "Text"], Cell["coordinateSummary[]", "Input"], Cell["The twins: accuracy of \
+a row minus that of its twin with the larger exact group (points).", "Text"], 
+     Cell["twinDeltas[]", "Input"], Cell["The best embedded rows at N = 150 \
+against the ceiling row of Table 1, the BDT on all 53 observables.", "Text"], 
+     Cell["ceilingComparison[]", "Input"]}, Open]]}, WindowSize -> {900, 900}]
