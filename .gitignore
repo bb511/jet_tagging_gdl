@@ -106,10 +106,14 @@ dmypy.json
 *.tar
 *.tar.gz
 
-# Paper figures and the inputs they are drawn from, private until the paper is out
+# Private until the paper is out: its figures, their inputs and the measured numbers
 notebooks/inputs/
 notebooks/**/*.pdf
 notebooks/**/*.png
+/ARCHITECTURES.md
+
+# The notebooks' own code, which lib/ above would catch
+!notebooks/lib/
 
 # Lightning-Hydra-Template
 configs/local/default.yaml
